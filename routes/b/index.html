@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coach Gari — Online coaching, nutrition &amp; padel. Dubai.</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/coach-gari.css">
+<style>
+  /* Route B — specific to the four-offer vitrine */
+  .hero{padding:92px 0 88px;}
+  .hero .sub{max-width:52ch;}
+  .nav-in{gap:40px;}
+  @media(max-width:1040px){.nav-links{display:none;}}
+  @media(max-width:560px){.nav-right .plain{display:none;}}
+
+  .cards3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:52px;}
+  .c3{background:#fff;border-radius:22px;padding:42px 32px;text-align:center;box-shadow:0 2px 3px rgba(10,10,11,.03);}
+  .c3 p{color:var(--grey-text);font-size:15.5px;font-weight:500;margin:14px 0 26px;}
+  @media(max-width:900px){.cards3{grid-template-columns:1fr;}}
+
+  .usedby{font-size:12.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--grey-text);margin:30px 0 0;}
+  .used-list{display:grid;grid-template-columns:1fr 1fr;gap:10px 26px;list-style:none;margin:14px 0 26px;
+    border-top:1px dashed #C6D0F2;border-bottom:1px dashed #C6D0F2;padding:16px 0;}
+  .used-list li{font-size:15.5px;font-weight:600;}
+
+  .quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:52px;text-align:left;}
+  .q{background:#fff;border:1px solid var(--line);border-radius:20px;padding:32px 28px;}
+  .q p{font-size:15.5px;color:var(--grey-text);font-weight:500;}
+  .q .who{display:flex;align-items:center;gap:13px;margin-top:22px;padding-top:20px;border-top:1px solid var(--line);}
+  .q .av{width:44px;height:44px;border-radius:50%;background:var(--grey-bg);flex:0 0 auto;}
+  .q b{display:block;font-size:14.5px;}
+  .q span{font-size:13.5px;color:var(--grey-text);}
+  @media(max-width:900px){.quotes{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="#top">Coach Gari<i>.</i></a>
+    <div class="nav-links">
+      <a href="#programmes">Programmes</a>
+      <a href="#online">Online coaching</a>
+      <a href="#nutrition">Nutrition</a>
+      <a href="#dubai">In Dubai</a>
+      <a href="#about">About</a>
+    </div>
+    <div class="nav-right">
+      <a class="plain" href="#about">About</a>
+      <a class="btn btn-accent btn-sm" data-cta-main href="#enquiry">Get in touch →</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero center" id="top">
+  <div class="wrap">
+    <h1>Coaching That Travels<br>As Far As You Do</h1>
+    <p class="sub">Online coaching, nutrition and padel with Coach Gari — certified trainer in Dubai for ten years. Train with me from anywhere, or in person if you're in the city.</p>
+    <div class="hero-cta">
+      <a class="btn btn-accent" data-cta-main href="#programmes">See the programmes →</a>
+      <a class="btn btn-line" href="#online">How online coaching works</a>
+    </div>
+    <p class="hero-meta">PadelMBA Certified Coach · 10 years in Dubai · Southern African roots</p>
+  </div>
+</header>
+
+<section class="band center" id="programmes">
+  <div class="wrap">
+    <span class="badge">Programmes</span>
+    <h2 class="reveal">Pick How You Want To Train</h2>
+    <p class="sub reveal">Online programmes work from anywhere. In-person sessions are Dubai only.</p>
+
+    <div class="shop reveal">
+
+      <div class="item" data-sku="programme-8w" data-price="AED 149" data-unit="one-off" data-checkout="">
+        <div class="tagline">Self-guided</div>
+        <h3>The Programme</h3>
+        <div class="price"></div>
+        <p>An 8-week training plan you run yourself, built for whatever equipment you actually have.</p>
+        <ul>
+          <li><b>›</b> 8-week structured plan</li>
+          <li><b>›</b> Video demo for every move</li>
+          <li><b>›</b> Home or gym versions</li>
+          <li><b>›</b> Yours to keep</li>
+        </ul>
+        <div class="buy"></div>
+      </div>
+
+      <div class="item feat" data-sku="online-coaching" data-price="AED 450" data-unit="/ month" data-checkout="">
+        <div class="tagline">Most popular</div>
+        <h3>Online Coaching</h3>
+        <div class="price"></div>
+        <p>Live video sessions with me, plus a plan that changes as you do. Wherever you are.</p>
+        <ul>
+          <li><b>›</b> 2 live video sessions a month</li>
+          <li><b>›</b> Programme rewritten monthly</li>
+          <li><b>›</b> WhatsApp check-ins</li>
+          <li><b>›</b> Form review from your clips</li>
+        </ul>
+        <div class="buy"></div>
+      </div>
+
+      <div class="item" data-sku="nutrition-plan" data-price="AED 350" data-unit="one-off" data-checkout="">
+        <div class="tagline">Eating</div>
+        <h3>Nutrition Plan</h3>
+        <div class="price"></div>
+        <p>A plan built around the food where you live, not a template full of things you can't buy.</p>
+        <ul>
+          <li><b>›</b> 45-minute video consult</li>
+          <li><b>›</b> Plan for your region's food</li>
+          <li><b>›</b> Shopping list and swaps</li>
+          <li><b>›</b> One follow-up call</li>
+        </ul>
+        <div class="buy"></div>
+      </div>
+
+      <div class="item" data-sku="conversation" data-price="AED 200" data-unit="/ session" data-checkout="">
+        <div class="tagline">Mindset</div>
+        <h3>The Conversation</h3>
+        <div class="price"></div>
+        <p>A one-hour call about the part nobody trains: showing up when you don't feel like it.</p>
+        <ul>
+          <li><b>›</b> 60 minutes, one to one</li>
+          <li><b>›</b> Goals, habits, getting unstuck</li>
+          <li><b>›</b> Single session or monthly</li>
+          <li><b>›</b> No programme required</li>
+        </ul>
+        <div class="buy"></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="band tight" id="online">
+  <div class="wrap">
+    <div class="bigcard reveal">
+      <span class="badge">Online coaching</span>
+      <h2>Live Sessions, Not A PDF<br>You Never Open</h2>
+      <p class="sub">Most online coaching is a file and silence. This is a standing appointment with a coach who can see what you're doing and tell you to fix it.</p>
+      <div class="bigcard-media">
+        <img src="/assets/img/gari.jpg" alt="Coach Gari, certified personal trainer and padel coach in Dubai">
+      </div>
+      <div class="triplet">
+        <div class="tri">
+          <span class="ti">◑</span>
+          <h4>We meet on video</h4>
+          <p>Twice a month, live. I watch you move, correct it in real time, and adjust the week in front of you.</p>
+        </div>
+        <div class="tri">
+          <span class="ti">◔</span>
+          <h4>Built for your kit</h4>
+          <p>Full gym, a set of bands, or nothing but a floor. The plan is written for what you actually have.</p>
+        </div>
+        <div class="tri">
+          <span class="ti">◕</span>
+          <h4>Answered between sessions</h4>
+          <p>Send a clip, get it checked. The days between sessions are where most people quietly stop.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band tight" id="nutrition">
+  <div class="wrap">
+    <div class="pale reveal">
+      <div class="pale-grid">
+        <div>
+          <span class="badge">Nutrition</span>
+          <h2>Food You Can<br>Actually Buy</h2>
+          <p class="sub">A nutrition plan is useless if half the ingredients aren't in your local market. We build yours around what's on your shelves, your budget and your schedule.</p>
+          <p class="usedby">Built around</p>
+          <ul class="used-list">
+            <li>Your local food</li>
+            <li>Your budget</li>
+            <li>Family meals</li>
+            <li>Shift work</li>
+            <li>Training days</li>
+            <li>Eating out</li>
+          </ul>
+          <a class="btn btn-dark" data-cta-main href="#enquiry">Ask about nutrition →</a>
+        </div>
+        <div class="pale-media">
+          <img src="/assets/img/gari.jpg" alt="Coach Gari">
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band tight center" id="dubai">
+  <div class="wrap">
+    <span class="badge dark">Dubai only</span>
+    <h2 class="reveal">In Person, In The City</h2>
+    <p class="sub reveal">If you're in Dubai, everything above also happens face to face.</p>
+    <div class="cards3 reveal">
+      <div class="c3">
+        <h3>Corporate sessions</h3>
+        <p>45 minutes at your office or building gym. Ten to forty people, three ability levels at once, no equipment needed on site.</p>
+        <a class="btn btn-soft btn-sm" href="#enquiry">Enquire ↗</a>
+      </div>
+      <div class="c3">
+        <h3>One-to-one</h3>
+        <p>Sixty minutes in a Dubai gym, a programme around your week, and a check-in so the days between count.</p>
+        <a class="btn btn-soft btn-sm" href="#enquiry">Enquire ↗</a>
+      </div>
+      <div class="c3">
+        <h3>Padel coaching</h3>
+        <p>Technique, tactics and match play from beginner to club level, plus the conditioning that keeps you playing.</p>
+        <a class="btn btn-soft btn-sm" href="#enquiry">Enquire ↗</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band white" id="about">
+  <div class="wrap about">
+    <div class="about-photo reveal">
+      <img src="/assets/img/gari.jpg" alt="Coach Gari">
+    </div>
+    <div class="reveal">
+      <span class="badge">About</span>
+      <h2>Southern African Roots,<br>Dubai Sports Floor</h2>
+      <p class="sub">Born in Zimbabwe and raised between Zimbabwe and South Africa, I've spent the last ten years in Dubai as a personal trainer, sports coach and entrepreneur.</p>
+      <p class="sub">I lead coaching programmes, member experience and community activation — the on-the-ground side of building somewhere people want to keep coming back to. It's the same job whether the room is a corporate gym or a padel court.</p>
+      <ul class="facts">
+        <li><span>›</span> PadelMBA Certified Coach</li>
+        <li><span>›</span> Ten years coaching in Dubai</li>
+        <li><span>›</span> Athletic development and premium client engagement</li>
+        <li><span>›</span> Active padel and tennis player in Dubai's padel community</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- Testimonials withheld until real, named quotes are supplied (brief: placeholders intentionally not published).
+<section class="band center" id="clients">
+  <div class="wrap">
+    <h2 class="reveal">What Clients Say</h2>
+    <div class="quotes reveal">
+      <div class="q">
+        <p>Quote from an online coaching client — ideally someone outside Dubai, about staying consistent at distance.</p>
+        <div class="who"><span class="av"></span><span><b>Name</b><span>Online coaching</span></span></div>
+      </div>
+      <div class="q">
+        <p>Quote from a nutrition client — about eating normally rather than following a restrictive template.</p>
+        <div class="who"><span class="av"></span><span><b>Name</b><span>Nutrition</span></span></div>
+      </div>
+      <div class="q">
+        <p>Quote from a padel or corporate client — about progression, or about a team that kept turning up.</p>
+        <div class="who"><span class="av"></span><span><b>Name, role</b><span>Company</span></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+-->
+
+<section class="close" id="enquiry">
+  <div class="wrap center">
+    <h2 class="reveal">Start This Week</h2>
+    <p class="sub reveal" style="margin-top:18px;">Tell me where you are, what you've got to train with, and what you're actually trying to change. You'll get a straight answer about which programme fits — or whether none of them do.</p>
+
+    <div class="enquiry reveal">
+      <form data-enquiry>
+        <div class="two">
+          <div class="field">
+            <label for="f-name">Your name</label>
+            <input id="f-name" name="name" type="text" autocomplete="name">
+          </div>
+          <div class="field">
+            <label for="f-email">Email</label>
+            <input id="f-email" name="email" type="email" autocomplete="email">
+          </div>
+        </div>
+        <div class="two">
+          <div class="field">
+            <label for="f-where">Where are you based</label>
+            <input id="f-where" name="location" type="text" placeholder="City and country">
+          </div>
+          <div class="field">
+            <label for="f-what">What you're after</label>
+            <select id="f-what" name="interest">
+              <option>Online coaching</option>
+              <option>Nutrition plan</option>
+              <option>The 8-week programme</option>
+              <option>Mindset session</option>
+              <option>Corporate sessions (Dubai)</option>
+              <option>One-to-one (Dubai)</option>
+              <option>Padel (Dubai)</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="f-more">Anything useful to know</label>
+          <textarea id="f-more" name="detail" placeholder="What you train with, how much time you have, what you've tried before."></textarea>
+        </div>
+        <button class="btn btn-accent btn-full" type="submit">Send enquiry →</button>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="f-top">
+      <div>
+        <h4>Train online</h4>
+        <ul>
+          <li><a href="#programmes">The Programme</a></li>
+          <li><a href="#online">Online coaching</a></li>
+          <li><a href="#nutrition">Nutrition plan</a></li>
+          <li><a href="#programmes">The Conversation</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>In Dubai</h4>
+        <ul>
+          <li><a href="#dubai">Corporate sessions</a></li>
+          <li><a href="#dubai">One-to-one</a></li>
+          <li><a href="#dubai">Padel coaching</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>More</h4>
+        <ul>
+          <li><a href="#about">About Coach Gari</a></li>
+          <li><a href="https://www.tiktok.com/@coach_gari28">TikTok</a></li>
+          <li><a href="#enquiry">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Weekly note</h4>
+        <p style="font-size:15.5px;color:var(--grey-text);font-weight:500;margin:0;">One message a week — a session to try, something about food, something about showing up.</p>
+        <form class="f-news" onsubmit="return false;">
+          <input type="email" placeholder="Enter your email" aria-label="Email">
+          <button type="submit" aria-label="Subscribe">↗</button>
+        </form>
+      </div>
+    </div>
+    <div class="wordmark">coach gari</div>
+    <div class="f-bot">
+      <div>© 2026 Coach Gari — Dubai, UAE</div>
+      <div><a href="https://www.tiktok.com/@coach_gari28">@coach_gari28</a></div>
+    </div>
+  </div>
+</footer>
+
+<script type="module" src="/assets/site.js"></script>
+
+</body>
+</html>

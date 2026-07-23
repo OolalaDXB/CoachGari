@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Lint HTML
+        run: npx --yes htmlhint "index.html" "routes/**/*.html"
+
+      - name: Check internal links & assets
+        run: node scripts/check-links.mjs
+
+      - name: Verify config is valid ES module
+        run: node --input-type=module -e "import('./config.js').then(m => { if (!m.CONFIG) { console.error('CONFIG export missing'); process.exit(1); } console.log('config.js OK'); })"

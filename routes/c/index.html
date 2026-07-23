@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Coach Gari — Online coaching, programmes &amp; live sessions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/coach-gari.css">
+<style>
+  /* Route C — specific to the online-first page */
+  @media(max-width:1080px){.nav-links{display:none;}}
+  .pale-grid{grid-template-columns:1.1fr .9fr;gap:50px;}
+  .pale-media img{object-position:50% 8%;}
+
+  .dates{list-style:none;padding:0;margin:44px 0 0;}
+  .dates li{display:grid;grid-template-columns:170px 1fr auto;gap:26px;align-items:center;
+    background:#fff;border-radius:16px;padding:24px 28px;margin-bottom:12px;}
+  .dates .when{font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);}
+  .dates .what{font-size:17px;font-weight:700;letter-spacing:-.02em;}
+  .dates .what span{display:block;font-size:14.5px;font-weight:500;color:var(--grey-text);letter-spacing:0;margin-top:4px;}
+  @media(max-width:760px){
+    .dates li{grid-template-columns:1fr;gap:12px;text-align:left;}
+    .dates li .btn{width:100%;}
+  }
+
+  .credit{display:flex;align-items:center;gap:9px;}
+  .credit a{font-weight:700;color:var(--black);text-decoration:none;border-bottom:1.5px solid var(--accent);padding-bottom:1px;}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="#top">Coach Gari<i>.</i></a>
+    <div class="nav-links">
+      <a href="#programmes">Programmes</a>
+      <a href="#online">Online coaching</a>
+      <a href="#live">Live &amp; onsite</a>
+      <a href="#about">About</a>
+    </div>
+    <div class="nav-right">
+      <a class="btn btn-accent btn-sm" data-cta-main href="#enquiry">Get started →</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero center" id="top">
+  <div class="wrap">
+    <h1>Train With Me<br>From Anywhere</h1>
+    <p class="sub">Online coaching, video programmes and live sessions — built for people training at home, in a local gym, or wherever they can find a floor. Harare, Johannesburg, Dubai, or somewhere I've never heard of.</p>
+    <div class="hero-cta">
+      <a class="btn btn-accent" data-cta-main href="#programmes">See the programmes →</a>
+      <a class="btn btn-line" href="#online">How online coaching works</a>
+    </div>
+    <p class="hero-meta">PadelMBA Certified Coach · Ten years coaching in Dubai · Zimbabwean</p>
+  </div>
+</header>
+
+<section class="band center" id="programmes">
+  <div class="wrap">
+    <span class="badge">Programmes</span>
+    <h2 class="reveal">Four Ways To Train With Me</h2>
+    <p class="sub reveal">All of it works online. Nothing here needs a gym membership or equipment you don't own.</p>
+
+    <div class="shop reveal">
+
+      <div class="item" data-sku="programme-12w" data-price="$29" data-unit="one-off" data-checkout="">
+        <div class="tagline">Self-guided</div>
+        <h3>The Programme</h3>
+        <div class="price"></div>
+        <p>Twelve weeks of training and eating, on video. Yours to keep, run at your own pace.</p>
+        <ul>
+          <li><b>›</b> 12-week training plan</li>
+          <li><b>›</b> Video demo for every move</li>
+          <li><b>›</b> Eating habits built in</li>
+          <li><b>›</b> Home version, no equipment</li>
+        </ul>
+        <div class="buy"></div>
+      </div>
+
+      <div class="item feat" data-sku="online-coaching" data-price="$79" data-unit="/ month" data-checkout="">
+        <div class="tagline">Most popular</div>
+        <h3>Online Coaching</h3>
+        <div class="price"></div>
+        <p>One to one with me, live on video. A plan that changes as you do, and someone who notices when you stop.</p>
+        <ul>
+          <li><b>›</b> 2 live video sessions a month</li>
+          <li><b>›</b> Plan rewritten every month</li>
+          <li><b>›</b> Food sorted alongside training</li>
+          <li><b>›</b> WhatsApp check-ins between</li>
+        </ul>
+        <div class="buy"></div>
+      </div>
+
+      <div class="item" data-sku="live-group" data-price="$12" data-unit="/ month" data-checkout="">
+        <div class="tagline">Together</div>
+        <h3>Live Group Sessions</h3>
+        <div class="price"></div>
+        <p>Train live with me and everyone else, twice a week. Camera on or off — nobody's watching but me.</p>
+        <ul>
+          <li><b>›</b> 2 live classes a week</li>
+          <li><b>›</b> Replays if you miss one</li>
+          <li><b>›</b> No equipment needed</li>
+          <li><b>›</b> Cancel whenever</li>
+        </ul>
+        <div class="buy"></div>
+      </div>
+
+      <div class="item" data-sku="conversation" data-price="$45" data-unit="/ session" data-checkout="">
+        <div class="tagline">Mindset</div>
+        <h3>The Conversation</h3>
+        <div class="price"></div>
+        <p>An hour to talk it through — what you're stuck on, why the last three attempts stopped, what you actually want.</p>
+        <ul>
+          <li><b>›</b> 60 minutes, one to one</li>
+          <li><b>›</b> Goals, habits, getting unstuck</li>
+          <li><b>›</b> One-off or monthly</li>
+          <li><b>›</b> No training plan required</li>
+        </ul>
+        <div class="buy"></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="band tight" id="online">
+  <div class="wrap">
+    <div class="bigcard reveal">
+      <span class="badge">Online coaching</span>
+      <h2>Live Sessions, Not A PDF<br>You Never Open</h2>
+      <p class="sub">Most online coaching is a file and then silence. This is a standing appointment with someone who can see what you're doing and tell you to fix it — and who follows up when the week goes quiet.</p>
+      <div class="bigcard-media">
+        <img src="/assets/img/gari.jpg" alt="Coach Gari, certified personal trainer and padel coach">
+      </div>
+      <div class="triplet">
+        <div class="tri">
+          <h4>We meet on video</h4>
+          <p>Live, twice a month. I watch you move, correct it in real time, and rewrite the week in front of you.</p>
+        </div>
+        <div class="tri">
+          <h4>Built for what you have</h4>
+          <p>A full gym, a set of bands, or a floor and a wall. The plan is written for your kit, not an ideal one.</p>
+        </div>
+        <div class="tri">
+          <h4>Food handled with it</h4>
+          <p>Simple habits around the food where you live and what it costs there. No meal plan full of things you can't buy.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band tight" id="talk">
+  <div class="wrap">
+    <div class="pale reveal">
+      <div class="pale-grid">
+        <div>
+          <span class="badge">Talk to Gari</span>
+          <h2>Sometimes The Session<br>Is The Conversation</h2>
+          <p class="sub">Not every call has to end in a workout. Some people book an hour just to talk it through — what's blocking them, why the last three attempts stopped, what they actually want out of this.</p>
+          <p class="sub">It's the part of coaching I like most, and it works the same whether you're down the road or six time zones away.</p>
+          <a class="btn btn-accent" data-cta-main href="#enquiry" style="margin-top:12px;">Book a conversation →</a>
+        </div>
+        <div class="pale-media">
+          <img src="/assets/img/gari.jpg" alt="Coach Gari">
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band tight" id="live">
+  <div class="wrap center">
+    <span class="badge dark">Live &amp; onsite</span>
+    <h2 class="reveal">When I'm On Your Side<br>Of The World</h2>
+    <p class="sub reveal">A few times a year I run sessions in person — in Zimbabwe, across Southern Africa, and wherever else I'm travelling. Small groups, outdoors where possible, open to anyone.</p>
+    <ul class="dates reveal" style="text-align:left;">
+      <li>
+        <div class="when">Dates to come</div>
+        <div class="what">Harare — outdoor group session
+          <span>A morning session in the park, all levels, bring water and a friend.</span></div>
+        <a class="btn btn-soft btn-sm" href="#enquiry">Join the list →</a>
+      </li>
+      <li>
+        <div class="when">Dates to come</div>
+        <div class="what">Southern Africa — weekend camp
+          <span>Two days of training, food and conversation. Numbers kept small on purpose.</span></div>
+        <a class="btn btn-soft btn-sm" href="#enquiry">Join the list →</a>
+      </li>
+      <li>
+        <div class="when">On request</div>
+        <div class="what">Somewhere else entirely
+          <span>If there are enough of you in one city, tell me. I travel more than I plan to.</span></div>
+        <a class="btn btn-soft btn-sm" href="#enquiry">Tell me where →</a>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section class="band tight">
+  <div class="wrap">
+    <div class="strip reveal">
+      <div>
+        <h3>In Dubai?</h3>
+        <p>One-to-one training, padel coaching and corporate sessions, in person across the city. Ten years of it.</p>
+      </div>
+      <a class="btn" href="#enquiry">Train in person →</a>
+    </div>
+  </div>
+</section>
+
+<section class="band white" id="about">
+  <div class="wrap about">
+    <div class="about-photo reveal">
+      <img src="/assets/img/gari.jpg" alt="Coach Gari">
+    </div>
+    <div class="reveal">
+      <span class="badge">About</span>
+      <h2>Zimbabwe To Dubai,<br>And Back Again</h2>
+      <p class="sub">Born in Zimbabwe and raised between Zimbabwe and South Africa, I've spent the last ten years in Dubai as a personal trainer, sports coach and entrepreneur.</p>
+      <p class="sub">I lead coaching programmes, member experience and community activation — the on-the-ground side of building somewhere people want to keep coming back to. Most of the people I coach now are nowhere near me, which suits both of us fine.</p>
+      <ul class="facts">
+        <li><span>›</span> PadelMBA Certified Coach</li>
+        <li><span>›</span> Ten years coaching in Dubai</li>
+        <li><span>›</span> Athletic development and premium client engagement</li>
+        <li><span>›</span> Active padel and tennis player</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section class="close" id="enquiry">
+  <div class="wrap center">
+    <h2 class="reveal">Start This Week</h2>
+    <p class="sub reveal" style="margin-top:18px;">Tell me where you are, what you've got to train with, and what you're trying to change. You'll get a straight answer about which one fits — or whether none of them do.</p>
+
+    <div class="enquiry reveal">
+      <form data-enquiry>
+        <div class="two">
+          <div class="field">
+            <label for="f-name">Your name</label>
+            <input id="f-name" name="name" type="text" autocomplete="name">
+          </div>
+          <div class="field">
+            <label for="f-email">Email or WhatsApp</label>
+            <input id="f-email" name="contact" type="text">
+          </div>
+        </div>
+        <div class="two">
+          <div class="field">
+            <label for="f-where">Where are you</label>
+            <input id="f-where" name="location" type="text" placeholder="City and country">
+          </div>
+          <div class="field">
+            <label for="f-what">What you're after</label>
+            <select id="f-what" name="interest">
+              <option>Online coaching</option>
+              <option>The 12-week programme</option>
+              <option>Live group sessions</option>
+              <option>A conversation</option>
+              <option>Live event near me</option>
+              <option>In person in Dubai</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label for="f-more">Anything useful to know</label>
+          <textarea id="f-more" name="detail" placeholder="What you train with, how much time is realistic, what you've tried before."></textarea>
+        </div>
+        <button class="btn btn-accent btn-full" type="submit">Send →</button>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="f-top">
+      <div>
+        <h4>Train online</h4>
+        <ul>
+          <li><a href="#programmes">The Programme</a></li>
+          <li><a href="#online">Online coaching</a></li>
+          <li><a href="#programmes">Live group sessions</a></li>
+          <li><a href="#talk">The Conversation</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>In person</h4>
+        <ul>
+          <li><a href="#live">Live events</a></li>
+          <li><a href="#live">Zimbabwe &amp; Southern Africa</a></li>
+          <li><a href="#enquiry">Dubai one-to-one</a></li>
+          <li><a href="#enquiry">Padel &amp; corporate</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>More</h4>
+        <ul>
+          <li><a href="#about">About Coach Gari</a></li>
+          <li><a href="https://www.tiktok.com/@coach_gari28">TikTok</a></li>
+          <li><a href="#enquiry">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Next live session</h4>
+        <p style="font-size:15.5px;color:var(--grey-text);font-weight:500;margin:0;">Drop your email and I'll tell you when the next group session or live event opens.</p>
+        <form class="f-news" onsubmit="return false;">
+          <input type="email" placeholder="Enter your email" aria-label="Email">
+          <button type="submit" aria-label="Subscribe">↗</button>
+        </form>
+      </div>
+    </div>
+    <div class="wordmark">coach gari</div>
+    <div class="f-bot">
+      <div>© 2026 Coach Gari</div>
+      <div class="credit">Design &amp; build by <a href="#" data-config-href="STUDIO_URL">The Studio MT</a></div>
+    </div>
+  </div>
+</footer>
+
+<script type="module" src="/assets/site.js"></script>
+
+</body>
+</html>

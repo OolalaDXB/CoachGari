@@ -1,0 +1,189 @@
+/* =============================================================
+   Coach Gari — design system
+   White / #1540E8 / Manrope
+
+   Shared across the three routes (A, B, C). Anything that lives
+   on a single route stays inline in that route's <style> block.
+   Do not merge with studio-mt.css — that is a separate identity.
+   ============================================================= */
+
+:root{
+  --accent:#1540E8;
+  --accent-dark:#0F32BE;
+  --accent-tint:#E9EDFD;
+  --accent-pale:#F3F5FE;
+  --black:#0A0A0B;
+  --grey-text:#6C6C78;
+  --grey-bg:#F4F4F6;
+  --line:#E6E6EA;
+  --white:#FFFFFF;
+  --maxw:1200px;
+}
+
+*{box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{
+  margin:0;background:#fff;color:var(--black);
+  font-family:"Manrope",system-ui,sans-serif;font-size:17px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px;}
+a{color:inherit;}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:2px solid var(--accent);outline-offset:3px;}
+h1,h2,h3,h4{margin:0;font-weight:800;letter-spacing:-.038em;line-height:1.04;}
+h1{font-size:clamp(2.5rem,5.4vw,4rem);}
+h2{font-size:clamp(2rem,3.9vw,3.05rem);}
+h3{font-size:clamp(1.4rem,2.2vw,1.8rem);letter-spacing:-.03em;}
+h4{font-size:1.08rem;letter-spacing:-.02em;line-height:1.3;}
+p{margin:0 0 1em;}
+.sub{color:var(--grey-text);font-size:1.09rem;font-weight:500;max-width:60ch;}
+.center{text-align:center;}
+.center .sub{margin-left:auto;margin-right:auto;}
+
+.badge{
+  display:inline-block;font-size:12.5px;font-weight:800;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--accent);background:var(--accent-tint);
+  padding:8px 15px;border-radius:7px;margin-bottom:22px;
+}
+.badge.dark{color:#fff;background:var(--black);}
+
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:11px;text-decoration:none;
+  font-weight:700;font-size:16px;padding:17px 30px;border-radius:9px;border:1.5px solid transparent;
+  font-family:inherit;cursor:pointer;transition:background .15s ease,border-color .15s ease;
+}
+.btn-accent{background:var(--accent);color:#fff;}
+.btn-accent:hover{background:var(--accent-dark);}
+.btn-dark{background:var(--black);color:#fff;}
+.btn-dark:hover{background:#26262B;}
+.btn-line{border-color:var(--line);color:var(--black);background:#fff;}
+.btn-line:hover{border-color:var(--black);}
+.btn-soft{background:var(--grey-bg);color:var(--black);}
+.btn-soft:hover{background:#E9E9ED;}
+.btn-sm{padding:12px 22px;font-size:14.5px;}
+.btn-full{width:100%;}
+
+.nav{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--line);}
+.nav-in{display:flex;align-items:center;gap:38px;height:78px;}
+.logo{font-size:1.3rem;font-weight:800;letter-spacing:-.045em;text-decoration:none;white-space:nowrap;}
+.logo i{color:var(--accent);font-style:normal;}
+.nav-links{display:flex;gap:28px;font-size:14px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;}
+.nav-links a{text-decoration:none;}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:20px;}
+.nav-right .plain{font-size:14px;font-weight:700;text-transform:uppercase;text-decoration:none;}
+
+.hero{padding:92px 0 86px;}
+.hero h1{margin-bottom:24px;}
+.hero .sub{font-size:1.18rem;max-width:54ch;}
+.hero-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:38px;}
+.hero-meta{margin-top:28px;font-size:14.5px;font-weight:600;color:var(--grey-text);}
+@media(max-width:640px){.hero{padding:56px 0;}.hero-cta .btn{width:100%;}}
+
+.band{background:var(--grey-bg);padding:84px 0;}
+.band.tight{padding-top:0;}
+.band.white{background:#fff;}
+@media(max-width:720px){.band{padding:56px 0;}}
+
+/* products (routes B & C) */
+.shop{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-top:52px;text-align:left;}
+.item{background:#fff;border-radius:20px;padding:34px 28px;display:flex;flex-direction:column;
+  box-shadow:0 2px 3px rgba(10,10,11,.03);}
+.item.feat{outline:2px solid var(--accent);}
+.item .tagline{font-size:12.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--grey-text);margin-bottom:16px;}
+.item.feat .tagline{color:var(--accent);}
+.price{font-size:2.1rem;font-weight:800;letter-spacing:-.04em;line-height:1;margin:18px 0 4px;}
+.price small{font-size:.95rem;font-weight:700;color:var(--grey-text);letter-spacing:-.01em;}
+.price.enquire{font-size:1.25rem;color:var(--grey-text);letter-spacing:-.02em;}
+.item p{font-size:15px;color:var(--grey-text);font-weight:500;margin:14px 0 0;}
+.item ul{list-style:none;padding:0;margin:22px 0 0;}
+.item li{font-size:14.5px;font-weight:600;padding:9px 0;border-top:1px solid var(--line);display:flex;gap:10px;}
+.item li b{color:var(--accent);font-weight:800;flex:0 0 auto;}
+.item .buy{margin-top:auto;padding-top:26px;}
+@media(max-width:1040px){.shop{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:620px){.shop{grid-template-columns:1fr;}}
+
+/* big feature card (all routes) */
+.bigcard{background:#fff;border-radius:26px;padding:56px 52px;box-shadow:0 2px 3px rgba(10,10,11,.03);}
+.bigcard-media{margin-top:44px;border-radius:16px;overflow:hidden;background:#5E311C;aspect-ratio:21/9;}
+.bigcard-media img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 18%;}
+.triplet{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:52px;}
+.tri{padding:26px 30px 0 0;border-top:2px solid var(--line);}
+.tri:first-child{border-top-color:var(--black);}
+.tri .ti{font-size:21px;margin-bottom:14px;display:block;}
+.tri h3{font-size:1.05rem;letter-spacing:-.02em;}
+.tri p{font-size:15.5px;color:var(--grey-text);margin:9px 0 0;font-weight:500;}
+@media(max-width:860px){
+  .bigcard{padding:36px 24px;border-radius:20px;}
+  .bigcard-media{aspect-ratio:4/3;}
+  .triplet{grid-template-columns:1fr;}.tri{padding-right:0;}
+}
+
+/* pale block (all routes) */
+.pale{background:var(--accent-pale);border-radius:26px;padding:56px 52px;}
+.pale-grid{display:grid;grid-template-columns:1fr 1fr;gap:52px;align-items:center;}
+.pale-media{border-radius:18px;overflow:hidden;background:#5E311C;aspect-ratio:4/5;}
+.pale-media img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 10%;}
+@media(max-width:860px){.pale{padding:36px 24px;}.pale-grid{grid-template-columns:1fr;gap:32px;}}
+
+/* about (all routes) */
+.about{display:grid;grid-template-columns:.85fr 1.15fr;gap:58px;align-items:center;}
+.about-photo{border-radius:22px;overflow:hidden;background:#5E311C;aspect-ratio:4/5;}
+.about-photo img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 8%;}
+.facts{list-style:none;padding:0;margin:28px 0 0;}
+.facts li{padding:14px 0;border-top:1px solid var(--line);font-size:16px;font-weight:600;display:flex;gap:13px;}
+.facts li span{color:var(--accent);font-weight:800;flex:0 0 auto;}
+@media(max-width:860px){.about{grid-template-columns:1fr;gap:32px;}}
+
+/* dark strip (routes A & C) */
+.strip{background:var(--black);color:#fff;border-radius:20px;padding:40px 44px;
+  display:flex;align-items:center;gap:30px;flex-wrap:wrap;}
+.strip h3{color:#fff;flex:1;min-width:270px;}
+.strip p{color:#A5A5B2;font-size:15.5px;font-weight:500;margin:8px 0 0;max-width:56ch;}
+.strip .btn{background:#fff;color:var(--black);}
+.strip .btn:hover{background:#E9E9ED;}
+@media(max-width:640px){.strip{padding:30px 24px;}.strip .btn{width:100%;}}
+
+/* enquiry form (routes B & C) */
+.enquiry{background:#fff;border-radius:26px;padding:52px 48px;max-width:760px;margin:52px auto 0;
+  text-align:left;box-shadow:0 2px 3px rgba(10,10,11,.03);}
+.field{margin-bottom:20px;}
+.field label{display:block;font-size:12.5px;font-weight:800;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--grey-text);margin-bottom:9px;}
+.field input,.field select,.field textarea{width:100%;padding:16px 18px;font-family:inherit;
+  font-size:16px;font-weight:500;border:1.5px solid var(--line);border-radius:9px;background:#fff;color:var(--black);}
+.field textarea{min-height:110px;resize:vertical;}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.form-status{margin:16px 0 0;font-size:14.5px;font-weight:600;}
+.form-status.err{color:#B00020;}
+.form-status.ok{color:var(--accent);}
+@media(max-width:640px){.enquiry{padding:32px 22px;}.two{grid-template-columns:1fr;}}
+
+.close{padding:96px 0;text-align:center;}
+
+/* big footer (routes B & C) */
+footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
+.f-top{display:grid;grid-template-columns:1.1fr 1fr 1fr 1.3fr;gap:44px;}
+.f-top h4{font-size:12.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--grey-text);margin-bottom:18px;}
+.f-top ul{list-style:none;padding:0;margin:0;}
+.f-top li{padding:6px 0;font-size:16px;font-weight:600;}
+.f-top a{text-decoration:none;}
+.f-news{display:flex;gap:10px;margin-top:16px;}
+.f-news input{flex:1;min-width:0;padding:15px 18px;border:1.5px solid var(--line);border-radius:9px;
+  font-family:inherit;font-size:14.5px;background:#fff;}
+.f-news button{width:52px;height:52px;flex:0 0 auto;border:0;border-radius:50%;
+  background:var(--black);color:#fff;font-size:19px;cursor:pointer;}
+.wordmark{margin-top:64px;font-size:clamp(3.4rem,12vw,9.5rem);font-weight:800;letter-spacing:-.055em;
+  line-height:.85;color:var(--accent);opacity:.15;user-select:none;text-align:center;}
+.f-bot{border-top:1px solid var(--line);padding:22px 0 30px;display:flex;flex-wrap:wrap;gap:14px;
+  justify-content:space-between;align-items:center;font-size:14px;color:var(--grey-text);font-weight:500;}
+@media(max-width:900px){.f-top{grid-template-columns:1fr 1fr;gap:32px;}}
+
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease;}
+.reveal.in{opacity:1;transform:none;}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto;}
+  .reveal{opacity:1;transform:none;transition:none;}
+}
