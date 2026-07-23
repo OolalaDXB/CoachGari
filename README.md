@@ -32,7 +32,8 @@ export const CONFIG = {
   COMMERCE: false,        // false = prices hidden, CTAs go to form/WhatsApp
   WHATSAPP: '',           // digits only, e.g. '971500000000'
   FORM_ENDPOINT: '',      // Supabase Edge Function URL for the enquiry form
-  STUDIO_URL: '',         // link behind the "Studio MT" footer credit (Route C)
+  STUDIO_URL: '',         // link behind the "Studio MT" footer credit
+  SOCIAL_URL: '',         // Oolala (Oo) social-follow link in every footer
   COMMISSION_RATE: '',    // replaces "__ %" in the proposal, e.g. '20%'
 };
 ```
@@ -61,8 +62,9 @@ breaks, it just isn't wired yet.
 1. WhatsApp number
 2. Enquiry form endpoint (Supabase Edge Function + Resend notification)
 3. Studio MT URL for the footer credit
-4. Commission rate for the proposal
-5. Target domain
+4. Oolala (Oo) social-follow URL
+5. Commission rate for the proposal
+6. Target domain
 
 ## Notes
 

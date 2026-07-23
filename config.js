@@ -21,6 +21,9 @@ export const CONFIG = {
   // URL behind the "Studio MT" footer credit.
   STUDIO_URL: '',
 
+  // Oolala (Oo) social-follow link used in every footer.
+  SOCIAL_URL: '',
+
   // Replaces the "__ %" in the proposal (index.html). e.g. '20%'.
   COMMISSION_RATE: '',
 };

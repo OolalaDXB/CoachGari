@@ -42,8 +42,7 @@
   @media(max-width:900px){.routes{grid-template-columns:1fr;}}
 
   footer{background:#fff;border-top:1px solid var(--line);padding:44px 0;overflow:visible;}
-  .f-in{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;
-    font-size:14.5px;color:var(--grey-text);font-weight:600;}
+  footer .f-bot{border-top:0;padding:0;font-size:14.5px;}
   footer a{text-decoration:none;}
 </style>
 </head>
@@ -206,9 +205,20 @@
 </section>
 
 <footer>
-  <div class="wrap f-in">
-    <div>© 2026 Coach Gari — Dubai, UAE</div>
-    <div><a href="https://www.tiktok.com/@coach_gari28">@coach_gari28</a></div>
+  <div class="wrap">
+    <div class="f-bot">
+      <div class="f-bot-l">
+        <span>© 2026 Coach Gari</span>
+        <a class="btn btn-line btn-sm f-back" href="/">← The proposal</a>
+      </div>
+      <div class="f-bot-r">
+        <a class="oo-follow" href="#" data-config-href="SOCIAL_URL" rel="noopener">
+          <img src="/assets/img/oo-icon-dark.svg" alt="Oolala"> Follow us
+        </a>
+        <a href="https://www.tiktok.com/@coach_gari28">@coach_gari28</a>
+        <span class="credit">Design &amp; build by <a href="#" data-config-href="STUDIO_URL">The Studio MT</a></span>
+      </div>
+    </div>
   </div>
 </footer>
 

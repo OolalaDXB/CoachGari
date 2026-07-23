@@ -165,6 +165,9 @@ p{margin:0 0 1em;}
 
 footer{background:var(--midnight-deep);color:rgba(231,229,228,.55);padding:56px 0;font-size:.82rem;}
 .f-in{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:center;}
+.f-social{display:flex;align-items:center;gap:22px;flex-wrap:wrap;}
+.oo-follow{display:inline-flex;align-items:center;gap:8px;}
+.oo-follow img{width:20px;height:20px;display:block;}
 footer a{color:rgba(231,229,228,.85);}
 
 .reveal{opacity:0;transform:translateY(20px);
