@@ -88,8 +88,8 @@ import { CONFIG } from '/config.js';
   els.forEach(function(el){
     var context = el.getAttribute('data-wa') || '';
     var text = context
-      ? 'Hi Gari — ' + context
-      : 'Hi Gari, I found you online.';
+      ? 'Hi Coach Gari — ' + context
+      : 'Hi Coach Gari, I found you online.';
     el.setAttribute('href', 'https://wa.me/' + num + '?text=' + encodeURIComponent(text));
     el.setAttribute('rel', 'noopener');
     el.setAttribute('target', '_blank');
