@@ -68,9 +68,21 @@ breaks, it just isn't wired yet.
 
 ## Notes
 
-- **Vercel access protection** for the proposal can't be set in `vercel.json` — enable
-  *Password Protection* (or Vercel Authentication) on the project in the Vercel
-  dashboard. `noindex` (meta + `X-Robots-Tag` header) is already in place.
+- **Proposal password protection** is handled by `middleware.js` (Edge Middleware),
+  which Basic-Auth-gates `/` (the proposal) only — `/routes/*` stay public. Set the
+  password in Vercel → Project → Settings → Environment Variables → `PROPOSAL_PASSWORD`
+  (username is `gari`). If the variable is unset the proposal fails closed. `noindex`
+  (meta + `X-Robots-Tag` header) is also in place.
+
+### Deploy (Vercel, git-connected)
+
+1. Vercel → Add New → Project → import `OolalaDXB/CoachGari` (Framework preset: **Other**,
+   no build command, output = repo root).
+2. Add env var `PROPOSAL_PASSWORD` = a password of your choice.
+3. Deploy. Routes are public; the proposal prompts for `gari` / your password.
+
+Pushes to `main` then auto-deploy. `vercel.json` (headers + redirects) and
+`middleware.js` (gate) are already in the repo, so protection is on from the first deploy.
 - **Testimonials** on Route B are withheld (commented out) until real, named quotes
   are supplied — placeholders are intentionally not published.
 - **`gari.jpg`** is a placeholder used four times until the real photos arrive; don't
