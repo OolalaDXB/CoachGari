@@ -262,13 +262,12 @@
         <div class="two">
           <div class="field">
             <label for="f-city">City</label>
-            <input id="f-city" name="city" type="text" autocomplete="address-level2" placeholder="Harare, Dubai, Paris…">
+            <input id="f-city" name="city" type="text" required autocomplete="address-level2" placeholder="Harare, Dubai, Paris…">
           </div>
           <div class="field">
             <label for="f-country">Country</label>
-            <select id="f-country" name="country" autocomplete="country-name" data-countries>
-              <option value="" selected>Choose a country</option>
-            </select>
+            <input id="f-country" name="country" type="text" required autocomplete="country-name" list="country-list" placeholder="Start typing…" data-country-input>
+            <datalist id="country-list" data-countries></datalist>
           </div>
         </div>
         <div class="two one">
