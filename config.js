@@ -24,6 +24,12 @@ export const CONFIG = {
   // Empty = payment step disabled; holds are still created.
   CHECKOUT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/checkout',
 
+  // Back-office (/admin): Supabase project URL + publishable key. The
+  // publishable key is public by design; every row is protected by RLS and
+  // a signed-in email only sees what app_permissions grants it.
+  SUPABASE_URL: 'https://acrjrlgeeyseyolmofuq.supabase.co',
+  SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_d84Nn7V7TB1cPs5mJRX3ZA_7LljnzBm',
+
   // URL behind the "Studio MT" footer credit.
   STUDIO_URL: '',
 

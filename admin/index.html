@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Coach Gari — Back-office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/coach-gari.css">
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body class="admin">
+
+<nav class="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="/">Coach Gari<i>.</i></a>
+    <div class="nav-links" id="tabs" hidden></div>
+    <div class="nav-right" id="who"></div>
+  </div>
+</nav>
+
+<main class="wrap ad-main">
+
+  <section id="login" class="ad-card ad-login" hidden>
+    <p class="ad-eyebrow">Back-office</p>
+    <h1>Sign in</h1>
+    <p class="ad-muted">Enter your email. You'll receive a one-time sign-in link. Access is granted per person by the owner.</p>
+    <form id="login-form" class="ad-form">
+      <label>Email <input type="email" name="email" required autocomplete="email" placeholder="you@example.com"></label>
+      <button class="btn btn-accent" type="submit">Send me a sign-in link</button>
+    </form>
+    <p id="login-msg" class="ad-msg" hidden></p>
+  </section>
+
+  <section id="noaccess" class="ad-card" hidden>
+    <p class="ad-eyebrow">Signed in</p>
+    <h1>No access yet</h1>
+    <p class="ad-muted">Your email is signed in but has not been granted a role. Ask the owner to add it in the permissions table, then reload.</p>
+    <button class="btn btn-line btn-sm" data-signout>Sign out</button>
+  </section>
+
+  <section id="app" hidden>
+    <div id="view"></div>
+  </section>
+
+</main>
+
+<p id="toast" class="ad-toast" hidden></p>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script type="module" src="/admin/admin.js"></script>
+</body>
+</html>

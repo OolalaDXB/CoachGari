@@ -5,10 +5,12 @@ enquiry form. Two design systems, one shared config, no secrets in the repo.
 
 Sprint log and blockers: [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
-**Status — CG-001: code complete / production-domain pending.** The one open
-gate is `GATE-DOMAIN-001` (DNS, Resend domain, mailboxes, CORS tightening,
-re-test on `coachgari.com`). CG-002/CG-003 run on the Vercel preview + Supabase
-and do not wait for it.
+**Status — CG-001 code complete / production-domain pending; CG-002 booking,
+CG-003 Stripe test payments and CG-002.5 back-office built and tested on the
+Vercel production alias + Supabase.** The open gates are `GATE-DOMAIN-001`
+(DNS, Resend domain, mailboxes, CORS tightening, re-test on `coachgari.com`),
+the Stripe test secrets and the first back-office grants — all owner actions
+listed in `docs/DECISIONS.md`.
 
 ## Structure
 
@@ -24,14 +26,18 @@ and do not wait for it.
 │   ├── studio-mt.css             → Studio MT design system (platinum / #1A3832 / Cormorant)
 │   ├── site.js                   → reveal · COMMERCE toggle · WhatsApp · attribution · form · config injection
 │   └── img/                      → gari.jpg (placeholder photo), oo-icon-*.svg
+├── admin/                        → back-office (noindex): magic-link sign-in, tabs by permission
 ├── config.js                     → single source of truth for public values (never secrets)
 ├── supabase/
-│   ├── migrations/               → public.contacts
-│   └── functions/contact/        → the enquiry Edge Function
+│   ├── migrations/               → contacts · booking engine · payments/ledger · permissions/RLS
+│   ├── functions/                → contact · booking · checkout · stripe-webhook (Edge Functions)
+│   └── tests/                    → rollback DB suites: cg002_booking · cg003_payments · cg0025_permissions
 ├── emails/                       → lead notification (live) + session templates (prepared, not wired)
 ├── scripts/
 │   ├── check-links.mjs           → CI: internal links & assets
-│   └── test-contact.mjs          → CG-001 gate test against the deployed function
+│   ├── test-contact.mjs          → CG-001 gate test against the deployed function
+│   ├── test-booking.mjs          → CG-002 API test incl. the capacity race
+│   └── test-checkout.mjs         → CG-003 Stripe test-mode round trip
 ├── docs/DECISIONS.md             → decisions & documented blockers
 ├── vercel.json                   → clean URLs, redirects, security headers, noindex headers
 └── .github/workflows/ci.yml
@@ -47,6 +53,10 @@ export const CONFIG = {
   COMMERCE: false,                       // prices hidden, CTAs go to the form / WhatsApp
   WHATSAPP: '971521365065',              // digits only → wa.me links with a pre-filled message
   FORM_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/contact',
+  BOOKING_ENDPOINT: '…/functions/v1/booking',   // CG-002 public booking API
+  CHECKOUT_ENDPOINT: '…/functions/v1/checkout', // CG-003 Stripe Checkout (test mode); '' = payment step off
+  SUPABASE_URL: 'https://acrjrlgeeyseyolmofuq.supabase.co',   // back-office
+  SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_…',               // public by design; RLS protects every row
   STUDIO_URL: '',                        // "Studio MT" footer credit — pending
   SOCIAL_URL: 'https://myoolala.com/u/coachgari',
   COMMISSION_RATE: '10%',                // shown in the proposal
@@ -183,6 +193,59 @@ The database suite prints `CG003_TESTS ok=24 fail=0` and always rolls back.
 The laptop script creates a hold, proves a forged amount is ignored, prints
 the Checkout URL (pay with `4242 4242 4242 4242`) and waits for the webhook to
 confirm the booking.
+
+## Back-office (CG-002.5) — `/admin`
+
+Lightweight operational back-office, no CMS. Sign-in by Supabase Auth magic
+link; what a person sees is decided by the database, not by the page.
+
+| Permission | Who | Gives |
+|---|---|---|
+| `coach:operations` | Gari | Leads (read + status), Calendar, Bookings (cancel / complete / no-show / confirm an unpriced hold), Availability, Exceptions, Tour stops |
+| `finance:view` | Oolala | Orders, payments, refunds, chargebacks, partner ledger, settlements, webhook log — **without customer identity** |
+| `finance:manage` | Oolala | Create settlements, mark paid (bank reference), mark reconciled |
+| `analytics:view` | either | Aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month) |
+
+There is no `content:*` permission: the website is edited in Git.
+
+- **Mechanics** (`supabase/migrations/20260905_cg0025_backoffice.sql`):
+  `app_users` + `app_permissions` keyed by email; `has_permission(text)` reads
+  the JWT; grants to `authenticated` are on explicit column lists (never
+  `manage_token`, `ip_hash`, `idempotency_key`, webhook payloads, and no
+  customer columns on `orders`); RLS policies gate rows by permission;
+  state changes go through `ops_set_booking_status`, `finance_*` and
+  `analytics_summary` RPCs that check the permission themselves. `anon` keeps
+  zero access.
+- **Granting access** (owner, SQL editor — the person signs in with the same
+  email afterwards):
+  ```sql
+  insert into public.app_users (email, display_name, party) values ('gari@example.com', 'Gari', 'gari');
+  insert into public.app_permissions (email, permission) values ('gari@example.com', 'coach:operations');
+  insert into public.app_users (email, display_name, party) values ('finance@example.com', 'Oolala', 'oolala');
+  insert into public.app_permissions (email, permission) values ('finance@example.com', 'finance:view'), ('finance@example.com', 'finance:manage'), ('finance@example.com', 'analytics:view');
+  ```
+  Revoke by deleting the permission row or setting `app_users.active = false`.
+- **Auth set-up** (owner, Supabase dashboard → Authentication → URL
+  configuration): add `https://coachgariv0.vercel.app/admin/` and, later,
+  `https://coachgari.com/admin/` to *Redirect URLs*. Magic links use Supabase's
+  built-in mailer until a custom SMTP (Resend) is configured there.
+- **Frontend**: `admin/index.html` + `admin/admin.js` (supabase-js UMD from
+  jsdelivr, allowed by a dedicated CSP on `/admin*`), publishable key and
+  project URL from `config.js`. Times are shown and entered in a chosen IANA
+  zone and stored in UTC.
+
+### Permission tests
+
+```
+psql "$DATABASE_URL" -f supabase/tests/cg0025_permissions.sql
+```
+
+Prints `CG0025_TESTS ok=73 fail=0` and rolls back. It switches role and JWT
+claims per persona (anon, signed-in stranger, inactive user, coach, finance,
+analytics) and asserts the negatives: anon is refused everywhere; a coach
+cannot read orders, payments, the ledger or `manage_token`; finance cannot
+read leads, bookings or customer names; analytics sees no row-level data and
+its output contains no lead body or contact.
 
 ## Supabase set-up (no secrets in this repo)
 

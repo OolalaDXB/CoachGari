@@ -23,6 +23,63 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-002.5 — Back-office, permissions, RLS
+
+**Status: built; database suite 73/73 (rollback harness, persona switching);
+`/admin` deployed (noindex). Granting the first emails and adding the
+redirect URL in Supabase Auth are owner actions.**
+
+### Decisions
+
+- **Permissions are the canonical rule, encoded.** `coach:operations` (Gari),
+  `finance:view` / `finance:manage` (Oolala), `analytics:view` (shared). No
+  `content:*` — the site is Git. A signed-in email with no `app_permissions`
+  row sees nothing.
+- **Magic link, no passwords, no roles in the JWT.** Authorisation is looked
+  up by email in `app_users`/`app_permissions` at query time, so revocation is
+  immediate (`active = false` or delete the row) without touching Auth.
+- **Column grants, not table grants.** `authenticated` is granted explicit
+  column lists: leads without `ip_hash`; bookings without `manage_token`,
+  `idempotency_key`, `ip_hash`; orders without `customer_name` /
+  `customer_contact`; webhook events only through a view without payloads.
+  The UI therefore never uses `select *` on a table.
+- **People vs money.** Finance reads a `finance_orders` view (order, booking
+  reference, service, session time, ledger figures) — never the person. The
+  coach reads people and the calendar — never orders, payments or the ledger.
+  Cancelling a booking as coach never touches a paid order; refunds are
+  Oolala's decision in Stripe and arrive through the webhook.
+- **Coach state changes are an RPC with a state machine**
+  (`ops_set_booking_status`): cancel a hold/pending/confirmed booking
+  (`cancelled_by = 'coach'`, queues a `booking_cancelled` email event —
+  prepared, not sent), complete / no-show only a confirmed session that has
+  started, confirm by hand only an unpriced hold (paid bookings confirm through
+  payment only).
+- **Calendar edits are direct table access under RLS** (rules, exceptions,
+  tour stops, eligible services) — simplest thing that works, fully covered
+  by policies.
+- **Analytics is a single aggregate function**; its output is asserted PII-free
+  in the suite.
+- **Services stay read-only in the back-office**: prices and the catalogue are
+  a Git/migration change (public content rule).
+
+### Tests
+
+`supabase/tests/cg0025_permissions.sql` — `CG0025_TESTS ok=73 fail=0` on
+2026-09-03. Personas: anon (10 refusals), stranger and inactive user (11 each),
+coach (22: reads, column refusals, calendar edits, state machine), finance
+(13: ledger reads, identity refusals, settlement flow), analytics (5).
+
+### Owner actions
+
+1. Supabase → Authentication → URL configuration → Redirect URLs: add
+   `https://coachgariv0.vercel.app/admin/` (and `https://coachgari.com/admin/`
+   once live).
+2. SQL editor: insert Gari's and Oolala's emails in `app_users` +
+   `app_permissions` (snippet in README).
+3. Optional: custom SMTP for auth emails (Resend) once the domain is verified.
+
+---
+
 ## CG-003 — Orders, Stripe TEST mode, partner ledger
 
 **Status: built; database suite 24/24 (rollback harness); `checkout` and

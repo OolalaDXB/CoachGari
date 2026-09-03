@@ -1,0 +1,54 @@
+/* Back-office — lean, reuses the site's tokens and buttons. */
+.admin{background:var(--grey-bg);}
+.admin .nav-links{display:flex;gap:4px;flex-wrap:wrap;}
+.admin .nav-links a{padding:8px 12px;border-radius:999px;font-size:14px;font-weight:600;cursor:pointer;}
+.admin .nav-links a.on{background:var(--black);color:#fff;}
+.ad-main{padding:36px 0 80px;}
+.ad-card{background:#fff;border-radius:18px;padding:32px;max-width:720px;}
+.ad-login{max-width:520px;margin:60px auto;}
+.ad-eyebrow{font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 10px;}
+.ad-card h1{font-size:30px;letter-spacing:-.02em;margin:0 0 12px;}
+.ad-muted{color:var(--grey-text);font-size:15px;}
+.ad-msg{margin-top:14px;font-size:14px;font-weight:600;}
+.ad-msg.err{color:#b3261e;}
+.ad-msg.ok{color:#1b7a3d;}
+.ad-form{display:grid;gap:14px;margin-top:18px;}
+.ad-form label{display:grid;gap:6px;font-size:13px;font-weight:700;color:var(--grey-text);}
+.ad-form input,.ad-form select,.ad-form textarea{font:inherit;font-size:15px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;}
+.ad-form textarea{min-height:80px;}
+.ad-form .row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;}
+.ad-form .actions{display:flex;gap:10px;flex-wrap:wrap;}
+.ad-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin:0 0 18px;}
+.ad-head h1{font-size:28px;letter-spacing:-.02em;margin:0;}
+.ad-head .ad-muted{margin:4px 0 0;}
+.ad-filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.ad-filters select,.ad-filters input{font:inherit;font-size:14px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;}
+.ad-panel{background:#fff;border-radius:18px;padding:22px 24px;margin-bottom:18px;}
+.ad-panel h2{font-size:17px;margin:0 0 12px;letter-spacing:-.01em;}
+.ad-table-wrap{overflow-x:auto;}
+table.ad-table{width:100%;border-collapse:collapse;font-size:14px;}
+.ad-table th{text-align:left;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--grey-text);padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;}
+.ad-table td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top;}
+.ad-table tr:last-child td{border-bottom:0;}
+.ad-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.ad-table .msg{max-width:360px;white-space:pre-wrap;color:var(--grey-text);font-size:13px;}
+.ad-table .acts{white-space:nowrap;}
+.ad-table .acts button{margin-right:6px;}
+.ad-table select{font:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:8px;}
+.st{display:inline-block;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:700;background:#eef0f4;color:#3a3a44;white-space:nowrap;}
+.st-confirmed,.st-paid,.st-succeeded,.st-open,.st-ready,.st-qualified{background:#e2f5e9;color:#1b7a3d;}
+.st-hold,.st-pending_payment,.st-new,.st-draft,.st-pending{background:#fff3d6;color:#8a5a00;}
+.st-cancelled,.st-expired,.st-no_show,.st-failed,.st-refunded,.st-spam,.st-lost{background:#fde7e5;color:#b3261e;}
+.st-completed,.st-reconciled,.st-settled,.st-closed,.st-contacted{background:#e6e9ff;color:#3546b3;}
+.btn-xs{padding:6px 10px;font-size:12.5px;border-radius:999px;}
+.ad-day{margin:18px 0 6px;font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);}
+.ad-empty{color:var(--grey-text);padding:14px 0;font-size:14px;}
+.ad-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;}
+.ad-kpi{background:#fff;border-radius:14px;padding:16px 18px;}
+.ad-kpi b{display:block;font-size:24px;letter-spacing:-.02em;}
+.ad-kpi span{font-size:12.5px;color:var(--grey-text);}
+.ad-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;}
+.ad-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--black);color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;font-weight:600;z-index:50;max-width:90vw;}
+.ad-toast.err{background:#b3261e;}
+.ad-note{font-size:13px;color:var(--grey-text);margin:8px 0 0;}
+@media(max-width:760px){.ad-card{padding:22px;}.ad-panel{padding:16px;}}
