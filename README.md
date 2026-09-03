@@ -5,6 +5,11 @@ enquiry form. Two design systems, one shared config, no secrets in the repo.
 
 Sprint log and blockers: [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
+**Status — CG-001: code complete / production-domain pending.** The one open
+gate is `GATE-DOMAIN-001` (DNS, Resend domain, mailboxes, CORS tightening,
+re-test on `coachgari.com`). CG-002/CG-003 run on the Vercel preview + Supabase
+and do not wait for it.
+
 ## Structure
 
 ```
@@ -113,10 +118,23 @@ Project: `acrjrlgeeyseyolmofuq` (eu-central-1).
 
 ## Deploy (Vercel, git-connected)
 
-1. Vercel → Add New → Project → import `OolalaDXB/CoachGari`
-   (Framework preset **Other**, no build command, output = repo root).
-2. Deploy. Pushes to `main` auto-deploy. Add `coachgari.com` under Project → Domains
-   when the DNS is ready.
+The repo is linked to the Vercel project **`coachgari_v0`**
+(`prj_YCx9wcCieYVzzc1NBp2oRWoW8Zwp`, team *Mickael's projects*, framework
+*Other*, no build step). Every push builds automatically.
+
+| URL | What |
+|---|---|
+| `https://coachgariv0.vercel.app` | production alias (follows the production branch) |
+| `https://coachgariv0-git-claude-coach-325c7d-mickaels-projects-6a9e3bf2.vercel.app` | stable alias of the dev branch |
+
+Three project settings only the owner can change (the MCP token gets `403`):
+
+1. **Deployment Protection → Vercel Authentication → Off.** It is currently on
+   for all deployment URLs (`all_except_custom_domains`), so every preview
+   redirects to a Vercel login — nobody outside the team can open the link, and
+   the browser gate test cannot be run. (Custom domains are never affected.)
+2. **Git → Production Branch → `main`** (currently `claude/coach-gari-repo-setup-e4d7ep`).
+3. **Domains → `coachgari.com` + `www`** once DNS is ready.
 
 The CSP in `vercel.json` only allows `connect-src` to the Supabase project host.
 If the project ref ever changes, update it there too.
@@ -156,10 +174,26 @@ set once `RESEND_API_KEY` is configured (and the inbox at `letsgo@` has the mail
 
 **D. Clean-up** — `delete from public.contacts where interest = 'TEST — safe to delete';`
 
-> Note: the Claude Code web sandbox's egress policy does not allow
-> `*.supabase.co`, so steps A–B cannot be run from there. Run them from a
-> laptop or from the deployed preview. Everything else (migration, function,
-> schema, advisors) was verified through the Supabase API.
+### Verified so far (through the Supabase and Vercel APIs)
+
+- `public.contacts` live with the expected columns; `submission_id` unique index;
+  `status` check constraint; RLS enabled with **zero** policies and **no**
+  grants to `anon`/`authenticated`; `updated_at` trigger present with a pinned
+  `search_path`. Security advisors: only the intentional "RLS enabled, no
+  policy" notice. Row count 0 (no test data left behind).
+- Edge Function `contact` deployed, `ACTIVE`, v1, `verify_jwt: false`.
+- Vercel: project linked to the repo, preview build of `b2ce4ea` **READY** with
+  no build errors.
+
+### Not yet run — and why
+
+- **Steps A–B (HTTP submission, browser double-click)**: the Claude Code sandbox
+  egress policy blocks `*.supabase.co` and `*.vercel.app`, and the preview is
+  behind Vercel Authentication. Two minutes from any laptop once the protection
+  is off. This is *not* domain-dependent.
+- **Step 5 / GATE-DOMAIN-001**: the same run on `https://coachgari.com`, after
+  DNS, Resend domain verification, mailboxes and CORS tightening. See
+  `docs/DECISIONS.md`.
 
 ## Local checks
 

@@ -7,6 +7,41 @@ documented but deliberately **not** implemented. Newest sprint first.
 
 ## CG-001 — Route C becomes the site, form goes live
 
+**Status: code complete / production-domain pending.**
+Everything that can be verified through the Supabase and Vercel APIs has been
+verified (see README → "CG-001 technical gate"). One gate remains and it is
+tied to the production domain — see `GATE-DOMAIN-001` below. CG-002 and CG-003
+do **not** wait for it: booking and Stripe test-mode run on the Vercel preview
+and Supabase, independent of `coachgari.com`.
+
+### GATE-DOMAIN-001 — the single remaining CG-001 gate
+
+Closes when a real submission from `https://coachgari.com` creates exactly one
+`contacts` row, keeps its attribution, and triggers the `letsgo@` notification.
+Steps, all on the domain side:
+
+1. **Vercel project settings** (owner only — the MCP token gets `403` on
+   project updates):
+   - Deployment Protection → **Vercel Authentication → Off** (currently
+     `all_except_custom_domains`, which hides every preview behind a Vercel
+     login — the opposite of "no password, shareable link"). Alternative that
+     keeps protection on: generate a *Share* link from the deployment page.
+   - Git → **production branch → `main`** (currently the dev branch
+     `claude/coach-gari-repo-setup-e4d7ep`).
+   - Domains → add `coachgari.com` + `www` and point DNS at Vercel.
+2. **Resend** — verify the `coachgari.com` sending domain (SPF/DKIM) so
+   `yoursession@coachgari.com` can send; then `supabase secrets set RESEND_API_KEY=…`.
+3. **Mailboxes** — `letsgo@` and `yoursession@` on Migadu.
+4. **CORS** — in `supabase/functions/contact/index.ts`, replace the `*.vercel.app`
+   wildcard with the project's exact preview hosts, keep `coachgari.com` /
+   `www.coachgari.com`, redeploy the function.
+5. **Re-run the gate** on `https://coachgari.com`: README steps A → D.
+
+Separately, and *not* domain-related: the HTTP submission test (README steps
+A–B) could not be executed from the Claude Code sandbox (its egress policy
+blocks `*.supabase.co` and `*.vercel.app`). It is a two-minute run from any
+laptop or from the Vercel preview in a browser.
+
 **Decisions**
 
 - **Route C is the homepage.** Served at `/` (`index.html`). `/routes/c` → `/` is a
