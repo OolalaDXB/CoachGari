@@ -5,10 +5,10 @@
   "redirects": [
     { "source": "/routes/c", "destination": "/", "permanent": true },
     { "source": "/routes/c/(.*)", "destination": "/", "permanent": true },
-    { "source": "/coach-gari-online.html", "destination": "/", "permanent": true },
-    { "source": "/coach-gari-simple.html", "destination": "/routes/a", "permanent": true },
-    { "source": "/coach-gari-vitrine.html", "destination": "/routes/b", "permanent": true },
-    { "source": "/studio-mt-coach-gari.html", "destination": "/p/studio-mt-4e7a", "permanent": true }
+    { "source": "/coach-gari-online(\\.html)?", "destination": "/", "permanent": true },
+    { "source": "/coach-gari-simple(\\.html)?", "destination": "/routes/a", "permanent": true },
+    { "source": "/coach-gari-vitrine(\\.html)?", "destination": "/routes/b", "permanent": true },
+    { "source": "/studio-mt-coach-gari(\\.html)?", "destination": "/p/studio-mt-4e7a", "permanent": true }
   ],
   "headers": [
     {

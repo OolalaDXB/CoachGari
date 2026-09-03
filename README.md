@@ -190,7 +190,14 @@ set once `RESEND_API_KEY` is configured (and the inbox at `letsgo@` has the mail
   **zero** policies and **no** grants to `anon`/`authenticated`; `updated_at`
   trigger with pinned `search_path`. Security advisors: only the intentional
   "RLS enabled, no policy" notice.
-- Vercel: project linked to the repo, builds green, no build errors.
+- Vercel: `main` deployed to production (`coachgariv0.vercel.app`), Vercel
+  Authentication off. Checked on the live deployment: homepage 200 with the
+  full security header set (CSP, HSTS, nosniff, frame DENY, referrer,
+  permissions); `/routes/c` resolves to the homepage; proposal and archived
+  routes carry `noindex` both as meta and `X-Robots-Tag`; `config.js` and the
+  photo are served; no secret in any served file. The old-filename redirects
+  needed clean-URL-aware sources (`cleanUrls` strips `.html` before redirects
+  are evaluated) — fixed in `vercel.json`.
 
 v1 of the function returned `502` on every call: the `jsr:` types-only import
 made the worker fail to boot. v2 dropped it. Nothing else changed.
