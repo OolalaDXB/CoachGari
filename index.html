@@ -261,9 +261,17 @@
         </div>
         <div class="two">
           <div class="field">
-            <label for="f-where">Where are you</label>
-            <input id="f-where" name="location" type="text" placeholder="City and country">
+            <label for="f-city">City</label>
+            <input id="f-city" name="city" type="text" autocomplete="address-level2" placeholder="Harare, Dubai, Paris…">
           </div>
+          <div class="field">
+            <label for="f-country">Country</label>
+            <select id="f-country" name="country" autocomplete="country-name" data-countries>
+              <option value="" selected>Choose a country</option>
+            </select>
+          </div>
+        </div>
+        <div class="two one">
           <div class="field">
             <label for="f-what">What you're after</label>
             <select id="f-what" name="interest">

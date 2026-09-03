@@ -155,6 +155,7 @@ p{margin:0 0 1em;}
   font-size:16px;font-weight:500;border:1.5px solid var(--line);border-radius:9px;background:#fff;color:var(--black);}
 .field textarea{min-height:110px;resize:vertical;}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.two.one{grid-template-columns:1fr;}
 .form-status{margin:16px 0 0;font-size:14.5px;font-weight:600;}
 .form-status.err{color:#B00020;}
 .form-status.ok{color:var(--accent);}
