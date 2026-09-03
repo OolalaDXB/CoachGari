@@ -57,7 +57,7 @@ export const CONFIG = {
   CHECKOUT_ENDPOINT: '…/functions/v1/checkout', // CG-003 Stripe Checkout (test mode); '' = payment step off
   SUPABASE_URL: 'https://acrjrlgeeyseyolmofuq.supabase.co',   // back-office
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_…',               // public by design; RLS protects every row
-  STUDIO_URL: '',                        // "Studio MT" footer credit — pending
+  STUDIO_URL: 'https://thestudio.mt',    // "Studio MT" footer credit
   SOCIAL_URL: 'https://myoolala.com/u/coachgari',
   COMMISSION_RATE: '10%',                // shown in the proposal
   PLAUSIBLE_DOMAIN: '',                  // '' = analytics off; 'coachgari.com' once the property exists

@@ -31,7 +31,7 @@ export const CONFIG = {
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_d84Nn7V7TB1cPs5mJRX3ZA_7LljnzBm',
 
   // URL behind the "Studio MT" footer credit.
-  STUDIO_URL: '',
+  STUDIO_URL: 'https://thestudio.mt',
 
   // Oolala (Oo) social-follow link used in every footer.
   SOCIAL_URL: 'https://myoolala.com/u/coachgari',
