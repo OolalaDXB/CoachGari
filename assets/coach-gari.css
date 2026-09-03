@@ -154,6 +154,8 @@ p{margin:0 0 1em;}
 .field input,.field select,.field textarea{width:100%;padding:16px 18px;font-family:inherit;
   font-size:16px;font-weight:500;border:1.5px solid var(--line);border-radius:9px;background:#fff;color:var(--black);}
 .field textarea{min-height:110px;resize:vertical;}
+.form-hint{margin:8px 0 0;font-size:13.5px;color:var(--grey-text);font-weight:500;line-height:1.5;}
+.form-hint[hidden]{display:none;}
 .field input:user-invalid{border-color:#B00020;}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
 .two.one{grid-template-columns:1fr;}

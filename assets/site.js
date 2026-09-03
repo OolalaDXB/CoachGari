@@ -180,28 +180,54 @@ function matchCountry(value){
   return starts.length === 1 ? starts[0] : null;   // a unique prefix ("zimb") is accepted and normalised
 }
 
+/* ---- form adapts to the category ---------------------------- */
+/* One enquiry form. The "What you're after" choice drives a short
+   hint and the message placeholder; field labels never change.
+   `media` is a prepared switch for photo/video attachments per
+   category — off until the upload path (private bucket, signed
+   upload, size limits, coach-only access) exists. Nothing here
+   changes what is sent to the contact function.                */
+var CATEGORIES = {
+  'Online coaching':        { hint: '', detail: 'What you train with, how much time is realistic, what you\'ve tried before.', media: false },
+  'The 12-week programme':  { hint: '', detail: 'Home or gym, and what equipment you have.', media: false },
+  'Live group sessions':    { hint: '', detail: 'Your timezone and the days that usually work.', media: false },
+  'A conversation':         { hint: 'No preparation needed. You can also pick a time directly in the Book section above.', detail: 'What\'s on your mind, in a line or two.', media: false },
+  'Live event near me':     { hint: 'Tell Coach Gari where you are. If enough people ask for the same city, a session may happen there.', detail: 'Roughly when, how many of you, indoors or outdoors.', media: false },
+  'In person in Dubai':     { hint: 'Say where in Dubai you train and when you\'re usually free.', detail: 'Your goal, your area, the days that work.', media: false }
+};
+
+(function categories(){
+  var form = document.querySelector('form[data-enquiry]');
+  if (!form) return;
+  var interest = form.querySelector('select[name="interest"]');
+  var hint = form.querySelector('[data-interest-hint]');
+  var detail = form.querySelector('textarea[name="detail"]');
+  if (!interest) return;
+  var defaultDetail = detail ? detail.placeholder : '';
+  function apply(){
+    var c = CATEGORIES[interest.value] || {};
+    if (hint) { hint.textContent = c.hint || ''; hint.hidden = !c.hint; }
+    if (detail) detail.placeholder = c.detail || defaultDetail;
+    form.dataset.category = interest.value;
+  }
+  interest.addEventListener('change', apply);
+  apply();
+  form.applyCategory = apply;
+})();
+
 /* ---- travel / waitlist CTAs -------------------------------- */
 /* "Join the list", "Tell me where" and the footer email box all
-   lead to the ONE enquiry form: scroll there, preselect the
-   "Live event near me" interest, switch the location prompt to
-   "Where should Gari come next?", focus the city field. The
-   source is kept in the submission (page ?entry_point=…) without
-   touching first-touch UTM attribution. Reached organically, the
-   form is untouched.                                            */
+   lead to the ONE enquiry form: scroll there, select the
+   "Live event near me" category (which shows its own hint) and
+   focus the city field. The source is kept in the submission
+   (page ?entry_point=…) without touching first-touch UTMs.
+   Reached organically, the form is untouched.                  */
 (function travel(){
   var form = document.querySelector('form[data-enquiry]');
   if (!form) return;
   var city = form.querySelector('#f-city');
-  var country = form.querySelector('#f-country');
   var contact = form.querySelector('[name="contact"]');
   var interest = form.querySelector('select[name="interest"]');
-  var cityLabel = form.querySelector('label[for="f-city"]');
-  var defaults = {
-    label: cityLabel ? cityLabel.textContent : '',
-    cityPh: city ? city.placeholder : '',
-    countryPh: country ? country.placeholder : '',
-    interest: interest ? interest.value : ''
-  };
 
   function enter(source, email){
     form.dataset.entryPoint = source;
@@ -209,22 +235,15 @@ function matchCountry(value){
       for (var i = 0; i < interest.options.length; i++) {
         if (/live event near me/i.test(interest.options[i].text)) { interest.selectedIndex = i; break; }
       }
+      if (form.applyCategory) form.applyCategory();
     }
-    if (cityLabel) cityLabel.textContent = 'Where should Gari come next?';
-    if (city) city.placeholder = 'City';
-    if (country) country.placeholder = 'Country';
     if (email && contact && !contact.value) contact.value = email;
     var target = document.getElementById('enquiry') || form;
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (city) setTimeout(function(){ city.focus({ preventScroll: true }); }, 450);
   }
 
-  form.resetTravel = function(){
-    delete form.dataset.entryPoint;
-    if (cityLabel) cityLabel.textContent = defaults.label;
-    if (city) city.placeholder = defaults.cityPh;
-    if (country) country.placeholder = defaults.countryPh;
-  };
+  form.resetTravel = function(){ delete form.dataset.entryPoint; if (form.applyCategory) form.applyCategory(); };
 
   document.querySelectorAll('[data-travel]').forEach(function(a){
     a.addEventListener('click', function(e){ e.preventDefault(); enter(a.getAttribute('data-travel')); });
@@ -305,7 +324,7 @@ function matchCountry(value){
         form.reset();
         submissionId = newId(); // next enquiry gets a fresh id
         say(travelEntry
-          ? 'You’re on the list. If enough people ask for your city, Gari may bring a session there.'
+          ? 'You’re on the list. If enough people ask for your city, Coach Gari may bring a session there.'
           : 'Thanks — that’s with Coach Gari. You’ll hear back soon.', 'ok');
         if (travelEntry && form.resetTravel) form.resetTravel();
         return;
