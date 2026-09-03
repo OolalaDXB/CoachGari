@@ -102,6 +102,40 @@ Migadu mailboxes are set up separately when the domain is connected.
 - **Location**: the single "City and country" field is stored verbatim in
   `location_raw` and split on the last comma into `city` / `country`.
 
+## Booking (CG-002)
+
+Internal engine, no external scheduler. Flow on the homepage (`#book`):
+service → day → time → details → 10-minute hold → payment (CG-003).
+
+- **Tables**: `services`, `availability_rules`, `availability_exceptions`,
+  `tour_stops`, `tour_stop_services`, `bookings`
+  (`supabase/migrations/20260904_cg002_booking.sql`).
+- **RPCs** (service role only): `available_slots(service, from, to, tz)`,
+  `create_hold(...)`, `get_booking(ref, token)`, `cancel_booking(ref, token, reason)`,
+  `expire_holds()` (also run by `pg_cron` every minute).
+- **API** `supabase/functions/booking` — `GET ?action=services|tour_stops|slots|state`,
+  `POST {action:"hold"|"cancel"}`. The database decides price, duration,
+  capacity and availability; the request only carries identity and intent.
+- **Timezones**: UTC in the database, IANA zone kept on every row, slots
+  returned in the visitor's zone with the session zone spelled out.
+- **Tour stops**: insert a `tour_stops` row (`status = 'open'`), link services in
+  `tour_stop_services`, add `availability_exceptions` rows with `kind = 'open'`
+  and `tour_stop_id` for the bookable windows. Until CG-002.5's back-office, do
+  this in the SQL editor.
+- **Placeholder hours**: Mon–Fri 09:00–17:00 Asia/Dubai are seeded so the engine
+  has something to offer — edit them in `availability_rules`.
+
+### Booking tests
+
+```
+# database suite — one transaction, always rolls back, prints CG002_TESTS ok=N fail=N
+psql "$DATABASE_URL" -f supabase/tests/cg002_booking.sql
+# (or paste it in the SQL editor / run it through the MCP apply_migration tool — a raised exception is never recorded)
+
+# live API from a laptop — includes the two-parallel-holds race
+node scripts/test-booking.mjs
+```
+
 ## Supabase set-up (no secrets in this repo)
 
 Project: `acrjrlgeeyseyolmofuq` (eu-central-1).

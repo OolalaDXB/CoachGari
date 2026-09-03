@@ -160,6 +160,35 @@ p{margin:0 0 1em;}
 .form-status.ok{color:var(--accent);}
 .form-alt{margin:18px 0 0;font-size:14.5px;color:var(--grey-text);font-weight:500;text-align:center;}
 .form-alt a{font-weight:700;color:var(--black);text-decoration:none;border-bottom:1.5px solid var(--accent);padding-bottom:1px;}
+/* booking flow */
+.bk{margin-top:34px;text-align:left;}
+.bk-step{margin-top:26px;}
+.bk-step[hidden]{display:none;}
+.bk-step h4{margin-bottom:12px;}
+.bk-services{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;}
+.bk-service{text-align:left;background:#fff;border:1.5px solid var(--line);border-radius:14px;padding:16px 18px;cursor:pointer;font-family:inherit;display:flex;flex-direction:column;gap:6px;}
+.bk-service b{font-size:16px;}
+.bk-service span{font-size:14px;color:var(--grey-text);font-weight:500;}
+.bk-service.on{border-color:var(--accent);outline:2px solid var(--accent);}
+.bk-tour{margin-top:18px;background:var(--accent-pale);border-radius:14px;padding:16px 18px;}
+.bk-tour h4{margin-bottom:8px;}
+.bk-tourstop{display:flex;flex-direction:column;gap:2px;padding:8px 0;border-top:1px solid #C6D0F2;font-size:14.5px;}
+.bk-tourstop:first-of-type{border-top:0;}
+.bk-tourstop span,.bk-tourstop em{color:var(--grey-text);font-weight:500;font-style:normal;}
+.bk-date{padding:14px 16px;font-family:inherit;font-size:16px;font-weight:600;border:1.5px solid var(--line);border-radius:9px;background:#fff;color:var(--black);}
+.bk-note{font-size:14.5px;color:var(--grey-text);font-weight:500;margin:10px 0 0;}
+.bk-slots{display:flex;flex-wrap:wrap;gap:10px;}
+.bk-slot{font-family:inherit;font-weight:700;font-size:14.5px;padding:11px 16px;border-radius:9px;border:1.5px solid var(--line);background:#fff;cursor:pointer;}
+.bk-slot.tour{border-style:dashed;}
+.bk-slot.on,.bk-slot:hover{border-color:var(--accent);}
+.bk-slot.on{background:var(--accent);color:#fff;}
+.bk-summary{font-size:15.5px;line-height:1.5;margin:0 0 16px;}
+.bk-form{max-width:640px;}
+.bk-done{background:#fff;border-radius:16px;padding:22px 24px;box-shadow:0 2px 3px rgba(10,10,11,.03);}
+.bk-done:empty{display:none;}
+.bk-status{margin:14px 0 0;font-size:14.5px;font-weight:600;min-height:1.2em;}
+.bk-status.err{color:#B00020;}
+.bk-status.ok{color:var(--accent);}
 /* honeypot — off-screen, never shown to people, never focusable */
 .hp{position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;}
 @media(max-width:640px){.enquiry{padding:32px 22px;}.two{grid-template-columns:1fr;}}

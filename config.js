@@ -17,6 +17,13 @@ export const CONFIG = {
   // Public Edge Function that receives the enquiry form POST.
   FORM_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/contact',
 
+  // Public booking API (services, slots, holds, state, cancel).
+  BOOKING_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/booking',
+
+  // Server-side Stripe Checkout creation (test mode until CHECK-LICENCE-001 is cleared).
+  // Empty = payment step disabled; holds are still created.
+  CHECKOUT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/checkout',
+
   // URL behind the "Studio MT" footer credit.
   STUDIO_URL: '',
 
