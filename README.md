@@ -202,7 +202,7 @@ link; what a person sees is decided by the database, not by the page.
 | Permission | Who | Gives |
 |---|---|---|
 | `coach:operations` | Gari | Leads (read + status), Calendar, Bookings (cancel / complete / no-show / confirm an unpriced hold), Availability, Exceptions, Tour stops |
-| `finance:view` | Oolala | Orders, payments, refunds, chargebacks, partner ledger, settlements, webhook log — **without customer identity** |
+| `finance:view` | Oolala | Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`) — **without customer identity** |
 | `finance:manage` | Oolala | Create settlements, mark paid (bank reference), mark reconciled |
 | `analytics:view` | either | Aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month) |
 

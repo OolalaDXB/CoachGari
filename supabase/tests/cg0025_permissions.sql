@@ -6,12 +6,12 @@
 --   signed-in, no row → nothing (0 rows), every RPC forbidden
 --   inactive user     → same as no row
 --   coach             → leads/bookings/calendar; no orders/payments/ledger; no manage_token
---   finance           → orders/ledger without customer identity; no leads/bookings
+--   finance           → orders/ledger (finance_orders() function) without customer identity; no leads/bookings
 --   analytics         → aggregates only
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
-  svc uuid; bid uuid; oref text; n int; j jsonb; s jsonb; q text;
+  svc uuid; bid uuid; oref text; n int; j jsonb; s jsonb; q text; b boolean;
   sess text := 'cs_test_' || replace(gen_random_uuid()::text, '-', ''); pi text := 'pi_test_' || replace(gen_random_uuid()::text, '-', '');
 begin
   /* ---- seed as postgres ---- */
@@ -47,7 +47,7 @@ begin
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);
   execute 'set local role anon';
   foreach q in array array['select count(*) from public.contacts', 'select count(*) from public.bookings', 'select count(*) from public.orders',
-                           'select count(*) from public.partner_earnings', 'select count(*) from public.finance_orders', 'select count(*) from public.availability_rules',
+                           'select count(*) from public.partner_earnings', 'select count(*) from public.finance_orders()', 'select count(*) from public.availability_rules',
                            'select count(*) from public.app_permissions', 'select public.my_permissions()', 'select public.analytics_summary()',
                            'select public.ops_set_booking_status(''CG-TEST03'', ''cancelled'')'] loop
     begin execute q; fail := fail + 1; log := log || ' [anon allowed: ' || q || ']';
@@ -62,7 +62,7 @@ begin
     select count(*) into n from public.contacts;           if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s contacts]', q); end if;
     select count(*) into n from public.bookings;           if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s bookings]', q); end if;
     select count(*) into n from public.orders;             if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s orders]', q); end if;
-    select count(*) into n from public.finance_orders;     if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s finance_orders]', q); end if;
+    begin perform public.finance_orders(); fail := fail + 1; log := log || format(' [%s finance_orders]', q); exception when insufficient_privilege then ok := ok + 1; end;
     select count(*) into n from public.availability_rules; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s rules]', q); end if;
     if (public.my_permissions() -> 'permissions') = '[]'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s my_permissions]', q); end if;
     begin perform public.ops_set_booking_status('CG-TEST03', 'cancelled'); fail := fail + 1; log := log || format(' [%s ops rpc]', q); exception when insufficient_privilege then ok := ok + 1; end;
@@ -90,7 +90,7 @@ begin
   select count(*) into n from public.orders;           if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees orders]'; end if;
   select count(*) into n from public.payments;         if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees payments]'; end if;
   select count(*) into n from public.partner_earnings; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees earnings]'; end if;
-  select count(*) into n from public.finance_orders;   if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees finance_orders]'; end if;
+  begin perform public.finance_orders(); fail := fail + 1; log := log || ' [coach sees finance_orders]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.finance_create_settlement(current_date - 1, current_date + 1); fail := fail + 1; log := log || ' [coach finance rpc]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.analytics_summary(); fail := fail + 1; log := log || ' [coach analytics rpc]'; exception when insufficient_privilege then ok := ok + 1; end;
   select count(*) into n from public.app_users; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach app_users self only]'; end if;
@@ -127,11 +127,12 @@ begin
   exception when insufficient_privilege then ok := ok + 1; end;
   select count(*) into n from public.contacts;  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance sees leads]'; end if;
   select count(*) into n from public.bookings;  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance sees bookings]'; end if;
-  select count(*) into n from public.finance_orders where reference = oref and service_title = 'Perm test session' and gari_payable = 3905;
+  select count(*) into n from public.finance_orders() f where f.reference = oref and f.service_title = 'Perm test session' and f.gari_payable = 3905;
   if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance_orders row]'; end if;
-  select count(*) into n from information_schema.columns where table_schema = 'public' and table_name = 'finance_orders' and column_name in ('customer_name','customer_contact');
-  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance_orders exposes identity]'; end if;
-  select count(*) into n from public.finance_webhook_log where event_id = 'evt_perm_1'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance webhook log]'; end if;
+  select (to_jsonb(f) ? 'customer_name') or (to_jsonb(f) ? 'customer_contact') or to_jsonb(f)::text like '%Paying Person%' or to_jsonb(f)::text like '%payer@example.com%' into b
+    from public.finance_orders() f where f.reference = oref;
+  if not b then ok := ok + 1; else fail := fail + 1; log := log || ' [finance_orders exposes identity]'; end if;
+  select count(*) into n from public.finance_webhook_log() w where w.event_id = 'evt_perm_1'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance webhook log]'; end if;
   begin select count(*) into n from public.webhook_events; fail := fail + 1; log := log || ' [finance raw webhook payloads]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.ops_set_booking_status('CG-TEST02', 'cancelled'); fail := fail + 1; log := log || ' [finance ops rpc]'; exception when insufficient_privilege then ok := ok + 1; end;
   update public.availability_rules set active = true; get diagnostics n = row_count;

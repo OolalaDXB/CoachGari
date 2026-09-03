@@ -319,9 +319,9 @@ async function tours() {
 async function finance() {
   const manage = has('finance:manage');
   const [{ data: orders, error }, { data: settlements }, { data: events }] = await Promise.all([
-    sb.from('finance_orders').select('*').order('created_at', { ascending: false }).limit(300),
+    sb.rpc('finance_orders').limit(300),
     sb.from('partner_settlements').select('*').order('created_at', { ascending: false }),
-    sb.from('finance_webhook_log').select('*').order('received_at', { ascending: false }).limit(30),
+    sb.rpc('finance_webhook_log').limit(30),
   ]); if (error) throw error;
   const open = orders.filter((o) => o.earning_status === 'open');
   const sum = (arr, k) => arr.reduce((a, o) => a + (o[k] || 0), 0);

@@ -41,9 +41,13 @@ redirect URL in Supabase Auth are owner actions.**
 - **Column grants, not table grants.** `authenticated` is granted explicit
   column lists: leads without `ip_hash`; bookings without `manage_token`,
   `idempotency_key`, `ip_hash`; orders without `customer_name` /
-  `customer_contact`; webhook events only through a view without payloads.
+  `customer_contact`; webhook events only through `finance_webhook_log()`, without payloads.
+  Both are SECURITY DEFINER *functions* that check the permission (the
+  linter rates definer *views* as errors; definer functions callable by
+  `authenticated` are a documented warning — every one of ours checks
+  `has_permission` first).
   The UI therefore never uses `select *` on a table.
-- **People vs money.** Finance reads a `finance_orders` view (order, booking
+- **People vs money.** Finance reads `finance_orders()` (order, booking
   reference, service, session time, ledger figures) — never the person. The
   coach reads people and the calendar — never orders, payments or the ledger.
   Cancelling a booking as coach never touches a paid order; refunds are
