@@ -174,24 +174,35 @@ set once `RESEND_API_KEY` is configured (and the inbox at `letsgo@` has the mail
 
 **D. Clean-up** — `delete from public.contacts where interest = 'TEST — safe to delete';`
 
-### Verified so far (through the Supabase and Vercel APIs)
+### Verified (2026-09-03)
 
-- `public.contacts` live with the expected columns; `submission_id` unique index;
-  `status` check constraint; RLS enabled with **zero** policies and **no**
-  grants to `anon`/`authenticated`; `updated_at` trigger present with a pinned
-  `search_path`. Security advisors: only the intentional "RLS enabled, no
-  policy" notice. Row count 0 (no test data left behind).
-- Edge Function `contact` deployed, `ACTIVE`, v1, `verify_jwt: false`.
-- Vercel: project linked to the repo, preview build of `b2ce4ea` **READY** with
-  no build errors.
+- **Step A passed from a laptop — 7/7 checks** on function **v2**: accepted
+  (200 + id), same `submission_id` deduplicated to the same id, honeypot
+  silently dropped, validation 400 with fields, foreign origin 403, GET 405,
+  CORS header echoed.
+- **Step C passed**: exactly one row in `contacts`
+  (`4c74846a-c0ea-4983-9094-3b823c413498`), `city`/`country` split from the
+  location field, all five attribution fields + `first_visit_at` + `page`
+  stored, `notified_at` null with the expected `notify_skipped`
+  (`RESEND_API_KEY` not configured) log line. Function logs contain only event
+  names and record ids — no message, contact or IP.
+- Schema: `submission_id` unique index; `status` check constraint; RLS on with
+  **zero** policies and **no** grants to `anon`/`authenticated`; `updated_at`
+  trigger with pinned `search_path`. Security advisors: only the intentional
+  "RLS enabled, no policy" notice.
+- Vercel: project linked to the repo, builds green, no build errors.
+
+v1 of the function returned `502` on every call: the `jsr:` types-only import
+made the worker fail to boot. v2 dropped it. Nothing else changed.
+
+Clean-up of the test row: `delete from public.contacts where interest = 'TEST — safe to delete';`
 
 ### Not yet run — and why
 
-- **Steps A–B (HTTP submission, browser double-click)**: the Claude Code sandbox
-  egress policy blocks `*.supabase.co` and `*.vercel.app`, and the preview is
-  behind Vercel Authentication. Two minutes from any laptop once the protection
-  is off. This is *not* domain-dependent.
-- **Step 5 / GATE-DOMAIN-001**: the same run on `https://coachgari.com`, after
+- **Step B (browser, visible success state, double-click)**: needs the Vercel
+  preview to be reachable, i.e. *Deployment Protection → Vercel Authentication
+  → Off* (owner-only setting). Not domain-dependent.
+- **Step D / GATE-DOMAIN-001**: the same run on `https://coachgari.com`, after
   DNS, Resend domain verification, mailboxes and CORS tightening. See
   `docs/DECISIONS.md`.
 

@@ -8,9 +8,13 @@ documented but deliberately **not** implemented. Newest sprint first.
 ## CG-001 — Route C becomes the site, form goes live
 
 **Status: code complete / production-domain pending.**
-Everything that can be verified through the Supabase and Vercel APIs has been
-verified (see README → "CG-001 technical gate"). One gate remains and it is
-tied to the production domain — see `GATE-DOMAIN-001` below. CG-002 and CG-003
+2026-09-03 — API gate passed from a laptop (README steps A + C): 7/7 checks on
+function v2, exactly one `contacts` row, attribution kept, Resend skipped
+cleanly (key not set), logs free of personal data. v1 failed to boot (`502`)
+because of a `jsr:` types-only import; v2 removed it. The browser step (B)
+waits on Vercel Authentication being switched off by the project owner. One
+gate remains and it is tied to the production domain — see `GATE-DOMAIN-001`
+below. CG-002 and CG-003
 do **not** wait for it: booking and Stripe test-mode run on the Vercel preview
 and Supabase, independent of `coachgari.com`.
 
