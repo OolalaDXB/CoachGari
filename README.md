@@ -50,8 +50,18 @@ export const CONFIG = {
   STUDIO_URL: '',                        // "Studio MT" footer credit — pending
   SOCIAL_URL: 'https://myoolala.com/u/coachgari',
   COMMISSION_RATE: '10%',                // shown in the proposal
+  PLAUSIBLE_DOMAIN: '',                  // '' = analytics off; 'coachgari.com' once the property exists
 };
 ```
+
+## Analytics (Plausible)
+
+Aggregate, cookie-free website analytics. Prepared, **off** until the Plausible
+property exists. To activate: set `PLAUSIBLE_DOMAIN: 'coachgari.com'` in
+`config.js` and push — `site.js` then loads `https://plausible.io/js/script.js`,
+already allowed by the CSP (`script-src` + `connect-src`). No key, no secret.
+No other tracker is, or should be, added. Conversion attribution stays the
+first-touch UTM data captured with each enquiry.
 
 This file is served to every visitor. It must never contain a key, a token or
 a service role. All secrets live in the Supabase Edge Function environment.
@@ -139,10 +149,19 @@ Three project settings only the owner can change (the MCP token gets `403`):
 The CSP in `vercel.json` only allows `connect-src` to the Supabase project host.
 If the project ref ever changes, update it there too.
 
-## CG-001 technical gate — how to run it
+## CG-001 gates
 
-The gate is a **real submission from the frontend**. Run it first on the Vercel
-preview, then again on `coachgari.com`.
+Three separate gates — only the last depends on the production domain.
+
+| Gate | Proves | Status |
+|---|---|---|
+| `GATE-HTTP-001` | frontend → Edge Function → validation → `contacts`; idempotent; attribution kept | API steps passed 2026-09-03 (7/7); browser double-click step: run below |
+| `GATE-EMAIL-001` | Resend configured, sender validated, real mail to `letsgo@`, `notified_at` set | owner config (`RESEND_API_KEY`) |
+| `GATE-DOMAIN-001` | all of the above on `coachgari.com`, CORS tightened, Plausible verified | owner config (DNS, Vercel domain, Migadu, SPF/DKIM) |
+
+### GATE-HTTP-001 — how to run it
+
+No domain needed: run it on `https://coachgariv0.vercel.app`.
 
 **A. API checks (reproducible, ~5 s)**
 

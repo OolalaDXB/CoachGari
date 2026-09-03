@@ -224,6 +224,20 @@ function newId(){
   });
 })();
 
+/* ---- 6b. Plausible — aggregate website analytics ----------- */
+/* Loads the official Plausible script only when
+   CONFIG.PLAUSIBLE_DOMAIN is set. Cookie-free, no personal data.
+   The first-touch attribution above remains the conversion source;
+   Plausible is for aggregate traffic only.                       */
+(function plausible(){
+  if (!CONFIG.PLAUSIBLE_DOMAIN) return;
+  var s = document.createElement('script');
+  s.defer = true;
+  s.setAttribute('data-domain', CONFIG.PLAUSIBLE_DOMAIN);
+  s.src = 'https://plausible.io/js/script.js';
+  document.head.appendChild(s);
+})();
+
 /* ---- 6. config-driven text / href ------------------------- */
 /* <span data-config="COMMISSION_RATE">__ %</span> -> replaced when set.
    <a data-config-href="STUDIO_URL" href="#">    -> href set when present. */

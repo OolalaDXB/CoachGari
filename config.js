@@ -25,4 +25,9 @@ export const CONFIG = {
 
   // Replaces the "__ %" in the proposal.
   COMMISSION_RATE: '10%',
+
+  // Plausible (aggregate, cookie-free analytics). Empty = script not loaded.
+  // Activate by setting the site domain once the Plausible property exists,
+  // e.g. 'coachgari.com'. No key needed — Plausible identifies the site by domain.
+  PLAUSIBLE_DOMAIN: '',
 };
