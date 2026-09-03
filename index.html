@@ -181,19 +181,19 @@
         <div class="when">Dates to come</div>
         <div class="what">Harare — outdoor group session
           <span>A morning session in the park, all levels, bring water and a friend.</span></div>
-        <a class="btn btn-soft btn-sm" href="#enquiry">Join the list →</a>
+        <a class="btn btn-soft btn-sm" href="#enquiry" data-travel="join_waitlist">Join the list →</a>
       </li>
       <li>
         <div class="when">Dates to come</div>
         <div class="what">Southern Africa — weekend camp
           <span>Two days of training, food and conversation. Numbers kept small on purpose.</span></div>
-        <a class="btn btn-soft btn-sm" href="#enquiry">Join the list →</a>
+        <a class="btn btn-soft btn-sm" href="#enquiry" data-travel="join_waitlist">Join the list →</a>
       </li>
       <li>
         <div class="when">On request</div>
         <div class="what">Somewhere else entirely
           <span>If there are enough of you in one city, tell me. I travel more than I plan to.</span></div>
-        <a class="btn btn-soft btn-sm" href="#enquiry">Tell me where →</a>
+        <a class="btn btn-soft btn-sm" href="#enquiry" data-travel="tell_me_where">Tell me where →</a>
       </li>
     </ul>
   </div>
@@ -338,9 +338,9 @@
       <div>
         <h4>Next live session</h4>
         <p style="font-size:15.5px;color:var(--grey-text);font-weight:500;margin:0;">Drop your email and I'll tell you when the next group session or live event opens.</p>
-        <form class="f-news" onsubmit="return false;">
-          <input type="email" placeholder="Enter your email" aria-label="Email">
-          <button type="submit" aria-label="Subscribe">↗</button>
+        <form class="f-news" data-travel-form="footer_waitlist">
+          <input type="email" placeholder="Enter your email" aria-label="Email" required>
+          <button type="submit" aria-label="Join the list">↗</button>
         </form>
       </div>
     </div>

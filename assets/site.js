@@ -180,6 +180,65 @@ function matchCountry(value){
   return starts.length === 1 ? starts[0] : null;   // a unique prefix ("zimb") is accepted and normalised
 }
 
+/* ---- travel / waitlist CTAs -------------------------------- */
+/* "Join the list", "Tell me where" and the footer email box all
+   lead to the ONE enquiry form: scroll there, preselect the
+   "Live event near me" interest, switch the location prompt to
+   "Where should Gari come next?", focus the city field. The
+   source is kept in the submission (page ?entry_point=…) without
+   touching first-touch UTM attribution. Reached organically, the
+   form is untouched.                                            */
+(function travel(){
+  var form = document.querySelector('form[data-enquiry]');
+  if (!form) return;
+  var city = form.querySelector('#f-city');
+  var country = form.querySelector('#f-country');
+  var contact = form.querySelector('[name="contact"]');
+  var interest = form.querySelector('select[name="interest"]');
+  var cityLabel = form.querySelector('label[for="f-city"]');
+  var defaults = {
+    label: cityLabel ? cityLabel.textContent : '',
+    cityPh: city ? city.placeholder : '',
+    countryPh: country ? country.placeholder : '',
+    interest: interest ? interest.value : ''
+  };
+
+  function enter(source, email){
+    form.dataset.entryPoint = source;
+    if (interest) {
+      for (var i = 0; i < interest.options.length; i++) {
+        if (/live event near me/i.test(interest.options[i].text)) { interest.selectedIndex = i; break; }
+      }
+    }
+    if (cityLabel) cityLabel.textContent = 'Where should Gari come next?';
+    if (city) city.placeholder = 'City';
+    if (country) country.placeholder = 'Country';
+    if (email && contact && !contact.value) contact.value = email;
+    var target = document.getElementById('enquiry') || form;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (city) setTimeout(function(){ city.focus({ preventScroll: true }); }, 450);
+  }
+
+  form.resetTravel = function(){
+    delete form.dataset.entryPoint;
+    if (cityLabel) cityLabel.textContent = defaults.label;
+    if (city) city.placeholder = defaults.cityPh;
+    if (country) country.placeholder = defaults.countryPh;
+  };
+
+  document.querySelectorAll('[data-travel]').forEach(function(a){
+    a.addEventListener('click', function(e){ e.preventDefault(); enter(a.getAttribute('data-travel')); });
+  });
+  document.querySelectorAll('form[data-travel-form]').forEach(function(f){
+    f.addEventListener('submit', function(e){
+      e.preventDefault();
+      var input = f.querySelector('input');
+      enter(f.getAttribute('data-travel-form'), input ? input.value.trim() : '');
+      f.reset();
+    });
+  });
+})();
+
 (function enquiry(){
   var form = document.querySelector('form[data-enquiry]');
   if (!form) return;
@@ -225,9 +284,11 @@ function matchCountry(value){
       interest: fields.interest || '',
       message: fields.detail || fields.message || '',
       website: fields.website || '',          // honeypot — humans never see it
-      page: window.location.pathname,
+      page: window.location.pathname + (form.dataset.entryPoint ? '?entry_point=' + encodeURIComponent(form.dataset.entryPoint) : ''),
       attribution: attribution(),
     };
+    var travelEntry = form.dataset.entryPoint || '';
+    if (travelEntry) payload.attribution.entry_point = travelEntry;
 
     inFlight = true;
     if (btn) btn.disabled = true;
@@ -243,7 +304,10 @@ function matchCountry(value){
       if (res.status === 200 && res.body && res.body.ok) {
         form.reset();
         submissionId = newId(); // next enquiry gets a fresh id
-        say('Thanks — that’s with Coach Gari. You’ll hear back soon.', 'ok');
+        say(travelEntry
+          ? 'You’re on the list. If enough people ask for your city, Gari may bring a session there.'
+          : 'Thanks — that’s with Coach Gari. You’ll hear back soon.', 'ok');
+        if (travelEntry && form.resetTravel) form.resetTravel();
         return;
       }
       if (res.status === 400 && res.body && res.body.error === 'validation') {
