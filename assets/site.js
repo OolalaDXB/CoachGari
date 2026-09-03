@@ -1,5 +1,5 @@
 /* =============================================================
-   Coach Gari — shared behaviour for all four pages.
+   Coach Gari — shared behaviour for every page.
 
    Reads everything it needs from /config.js, the single source
    of truth. Loaded as an ES module:
@@ -9,8 +9,9 @@
      1. Reveal-on-scroll (IntersectionObserver)
      2. SHOWCASE <-> SHOP toggle (CONFIG.COMMERCE)
      3. WhatsApp links built from CONFIG.WHATSAPP + button context
-     4. Enquiry form -> CONFIG.FORM_ENDPOINT
-     5. Config-driven text / href injection (commission, studio URL)
+     4. First-touch attribution (UTM, referrer, landing page)
+     5. Enquiry form -> CONFIG.FORM_ENDPOINT (idempotent, honeypot)
+     6. Config-driven text / href injection (commission, links)
 
    Where a value in CONFIG is still empty, the page keeps its
    existing placeholder markup untouched — nothing breaks, it
@@ -96,12 +97,67 @@ import { CONFIG } from '/config.js';
   });
 })();
 
-/* ---- 4. enquiry form -------------------------------------- */
+/* ---- 4. first-touch attribution --------------------------- */
+/* Remembers where the visitor came from the first time they
+   land, so the enquiry keeps its origin even after browsing.
+   Stored in localStorage only; nothing leaves the browser until
+   the visitor submits the form. Not an analytics system.        */
+var FT_KEY = 'cg_first_touch';
+var UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+
+function readParams(){
+  var out = {};
+  try {
+    var q = new URLSearchParams(window.location.search);
+    UTM_KEYS.forEach(function(k){ var v = q.get(k); if (v) out[k] = v.slice(0, 200); });
+  } catch (e) {}
+  return out;
+}
+
+function firstTouch(){
+  var stored = null;
+  try { stored = JSON.parse(localStorage.getItem(FT_KEY) || 'null'); } catch (e) {}
+  if (stored && stored.first_visit_at) return stored;
+
+  var ft = readParams();
+  ft.referrer = (document.referrer || '').slice(0, 1000);
+  ft.landing_page = (window.location.pathname + window.location.search).slice(0, 1000);
+  ft.first_visit_at = new Date().toISOString();
+  try { localStorage.setItem(FT_KEY, JSON.stringify(ft)); } catch (e) {}
+  return ft;
+}
+
+var FIRST_TOUCH = firstTouch();
+
+function attribution(){
+  // First touch wins; UTMs present on the current URL fill any gaps.
+  var now = readParams();
+  var out = {};
+  UTM_KEYS.forEach(function(k){ out[k] = FIRST_TOUCH[k] || now[k] || null; });
+  out.referrer = FIRST_TOUCH.referrer || null;
+  out.landing_page = FIRST_TOUCH.landing_page || null;
+  out.first_visit_at = FIRST_TOUCH.first_visit_at || null;
+  return out;
+}
+
+/* ---- 5. enquiry form -------------------------------------- */
+function newId(){
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c){
+    var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
 (function enquiry(){
   var form = document.querySelector('form[data-enquiry]');
   if (!form) return;
 
   var status = form.querySelector('.form-status');
+  var btn = form.querySelector('button[type="submit"]');
+  var pageLoadedAt = Date.now();
+  var submissionId = newId(); // one id per form fill → double click / retry can't create two rows
+  var inFlight = false;
+
   function say(msg, cls){
     if (!status) return;
     status.textContent = msg;
@@ -110,17 +166,29 @@ import { CONFIG } from '/config.js';
 
   form.addEventListener('submit', function(e){
     e.preventDefault();
+    if (inFlight) return;
 
     if (!CONFIG.FORM_ENDPOINT) {
-      say('The form isn’t connected yet. Reach Gari on WhatsApp in the meantime.', 'err');
+      say('The form isn’t connected yet. Reach Coach Gari on WhatsApp in the meantime.', 'err');
       return;
     }
 
-    var btn = form.querySelector('button[type="submit"]');
-    var payload = Object.fromEntries(new FormData(form).entries());
-    payload.page = document.title;
+    var fields = Object.fromEntries(new FormData(form).entries());
+    var payload = {
+      submission_id: submissionId,
+      ts: pageLoadedAt,
+      name: fields.name || '',
+      contact: fields.contact || fields.email || '',
+      location: fields.location || '',
+      interest: fields.interest || '',
+      message: fields.detail || fields.message || '',
+      website: fields.website || '',          // honeypot — humans never see it
+      page: window.location.pathname,
+      attribution: attribution(),
+    };
 
-    if (btn) { btn.disabled = true; }
+    inFlight = true;
+    if (btn) btn.disabled = true;
     say('Sending…');
 
     fetch(CONFIG.FORM_ENDPOINT, {
@@ -128,19 +196,35 @@ import { CONFIG } from '/config.js';
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-    .then(function(r){ if (!r.ok) throw new Error(r.status); return r; })
-    .then(function(){
-      form.reset();
-      say('Thanks — that’s with Gari. You’ll hear back soon.', 'ok');
+    .then(function(r){ return r.json().then(function(j){ return { status: r.status, body: j }; }); })
+    .then(function(res){
+      if (res.status === 200 && res.body && res.body.ok) {
+        form.reset();
+        submissionId = newId(); // next enquiry gets a fresh id
+        say('Thanks — that’s with Coach Gari. You’ll hear back soon.', 'ok');
+        return;
+      }
+      if (res.status === 400 && res.body && res.body.error === 'validation') {
+        var f = res.body.fields || [];
+        say(f.indexOf('contact') !== -1
+          ? 'Add an email or WhatsApp number so Coach Gari can reply.'
+          : 'Add your name so Coach Gari knows who’s asking.', 'err');
+        return;
+      }
+      if (res.status === 429) {
+        say('Too many messages in a row — give it a few minutes, or message on WhatsApp.', 'err');
+        return;
+      }
+      throw new Error('status ' + res.status);
     })
     .catch(function(){
       say('Something went wrong sending that. Try again, or message on WhatsApp.', 'err');
     })
-    .finally(function(){ if (btn) { btn.disabled = false; } });
+    .finally(function(){ inFlight = false; if (btn) btn.disabled = false; });
   });
 })();
 
-/* ---- 5. config-driven text / href ------------------------- */
+/* ---- 6. config-driven text / href ------------------------- */
 /* <span data-config="COMMISSION_RATE">__ %</span> -> replaced when set.
    <a data-config-href="STUDIO_URL" href="#">    -> href set when present. */
 (function inject(){

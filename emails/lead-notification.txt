@@ -1,0 +1,15 @@
+Subject: New enquiry — {{interest}} — {{name}}
+From: Coach Gari <yoursession@coachgari.com>
+To: letsgo@coachgari.com
+Reply-To: {{contact_if_email}}
+
+Name: {{name}}
+Contact: {{contact}}
+Where: {{city}}, {{country}}
+Interest: {{interest}}
+
+{{message}}
+
+Attribution: {{attribution}}
+Submitted from: {{page}} at {{created_at}}
+Record: {{id}}
