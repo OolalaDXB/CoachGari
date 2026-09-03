@@ -13,7 +13,6 @@
 
    Logs never contain the message, the contact or the raw IP.
    ============================================================= */
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 /* ---- configuration (not secrets) -------------------------- */
