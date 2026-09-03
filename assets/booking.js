@@ -235,6 +235,16 @@ function init(){
           return;
         }
         if (b.status === 'cancelled' || b.status === 'expired') { line.textContent = 'This booking is ' + b.status + '. Pick a time again if you still want it.'; return; }
+        // Came back without paying (cancel_url): the hold is still live — offer payment again.
+        if (q.get('paid') !== '1' && (b.status === 'hold' || b.status === 'pending_payment')) {
+          stepDone.innerHTML = '';
+          stepDone.appendChild(el('h4', { text: 'Your time is still held — ' + b.reference }));
+          stepDone.appendChild(el('p', { class: 'bk-note', text: 'Payment wasn’t completed. Your time stays held until ' + fmtTime(b.hold_expires_at, tz) + '.' }));
+          var pay = el('button', { type: 'button', class: 'btn btn-accent', text: 'Continue to payment →' });
+          pay.addEventListener('click', function(){ startCheckout(b, pay); });
+          stepDone.appendChild(pay);
+          return;
+        }
         if (++tries < 40) setTimeout(tick, 3000);
         else line.textContent = 'Still confirming. Your reference is ' + b.reference + ' — you’ll get an email as soon as it’s done.';
       }).catch(function(){ if (++tries < 40) setTimeout(tick, 4000); });

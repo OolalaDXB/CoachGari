@@ -23,6 +23,96 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-003 — Orders, Stripe TEST mode, partner ledger
+
+**Status: built; database suite 24/24 (rollback harness); `checkout` and
+`stripe-webhook` Edge Functions deployed; Stripe secrets are an owner action
+(test keys only). No live payment is possible by construction.**
+
+### Decisions
+
+- **Stripe TEST mode only, enforced in code.** `checkout` refuses any key that
+  is not `sk_test_…` (`live_mode_blocked`) and `stripe-webhook` refuses any
+  event with `livemode: true`. Switching to live requires a code change on top
+  of CHECK-LICENCE-001 — not just a secret.
+- **No Stripe Connect.** Stripe = Oolala's account. Gari's share is computed in
+  our ledger and paid by manual bank transfer, tracked in `partner_settlements`.
+- **Server-side Checkout, trusted amount.** The browser sends `{ref, token}`
+  only; price and currency come from the booking's price snapshot
+  (`create_order_for_booking`). Any amount field in the request is ignored.
+  One live order per booking; a still-valid Checkout Session is reused.
+- **The webhook is the source of truth; the success page is not.** The return
+  URL only makes the page poll `state`; a booking becomes `confirmed` solely
+  when `process_stripe_event` records a verified `checkout.session.completed`
+  whose `amount_total`/currency equal the order. A mismatch is logged as
+  `ignored` and never confirms.
+- **Idempotent, transactional processing.** `webhook_events.event_id` is
+  unique; payments are unique per `payment_intent`; refunds per refund id;
+  disputes per dispute id. Re-deliveries (same or new event id) never create a
+  second payment, earning or email.
+- **Hold ↔ checkout.** Creating a session moves the booking to
+  `pending_payment` and aligns the hold with the session expiry (30 min,
+  Stripe's minimum). `checkout.session.expired` or the minute sweep releases
+  the slot and cancels the orphan order.
+- **Ledger (minor units):** `net_collected = gross − stripe_fee − refunds −
+  chargebacks(lost) − tax`; `oolala_commission = max(0, round(net × 10 %))`;
+  `gari_payable = net − commission`. The Stripe fee is read from the balance
+  transaction (`fee_known`); the fee is never refunded, so a full refund leaves
+  a small negative payable that the next settlement nets off. Only a *lost*
+  dispute hits the ledger; open disputes are visible but neutral. CHECK
+  constraints enforce the formulas in the database.
+- **Settlements**: `create_settlement(partner, from, to, currency)` freezes the
+  open earnings of the period (`ready`), `mark_settlement_paid(ref, bank_ref)`
+  → `paid`, `mark_settlement_reconciled` → `reconciled`. A settled earning that
+  changes later (refund after payout) is flagged with `adjusted_at` and its
+  delta is carried into the next settlement rather than rewriting history.
+- **Emails are queued, not implied.** `email_events` rows
+  (`booking_confirmed` to the customer if the contact is an email,
+  `payment_received` to letsgo@) are written inside the same transaction and
+  sent by the webhook only if `RESEND_API_KEY` is set; otherwise `skipped`.
+- **Security**: RLS on every new table, zero grants to anon/authenticated,
+  RPCs `SECURITY DEFINER` with pinned `search_path`, executable by the service
+  role only; PII-free logs; signature verification with 5-minute tolerance and
+  timing-safe compare.
+
+### Tests
+
+| Gate item | Where |
+|---|---|
+| order from a hold, trusted amount, idempotent | `supabase/tests/cg003_payments.sql` §1 |
+| checkout attach → pending_payment, hold extended, slot still taken | §2 |
+| paid → one payment, order paid, booking confirmed, emails queued | §3 |
+| ledger 4500 / fee 161 → net 4339, commission 434, payable 3905 | §3 |
+| duplicate event and re-delivery under a new id | §4 |
+| amount mismatch never confirms | §5 |
+| expired checkout and time-based expiry release capacity | §6 |
+| partial refund, `refund.updated` not double-counted | §7 |
+| full refund → commission 0, payable −161 | §8 |
+| dispute open neutral, dispute lost hits ledger | §9 |
+| settlement aggregate (2 items, gross 9000, fee 322, payable −322), paid, reconciled, post-settlement adjustment flag | §10 |
+| unknown order / unhandled type ignored | §11 |
+| `state` exposes the order for polling | §12 |
+| forged amount ignored, real Stripe round trip | `scripts/test-checkout.mjs` (laptop, after secrets) |
+
+Result `CG003_TESTS ok=24 fail=0` on 2026-09-03, rolled back, no probe
+migration recorded. Security advisor: only the intentional "RLS enabled, no
+policy" notices (service role only until CG-002.5).
+
+### Owner actions (Stripe, test mode)
+
+1. Stripe dashboard → **Test mode** → Developers → API keys: copy the
+   `sk_test_…` secret key.
+2. Developers → Webhooks → add endpoint
+   `https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/stripe-webhook`,
+   events `checkout.session.completed`, `checkout.session.expired`,
+   `refund.created`, `refund.updated`, `charge.dispute.created`,
+   `charge.dispute.updated`, `charge.dispute.closed`; copy the `whsec_…`.
+3. `supabase secrets set STRIPE_SECRET_KEY=sk_test_… STRIPE_WEBHOOK_SECRET=whsec_…`
+   (and `SITE_URL=https://coachgari.com` once the domain is live).
+4. `node scripts/test-checkout.mjs --wait`, pay with 4242 4242 4242 4242.
+
+---
+
 ## CG-002 — Internal booking engine
 
 **Status: built; database suite 28/28 (rollback harness); public API deployed;

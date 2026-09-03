@@ -136,6 +136,54 @@ psql "$DATABASE_URL" -f supabase/tests/cg002_booking.sql
 node scripts/test-booking.mjs
 ```
 
+## Payments (CG-003) — Stripe TEST mode only
+
+Server-side Stripe Checkout, verified webhook, financial ledger. Live mode is
+blocked in code (CHECK-LICENCE-001): `checkout` refuses non-`sk_test_` keys,
+`stripe-webhook` refuses `livemode: true` events.
+
+- **Tables**: `orders`, `payments`, `refunds`, `chargebacks`, `webhook_events`,
+  `partner_earnings`, `partner_settlements`, `partner_settlement_items`,
+  `email_events` (`supabase/migrations/20260904_cg003_payments.sql`).
+- **RPCs** (service role only): `create_order_for_booking(ref, token)`,
+  `attach_checkout(...)`, `process_stripe_event(jsonb)` (idempotent),
+  `recompute_earning(order_id)`, `create_settlement(partner, from, to, currency)`,
+  `mark_settlement_paid(ref, bank_ref)`, `mark_settlement_reconciled(ref)`.
+- **`supabase/functions/checkout`** — `POST {ref, token}` → `{url}`. Amount and
+  currency come from the database; request amounts are ignored. Returns 503
+  `payments_not_configured` until the test key is set.
+- **`supabase/functions/stripe-webhook`** — verifies `stripe-signature`,
+  enriches the fee from the balance transaction, calls `process_stripe_event`,
+  sends queued emails through Resend when configured. Returns 500 on a
+  processing error so Stripe retries (processing is idempotent).
+- **Frontend** (`assets/booking.js`): after the hold, "Pay" calls `checkout`
+  and redirects; back on `/?booking=REF&t=TOKEN&paid=1#book` the page polls
+  `state` until the webhook confirms. The success page is never authoritative.
+- **Ledger** (minor units): net = gross − Stripe fee − refunds − lost
+  chargebacks − tax; Oolala commission = max(0, round(net × 10 %)); Gari
+  payable = net − commission. Settlements are manual bank transfers recorded
+  with `mark_settlement_paid`.
+
+Secrets (Supabase, never committed): `STRIPE_SECRET_KEY` (`sk_test_…`),
+`STRIPE_WEBHOOK_SECRET` (`whsec_…`), optional `SITE_URL` (default
+`https://coachgariv0.vercel.app`). Webhook endpoint:
+`https://<project-ref>.supabase.co/functions/v1/stripe-webhook`, events
+`checkout.session.completed`, `checkout.session.expired`, `refund.created`,
+`refund.updated`, `charge.dispute.created`, `charge.dispute.updated`,
+`charge.dispute.closed`.
+
+### Payment tests
+
+```
+psql "$DATABASE_URL" -f supabase/tests/cg003_payments.sql
+node scripts/test-checkout.mjs --wait
+```
+
+The database suite prints `CG003_TESTS ok=24 fail=0` and always rolls back.
+The laptop script creates a hold, proves a forged amount is ignored, prints
+the Checkout URL (pay with `4242 4242 4242 4242`) and waits for the webhook to
+confirm the booking.
+
 ## Supabase set-up (no secrets in this repo)
 
 Project: `acrjrlgeeyseyolmofuq` (eu-central-1).
