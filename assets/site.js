@@ -258,6 +258,58 @@ var CATEGORIES = {
   });
 })();
 
+/* ---- attachments (photos / videos) ------------------------- */
+/* Up to 3 files, 50 MB in total, images and videos only. Files go
+   AFTER the enquiry is stored: the browser asks the upload function
+   for a signed URL (proving ownership with its own submission_id),
+   PUTs the file to the private bucket, then confirms. The lead is
+   never lost because an upload failed.                            */
+var MEDIA_MAX_FILES = 3, MEDIA_MAX_TOTAL = 50 * 1024 * 1024;
+function fmtBytes(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
+
+function mediaSetup(form){
+  var input = form.querySelector('[data-media]');
+  var list = form.querySelector('[data-media-list]');
+  if (!input) return null;
+  if (!CONFIG.UPLOAD_ENDPOINT) { var wrap = input.closest('.field'); if (wrap) wrap.hidden = true; return null; }
+  function render(){
+    if (!list) return;
+    var files = Array.prototype.slice.call(input.files || []);
+    list.innerHTML = '';
+    list.hidden = !files.length;
+    var total = 0, problems = [];
+    files.forEach(function(f){
+      total += f.size;
+      var ok = /^(image|video)\//.test(f.type);
+      if (!ok) problems.push(f.name + ': only photos and videos');
+      var li = document.createElement('li'); if (!ok) li.className = 'err';
+      li.innerHTML = '<b></b><span></span>';
+      li.querySelector('b').textContent = f.name; li.querySelector('span').textContent = fmtBytes(f.size);
+      list.appendChild(li);
+    });
+    if (files.length > MEDIA_MAX_FILES) problems.push('Three files maximum.');
+    if (total > MEDIA_MAX_TOTAL) problems.push('50 MB in total maximum (you have ' + fmtBytes(total) + ').');
+    input.setCustomValidity(problems.length ? problems[0] : '');
+    if (problems.length) { var li = document.createElement('li'); li.className = 'err'; li.textContent = problems.join(' '); list.appendChild(li); }
+  }
+  input.addEventListener('change', render);
+  return { input: input, files: function(){ return Array.prototype.slice.call(input.files || []); }, clear: function(){ if (list) { list.innerHTML = ''; list.hidden = true; } } };
+}
+
+function uploadOne(submissionId, file){
+  var H = { 'Content-Type': 'application/json' };
+  return fetch(CONFIG.UPLOAD_ENDPOINT, { method: 'POST', headers: H, body: JSON.stringify({ action: 'sign', submission_id: submissionId, filename: file.name, content_type: file.type, size: file.size }) })
+    .then(function(r){ return r.json().then(function(j){ if (!r.ok || !j.ok) throw new Error(j.message || j.error || 'sign failed'); return j; }); })
+    .then(function(sig){
+      return fetch(sig.url, { method: 'PUT', headers: { 'Content-Type': file.type, 'x-upsert': 'false' }, body: file })
+        .then(function(r){ if (!r.ok) throw new Error('upload failed ' + r.status); return sig; });
+    })
+    .then(function(sig){
+      return fetch(CONFIG.UPLOAD_ENDPOINT, { method: 'POST', headers: H, body: JSON.stringify({ action: 'confirm', submission_id: submissionId, path: sig.path }) })
+        .then(function(r){ return r.json(); }).then(function(j){ if (!j.ok || j.status !== 'uploaded') throw new Error('confirm failed'); return true; });
+    });
+}
+
 (function enquiry(){
   var form = document.querySelector('form[data-enquiry]');
   if (!form) return;
@@ -267,6 +319,7 @@ var CATEGORIES = {
   var pageLoadedAt = Date.now();
   var submissionId = newId(); // one id per form fill → double click / retry can't create two rows
   var inFlight = false;
+  var media = mediaSetup(form);
 
   function say(msg, cls){
     if (!status) return;
@@ -283,7 +336,9 @@ var CATEGORIES = {
       return;
     }
 
+    if (media && media.input && !media.input.checkValidity()) { say(media.input.validationMessage, 'err'); media.input.focus(); return; }
     var fields = Object.fromEntries(new FormData(form).entries());
+    delete fields.media;
     var countryEl = form.querySelector('[data-country-input]');
     if (countryEl && COUNTRY_NAMES.length) {
       var matched = matchCountry(countryEl.value);
@@ -321,13 +376,26 @@ var CATEGORIES = {
     .then(function(r){ return r.json().then(function(j){ return { status: r.status, body: j }; }); })
     .then(function(res){
       if (res.status === 200 && res.body && res.body.ok) {
-        form.reset();
-        submissionId = newId(); // next enquiry gets a fresh id
-        say(travelEntry
+        var files = media ? media.files() : [];
+        var sent = submissionId;
+        var done = travelEntry
           ? 'You’re on the list. If enough people ask for your city, Coach Gari may bring a session there.'
-          : 'Thanks — that’s with Coach Gari. You’ll hear back soon.', 'ok');
-        if (travelEntry && form.resetTravel) form.resetTravel();
-        return;
+          : 'Thanks — that’s with Coach Gari. You’ll hear back soon.';
+        var finish = function(extra){
+          form.reset(); if (media) media.clear();
+          submissionId = newId(); // next enquiry gets a fresh id
+          say(done + (extra || ''), 'ok');
+          if (travelEntry && form.resetTravel) form.resetTravel();
+        };
+        if (!files.length || !res.body.id) { finish(''); return; }
+        var okCount = 0, i = 0;
+        var next = function(){
+          if (i >= files.length) { finish(okCount === files.length ? ' ' + okCount + ' file' + (okCount > 1 ? 's' : '') + ' attached.' : ' ' + okCount + ' of ' + files.length + ' files attached — you can send the rest on WhatsApp.'); return; }
+          var f = files[i++];
+          say('Sending file ' + i + ' of ' + files.length + '…');
+          return uploadOne(sent, f).then(function(){ okCount++; }).catch(function(){}).then(next);
+        };
+        return next();
       }
       if (res.status === 400 && res.body && res.body.error === 'validation') {
         var f = res.body.fields || [];

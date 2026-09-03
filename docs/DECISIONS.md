@@ -23,9 +23,38 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-004 — Enquiry attachments (photos / videos)
+
+**Status: built and deployed; covered by the permissions suite.**
+
+### Decisions
+
+- **Every category, 3 files, 50 MB in total, images and videos only.** The
+  same limits live in the browser, in `reserve_contact_media` (with an
+  advisory lock per enquiry) and on the bucket itself.
+- **Lead first, files second.** The enquiry is stored by `contact` exactly as
+  before; uploads follow one by one and a failed upload never loses the lead.
+  The success message says how many files were attached.
+- **No key in the browser.** The `upload` Edge Function issues signed upload
+  URLs for the private bucket `enquiry-media`; the browser proves ownership
+  with the `submission_id` it generated itself, within 30 minutes of the
+  enquiry. `confirm` checks the object exists before marking the row
+  `uploaded`, and removes stray objects.
+- **People belong to Gari.** Only `coach:operations` can read
+  `contact_media` rows and the objects (policy on `storage.objects`); the
+  Leads tab opens each file with a short-lived signed URL. Finance,
+  analytics and anon are tested to see nothing.
+- **Off switch**: `UPLOAD_ENDPOINT: ''` hides the field without touching
+  the backend.
+- Not done on purpose: virus scanning, transcoding, thumbnails, attachments
+  on the lead email (it is sent before the files arrive; the back-office is
+  the place to view them).
+
+---
+
 ## CG-002.5 — Back-office, permissions, RLS
 
-**Status: built; database suite 93/93 (rollback harness, persona switching);
+**Status: built; database suite 113/113 (rollback harness, persona switching);
 `/admin` (Gari) and `/finance` (Oolala) deployed (noindex). Inviting the first
 auth users, granting their permissions and adding the redirect URLs in
 Supabase Auth are owner actions.**
@@ -81,7 +110,7 @@ Supabase Auth are owner actions.**
 
 ### Tests
 
-`supabase/tests/cg0025_permissions.sql` — `CG0025_TESTS ok=93 fail=0` on
+`supabase/tests/cg0025_permissions.sql` — `CG0025_TESTS ok=113 fail=0` on
 2026-09-03, rolled back. Personas: anon (10 refusals), stranger and inactive
 user (11 each), coach (35: intended reads and edits, refusals on orders,
 payments, refunds, chargebacks, settlements, settlement items, webhook log,

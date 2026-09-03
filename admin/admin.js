@@ -120,6 +120,10 @@ async function leads() {
   let q = sb.from('contacts').select(CONTACT_COLS).order('created_at', { ascending: false }).limit(200);
   if (status) q = q.eq('status', status);
   const { data, error } = await q; if (error) throw error;
+  const ids = data.map((c) => c.id);
+  const { data: mediaRows } = ids.length ? await sb.from('contact_media').select('id,contact_id,original_name,content_type,size_bytes,status,storage_path').in('contact_id', ids).eq('status', 'uploaded') : { data: [] };
+  const mediaBy = {}; for (const m of mediaRows || []) (mediaBy[m.contact_id] ||= []).push(m);
+  const mb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
   const opts = ['new', 'contacted', 'qualified', 'closed', 'spam'];
   view.innerHTML = `
     <div class="ad-head"><div><h1>Leads</h1><p class="ad-muted">Enquiries from the website form. Only you see these.</p></div>
@@ -129,11 +133,17 @@ async function leads() {
       <td><b>${esc(c.name)}</b><br><a href="${c.contact.includes('@') ? 'mailto:' + esc(c.contact) : 'https://wa.me/' + esc(c.contact.replace(/\D/g, ''))}">${esc(c.contact)}</a></td>
       <td>${esc(c.location_raw || [c.city, c.country].filter(Boolean).join(', ') || '—')}</td>
       <td>${esc(c.interest || '—')}</td>
-      <td class="msg">${esc(c.message || '')}</td>
+      <td class="msg">${esc(c.message || '')}${(mediaBy[c.id] || []).map((m) => `<div><a href="#" data-media-path="${esc(m.storage_path)}">${m.content_type.startsWith('video/') ? '🎬' : '🖼'} ${esc(m.original_name)}</a> <span class="ad-muted">${mb(m.size_bytes)}</span></div>`).join('')}</td>
       <td class="ad-muted" style="font-size:12px">${esc([c.utm_source, c.utm_medium, c.utm_campaign].filter(Boolean).join(' / ') || (c.referrer ? new URL(c.referrer).hostname : 'direct'))}<br>${esc(c.page || '')}</td>
       <td><select data-lead="${c.id}">${opts.map((o) => `<option ${o === c.status ? 'selected' : ''}>${o}</option>`).join('')}</select></td>
     </tr>`), 'No leads yet.')}</div>`;
   $('#lead-status').onchange = (e) => { view.dataset.leadStatus = e.target.value; leads().catch(fail); };
+  view.querySelectorAll('[data-media-path]').forEach((a) => a.onclick = async (e) => {
+    e.preventDefault();
+    const { data, error } = await sb.storage.from('enquiry-media').createSignedUrl(a.dataset.mediaPath, 600);
+    if (error || !data?.signedUrl) return fail(error || new Error('Could not open the file'));
+    window.open(data.signedUrl, '_blank', 'noopener');
+  });
   view.querySelectorAll('[data-lead]').forEach((s) => s.onchange = async () => {
     const { error } = await sb.from('contacts').update({ status: s.value }).eq('id', s.dataset.lead);
     if (error) return fail(error); toast('Lead updated');

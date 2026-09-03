@@ -8,6 +8,7 @@
 --   coach             → leads/bookings/calendar; no orders/payments/ledger; no manage_token
 --   finance           → orders/ledger (finance_orders() function) without customer identity; no leads/bookings
 --   analytics         → aggregates only
+--   attachments       → reserve/confirm limits (3 files, 50 MB, images/videos, 30-min window); only the coach reads rows and objects
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
@@ -44,6 +45,24 @@ begin
   if (select status from public.bookings where reference = 'CG-TEST01') = 'confirmed' then ok := ok + 1; else fail := fail + 1; log := log || ' [seed paid booking]'; end if;
   if public.mask_contact('+27000000') = '•••••••00' and public.mask_contact('payer@example.com') = 'p***@example.com' and public.mask_contact(null) is null then ok := ok + 1; else fail := fail + 1; log := log || ' [mask_contact]'; end if;
 
+  /* ---- 0a. enquiry attachments: limits and ownership (as postgres, service-role path) ---- */
+  select submission_id::text into q from public.contacts where contact = 'lead@example.com';
+  j := public.reserve_contact_media(q::uuid, 'swing.mp4', 'video/mp4', 30000000);
+  if j ->> 'path' like 'contacts/%/%.mp4' then ok := ok + 1; else fail := fail + 1; log := log || ' [reserve media]'; end if;
+  perform public.reserve_contact_media(q::uuid, 'front.jpg', 'image/jpeg', 10000000);
+  begin perform public.reserve_contact_media(q::uuid, 'big.mov', 'video/quicktime', 15000000); fail := fail + 1; log := log || ' [media total > 50MB]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  begin perform public.reserve_contact_media(q::uuid, 'doc.pdf', 'application/pdf', 1000); fail := fail + 1; log := log || ' [media pdf accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.reserve_contact_media(q::uuid, 'huge.mp4', 'video/mp4', 52428801); fail := fail + 1; log := log || ' [media > 50MB file]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  perform public.reserve_contact_media(q::uuid, 'side.png', 'image/png', 1000);
+  begin perform public.reserve_contact_media(q::uuid, 'fourth.png', 'image/png', 1000); fail := fail + 1; log := log || ' [media 4th file]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  begin perform public.reserve_contact_media('00000000-0000-4000-8000-00000000dead', 'x.png', 'image/png', 1000); fail := fail + 1; log := log || ' [media unknown enquiry]'; exception when no_data_found then ok := ok + 1; end;
+  s := public.confirm_contact_media(q::uuid, j ->> 'path', true);
+  if s ->> 'status' = 'uploaded' and (select status from public.contact_media where storage_path = j ->> 'path') = 'uploaded' then ok := ok + 1; else fail := fail + 1; log := log || ' [confirm media]'; end if;
+  update public.contacts set created_at = now() - interval '31 minutes' where submission_id = q::uuid;
+  begin perform public.reserve_contact_media(q::uuid, 'late.png', 'image/png', 10); fail := fail + 1; log := log || ' [media window closed]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  update public.contacts set created_at = now() where submission_id = q::uuid;
+  insert into storage.objects (bucket_id, name, metadata) values ('enquiry-media', j ->> 'path', '{"size": 30000000}'::jsonb);
+
   /* ---- 0. booking correctness is independent of pg_cron: an expired hold stops consuming capacity
           the moment it expires, without expire_holds() having run ---- */
   update public.availability_rules set active = false;
@@ -62,11 +81,12 @@ begin
   execute 'set local role anon';
   foreach q in array array['select count(*) from public.contacts', 'select count(*) from public.bookings', 'select count(*) from public.orders',
                            'select count(*) from public.partner_earnings', 'select count(*) from public.finance_orders()', 'select count(*) from public.availability_rules',
-                           'select count(*) from public.app_permissions', 'select public.my_permissions()', 'select public.analytics_summary()',
+                           'select count(*) from public.app_permissions', 'select count(*) from public.contact_media', 'select public.my_permissions()', 'select public.analytics_summary()',
                            'select public.ops_set_booking_status(''CG-TEST03'', ''cancelled'')'] loop
     begin execute q; fail := fail + 1; log := log || ' [anon allowed: ' || q || ']';
     exception when insufficient_privilege then ok := ok + 1; end;
   end loop;
+  select count(*) into n from storage.objects where bucket_id = 'enquiry-media'; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [anon reads media objects]'; end if;
   execute 'reset role';
 
   /* ---- 2. signed in without an app_users row, and an inactive user: nothing ---- */
@@ -78,6 +98,8 @@ begin
     select count(*) into n from public.orders;             if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s orders]', q); end if;
     begin perform public.finance_orders(); fail := fail + 1; log := log || format(' [%s finance_orders]', q); exception when insufficient_privilege then ok := ok + 1; end;
     select count(*) into n from public.availability_rules; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s rules]', q); end if;
+    select count(*) into n from public.contact_media;      if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s media]', q); end if;
+    select count(*) into n from storage.objects where bucket_id = 'enquiry-media'; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s media objects]', q); end if;
     if (public.my_permissions() -> 'permissions') = '[]'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s my_permissions]', q); end if;
     begin perform public.ops_set_booking_status('CG-TEST03', 'cancelled'); fail := fail + 1; log := log || format(' [%s ops rpc]', q); exception when insufficient_privilege then ok := ok + 1; end;
     begin perform public.finance_create_settlement(current_date - 1, current_date + 1); fail := fail + 1; log := log || format(' [%s finance rpc]', q); exception when insufficient_privilege then ok := ok + 1; end;
@@ -98,6 +120,9 @@ begin
   -- (the 'contacts' message column: a coach's intended read; finance and analytics are refused it below)
   select count(*) into n from public.contacts where message = 'private message body'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach reads leads]'; end if;
   select count(*) into n from public.bookings where customer_contact = 'payer@example.com'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach reads bookings]'; end if;
+  select count(*) into n from public.contact_media where status = 'uploaded'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach reads media rows]'; end if;
+  select count(*) into n from storage.objects where bucket_id = 'enquiry-media'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach reads media objects]'; end if;
+  begin perform public.reserve_contact_media('00000000-0000-4000-8000-00000000dead', 'x.png', 'image/png', 1); fail := fail + 1; log := log || ' [coach calls reserve]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin select count(*) into n from public.bookings where manage_token = 'secret-token'; fail := fail + 1; log := log || ' [coach manage_token readable]';
   exception when insufficient_privilege then ok := ok + 1; end;
   begin select count(*) into n from public.contacts where ip_hash is null; fail := fail + 1; log := log || ' [coach ip_hash readable]';
@@ -137,7 +162,7 @@ begin
   if j ->> 'status' = 'confirmed' then ok := ok + 1; else fail := fail + 1; log := log || ' [confirm unpriced hold]'; end if;
   j := public.ops_set_booking_status('CG-TEST03', 'cancelled', 'coach travelling');
   if j ->> 'status' = 'cancelled' and j ->> 'cancelled_by' = 'coach'
-     and (select count(*) from public.contacts) = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach cancel]'; end if;
+     and (select count(*) from public.contacts where contact = 'lead@example.com') = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach cancel]'; end if;
   begin perform public.ops_set_booking_status('CG-NOPE00', 'cancelled'); fail := fail + 1; log := log || ' [unknown ref]'; exception when no_data_found then ok := ok + 1; end;
   execute 'reset role';
   -- the cancel queued a customer email (prepared, not sent) and did not touch the paid order
@@ -152,6 +177,8 @@ begin
   exception when insufficient_privilege then ok := ok + 1; end;
   select count(*) into n from public.contacts;  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance sees leads]'; end if;
   select count(*) into n from public.bookings;  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance sees bookings]'; end if;
+  select count(*) into n from public.contact_media; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance sees media rows]'; end if;
+  select count(*) into n from storage.objects where bucket_id = 'enquiry-media'; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance sees media objects]'; end if;
   select count(*) into n from public.finance_orders() f where f.reference = oref and f.service_title = 'Perm test session' and f.gari_payable = 3905;
   if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance_orders row]'; end if;
   select (to_jsonb(f) ? 'customer_name') or (to_jsonb(f) ? 'customer_contact') or to_jsonb(f)::text like '%Paying Person%' or to_jsonb(f)::text like '%payer@example.com%' into b
@@ -188,6 +215,7 @@ begin
   select count(*) into n from public.contacts; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [analytics sees leads]'; end if;
   select count(*) into n from public.orders;   if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [analytics sees orders]'; end if;
   select count(*) into n from public.bookings; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [analytics sees bookings]'; end if;
+  select count(*) into n from storage.objects where bucket_id = 'enquiry-media'; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [analytics sees media objects]'; end if;
   execute 'reset role';
 
   raise exception 'CG0025_TESTS ok=% fail=% %', ok, fail, log;

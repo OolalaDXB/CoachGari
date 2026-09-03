@@ -156,6 +156,13 @@ p{margin:0 0 1em;}
 .field textarea{min-height:110px;resize:vertical;}
 .form-hint{margin:8px 0 0;font-size:13.5px;color:var(--grey-text);font-weight:500;line-height:1.5;}
 .form-hint[hidden]{display:none;}
+.field label .opt{font-weight:600;letter-spacing:0;text-transform:none;color:var(--grey-text);margin-left:6px;}
+.field input[type=file]{padding:12px 14px;font-size:14.5px;cursor:pointer;}
+.field input[type=file]::file-selector-button{font:inherit;font-weight:700;font-size:13.5px;padding:8px 14px;border-radius:999px;border:1.5px solid var(--line);background:#fff;color:var(--black);margin-right:12px;cursor:pointer;}
+.media-list{list-style:none;padding:0;margin:8px 0 0;font-size:13.5px;color:var(--grey-text);}
+.media-list li{display:flex;justify-content:space-between;gap:12px;padding:4px 0;}
+.media-list li b{font-weight:600;color:var(--black);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.media-list li.err{color:#B00020;}
 .field input:user-invalid{border-color:#B00020;}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
 .two.one{grid-template-columns:1fr;}

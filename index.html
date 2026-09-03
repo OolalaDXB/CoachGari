@@ -288,6 +288,12 @@
           <label for="f-more">Anything useful to know</label>
           <textarea id="f-more" name="detail" placeholder="What you train with, how much time is realistic, what you've tried before."></textarea>
         </div>
+        <div class="field">
+          <label for="f-media">Photos or videos <span class="opt">optional</span></label>
+          <input id="f-media" name="media" type="file" accept="image/*,video/*" multiple data-media>
+          <p class="form-hint">Up to 3 files, 50 MB in total. A short clip of you moving helps more than a long description.</p>
+          <ul class="media-list" data-media-list hidden></ul>
+        </div>
         <div class="hp" aria-hidden="true">
           <label for="f-website">Website</label>
           <input id="f-website" name="website" type="text" tabindex="-1" autocomplete="off">

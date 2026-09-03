@@ -29,8 +29,8 @@ listed in `docs/DECISIONS.md`.
 ├── admin/                        → back-office (noindex): magic-link sign-in, tabs by permission
 ├── config.js                     → single source of truth for public values (never secrets)
 ├── supabase/
-│   ├── migrations/               → contacts · booking engine · payments/ledger · permissions/RLS
-│   ├── functions/                → contact · booking · checkout · stripe-webhook (Edge Functions)
+│   ├── migrations/               → contacts · booking engine · payments/ledger · permissions/RLS · enquiry media
+│   ├── functions/                → contact · booking · checkout · stripe-webhook · upload (Edge Functions)
 │   └── tests/                    → rollback DB suites: cg002_booking · cg003_payments · cg0025_permissions
 ├── emails/                       → lead notification (live) + session templates (prepared, not wired)
 ├── scripts/
@@ -55,6 +55,7 @@ export const CONFIG = {
   FORM_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/contact',
   BOOKING_ENDPOINT: '…/functions/v1/booking',   // CG-002 public booking API
   CHECKOUT_ENDPOINT: '…/functions/v1/checkout', // CG-003 Stripe Checkout (test mode); '' = payment step off
+  UPLOAD_ENDPOINT: '…/functions/v1/upload',     // CG-004 signed uploads for enquiry attachments; '' = field hidden
   SUPABASE_URL: 'https://acrjrlgeeyseyolmofuq.supabase.co',   // back-office
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_…',               // public by design; RLS protects every row
   STUDIO_URL: 'https://thestudio.mt',    // "Studio MT" footer credit
@@ -111,6 +112,28 @@ Migadu mailboxes are set up separately when the domain is connected.
   Logs carry event names and record ids — never the message, contact or IP.
 - **Location**: the single "City and country" field is stored verbatim in
   `location_raw` and split on the last comma into `city` / `country`.
+
+## Enquiry attachments (CG-004)
+
+Every category of the enquiry form accepts up to **3 photos or videos, 50 MB
+in total**. The lead is stored first; files follow and never block it.
+
+- **Flow**: `contact` stores the enquiry → for each file the browser calls
+  `supabase/functions/upload` with `{action:"sign", submission_id, filename,
+  content_type, size}` → gets a signed upload URL for the private bucket
+  `enquiry-media` → `PUT`s the raw file → calls `{action:"confirm", path}`.
+  Ownership is proven by the `submission_id` the browser generated for its
+  own enquiry; the window closes 30 minutes after the enquiry.
+- **Limits, enforced three times**: browser (validation before Send), database
+  (`reserve_contact_media`: 3 files, 50 MB total, `image/*` or `video/*`,
+  window, advisory lock) and bucket (`file_size_limit` 50 MB,
+  `allowed_mime_types`).
+- **Table** `public.contact_media` (`storage_path`, `original_name`,
+  `content_type`, `size_bytes`, `status` pending/uploaded/failed).
+- **Access**: only `coach:operations` reads rows and objects (RLS on the table
+  and on `storage.objects`); the Leads tab lists the files and opens each one
+  with a 10-minute signed URL. Finance, analytics and anon see nothing.
+- **Off switch**: empty `UPLOAD_ENDPOINT` in `config.js` hides the field.
 
 ## Booking (CG-002)
 
@@ -255,7 +278,7 @@ psql "$DATABASE_URL" -f supabase/tests/cg0025_permissions.sql   # one suite
 DATABASE_URL=postgresql://… scripts/db-tests.sh                   # all three suites, exit 1 on any fail
 ```
 
-`CG0025_TESTS ok=93 fail=0`, always rolled back. It switches role and JWT
+`CG0025_TESTS ok=113 fail=0`, always rolled back. It switches role and JWT
 claims per persona and asserts the negatives: anon is refused on every private
 table and RPC; a stranger or inactive user gets zero rows and every RPC
 refused; a coach cannot read orders, payments, refunds, chargebacks,

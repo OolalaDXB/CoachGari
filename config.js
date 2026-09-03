@@ -20,6 +20,10 @@ export const CONFIG = {
   // Public booking API (services, slots, holds, state, cancel).
   BOOKING_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/booking',
 
+  // Signed uploads for enquiry attachments (photos / videos, 3 files, 50 MB).
+  // Empty = the attachment field is hidden.
+  UPLOAD_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/upload',
+
   // Server-side Stripe Checkout creation (test mode until CHECK-LICENCE-001 is cleared).
   // Empty = payment step disabled; holds are still created.
   CHECKOUT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/checkout',
