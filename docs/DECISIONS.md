@@ -25,9 +25,10 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ## CG-002.5 — Back-office, permissions, RLS
 
-**Status: built; database suite 73/73 (rollback harness, persona switching);
-`/admin` deployed (noindex). Granting the first emails and adding the
-redirect URL in Supabase Auth are owner actions.**
+**Status: built; database suite 93/93 (rollback harness, persona switching);
+`/admin` (Gari) and `/finance` (Oolala) deployed (noindex). Inviting the first
+auth users, granting their permissions and adding the redirect URLs in
+Supabase Auth are owner actions.**
 
 ### Decisions
 
@@ -35,9 +36,18 @@ redirect URL in Supabase Auth are owner actions.**
   `finance:view` / `finance:manage` (Oolala), `analytics:view` (shared). No
   `content:*` — the site is Git. A signed-in email with no `app_permissions`
   row sees nothing.
-- **Magic link, no passwords, no roles in the JWT.** Authorisation is looked
-  up by email in `app_users`/`app_permissions` at query time, so revocation is
-  immediate (`active = false` or delete the row) without touching Auth.
+- **Magic link, no passwords, no self-registration, no roles in the JWT.**
+  `signInWithOtp` runs with `shouldCreateUser: false`: only an auth user the
+  owner invited can receive a link. Authorisation is looked up by email in
+  `app_users`/`app_permissions` at query time, so revocation is immediate
+  (`active = false` or delete the row) without touching Auth. Those two tables
+  have no insert/update/delete grant for `authenticated` — permissions are
+  never writable from the browser (tested). No personal email is hardcoded in
+  any migration.
+- **Two routes, one script.** `/admin` shows only the six operational tabs;
+  `/finance` shows only Finance. Analytics appears on whichever area the
+  person has, when granted. No super-admin: a person with both permissions
+  simply has both areas.
 - **Column grants, not table grants.** `authenticated` is granted explicit
   column lists: leads without `ip_hash`; bookings without `manage_token`,
   `idempotency_key`, `ip_hash`; orders without `customer_name` /
@@ -48,7 +58,10 @@ redirect URL in Supabase Auth are owner actions.**
   `has_permission` first).
   The UI therefore never uses `select *` on a table.
 - **People vs money.** Finance reads `finance_orders()` (order, booking
-  reference, service, session time, ledger figures) — never the person. The
+  reference, service, session time, ledger figures, and a masked
+  `customer_hint` such as `p***@example.com` for matching a Stripe receipt) —
+  never the name, the full contact or an enquiry. Finance has no grant at all
+  on `contacts`, `bookings` or `email_events`. The
   coach reads people and the calendar — never orders, payments or the ledger.
   Cancelling a booking as coach never touches a paid order; refunds are
   Oolala's decision in Stripe and arrive through the webhook.
@@ -68,19 +81,31 @@ redirect URL in Supabase Auth are owner actions.**
 
 ### Tests
 
-`supabase/tests/cg0025_permissions.sql` — `CG0025_TESTS ok=73 fail=0` on
-2026-09-03. Personas: anon (10 refusals), stranger and inactive user (11 each),
-coach (22: reads, column refusals, calendar edits, state machine), finance
-(13: ledger reads, identity refusals, settlement flow), analytics (5).
+`supabase/tests/cg0025_permissions.sql` — `CG0025_TESTS ok=93 fail=0` on
+2026-09-03, rolled back. Personas: anon (10 refusals), stranger and inactive
+user (11 each), coach (35: intended reads and edits, refusals on orders,
+payments, refunds, chargebacks, settlements, settlement items, webhook log,
+`manage_token`, `ip_hash`, finance RPCs, and any write to the permission
+tables), finance (19: ledger reads, masked hint, refusals on leads, the
+message column, bookings, customer names, `email_events`, self-granting),
+analytics (6, including an email/phone/reference regex over the output).
+A pg_cron-independence check (3) proves an expired hold frees capacity
+before `expire_holds()` runs. CI job `db-boundary-tests` runs all three
+suites through `scripts/db-tests.sh` when `SUPABASE_DB_URL` is set and fails
+the build on any `fail>0`.
 
 ### Owner actions
 
 1. Supabase → Authentication → URL configuration → Redirect URLs: add
-   `https://coachgariv0.vercel.app/admin/` (and `https://coachgari.com/admin/`
-   once live).
-2. SQL editor: insert Gari's and Oolala's emails in `app_users` +
-   `app_permissions` (snippet in README).
-3. Optional: custom SMTP for auth emails (Resend) once the domain is verified.
+   `https://coachgariv0.vercel.app/admin/` and `…/finance/` (and the
+   `coachgari.com` equivalents once live). Auth settings: turn off *Allow new
+   users to sign up*.
+2. Authentication → Users → *Invite user* for Gari and for Oolala.
+3. SQL editor: insert the same emails in `app_users` + `app_permissions`
+   (snippet in README).
+4. GitHub → repository secret `SUPABASE_DB_URL` (session-pooler URI) so CI
+   enforces the boundary tests on every push.
+5. Optional: custom SMTP for auth emails (Resend) once the domain is verified.
 
 ---
 
@@ -131,10 +156,21 @@ coach (22: reads, column refusals, calendar edits, state machine), finance
   (`booking_confirmed` to the customer if the contact is an email,
   `payment_received` to letsgo@) are written inside the same transaction and
   sent by the webhook only if `RESEND_API_KEY` is set; otherwise `skipped`.
+- **Webhook signature = Stripe's scheme, verified on the raw body.**
+  `signature.js` (shared by the Edge Function and a Node unit test) parses
+  `Stripe-Signature` (`t`, every `v1`; `v0` ignored), computes
+  HMAC-SHA256(`STRIPE_WEBHOOK_SECRET`, `${t}.${raw body}`) and compares in
+  constant time; `|now − t| > 300 s` is rejected (replay / stale / far future).
+  The body is read with `req.text()` and verified before `JSON.parse`. 24
+  offline cases (`scripts/test-webhook-signature.mjs`, run by CI) cover
+  tampering, wrong secret, stale, future, replay, missing / malformed / v0-only
+  headers, truncated and bit-flipped signatures, secret rotation; a laptop
+  probe (`scripts/test-webhook.mjs`) sends the same cases to the deployed
+  function and expects 400 `bad_signature` with the reason, plus live-mode and
+  duplicate-event handling.
 - **Security**: RLS on every new table, zero grants to anon/authenticated,
   RPCs `SECURITY DEFINER` with pinned `search_path`, executable by the service
-  role only; PII-free logs; signature verification with 5-minute tolerance and
-  timing-safe compare.
+  role only; PII-free logs.
 
 ### Tests
 

@@ -12,31 +12,12 @@
    charge.dispute.created, charge.dispute.updated, charge.dispute.closed.
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
+// Stripe's signing scheme (t + "." + raw body, HMAC-SHA256, v1, 300 s tolerance) — shared with the Node unit test.
+import { verifyStripeSignature } from "./signature.js";
 
-const TOLERANCE_S = 300;
 const LEAD_TO = Deno.env.get("LEAD_TO_EMAIL") ?? "letsgo@coachgari.com";
 const MAIL_FROM = Deno.env.get("MAIL_FROM") ?? "Coach Gari <yoursession@coachgari.com>";
 const log = (event: string, data: Record<string, unknown> = {}) => console.log(JSON.stringify({ fn: "stripe-webhook", event, ...data }));
-
-async function hmacHex(secret: string, payload: string) {
-  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(payload));
-  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-function timingSafeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return r === 0;
-}
-async function verify(header: string | null, raw: string, secret: string): Promise<boolean> {
-  if (!header) return false;
-  const parts = Object.fromEntries(header.split(",").map((p) => p.trim().split("=")).filter((x) => x.length === 2).map(([k, v]) => [k, v]));
-  const t = parts["t"]; const sigs = header.split(",").map((p) => p.trim()).filter((p) => p.startsWith("v1=")).map((p) => p.slice(3));
-  if (!t || !sigs.length) return false;
-  if (Math.abs(Date.now() / 1000 - Number(t)) > TOLERANCE_S) return false;
-  const expected = await hmacHex(secret, `${t}.${raw}`);
-  return sigs.some((s) => timingSafeEqual(s, expected));
-}
 
 async function enrichFee(key: string, paymentIntent: string) {
   try {
@@ -93,9 +74,10 @@ Deno.serve(async (req: Request) => {
   const secret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
   if (!secret) { log("not_configured"); return new Response(JSON.stringify({ ok: false, error: "webhook_not_configured" }), { status: 503, headers: { "Content-Type": "application/json" } }); }
 
-  const raw = await req.text();
-  if (!(await verify(req.headers.get("stripe-signature"), raw, secret))) {
-    log("bad_signature"); return new Response(JSON.stringify({ ok: false, error: "bad_signature" }), { status: 400, headers: { "Content-Type": "application/json" } });
+  const raw = await req.text();                      // exact raw bytes — never re-serialised before verification
+  const sig = await verifyStripeSignature(req.headers.get("stripe-signature"), raw, secret);
+  if (!sig.ok) {
+    log("bad_signature", { reason: sig.reason }); return new Response(JSON.stringify({ ok: false, error: "bad_signature", reason: sig.reason }), { status: 400, headers: { "Content-Type": "application/json" } });
   }
   let event: Record<string, unknown>;
   try { event = JSON.parse(raw); } catch { return new Response(JSON.stringify({ ok: false, error: "invalid_json" }), { status: 400, headers: { "Content-Type": "application/json" } }); }

@@ -42,6 +42,20 @@ begin
   insert into public.bookings (reference, service_id, customer_name, customer_contact, start_at, end_at, session_timezone, delivery_mode, status, idempotency_key, manage_token, price_amount, currency)
     values ('CG-TEST03', svc, 'Future Person', 'future@example.com', now() + interval '5 days', now() + interval '5 days 1 hour', 'Asia/Dubai', 'online', 'confirmed', gen_random_uuid(), 'secret-3', 4500, 'USD');
   if (select status from public.bookings where reference = 'CG-TEST01') = 'confirmed' then ok := ok + 1; else fail := fail + 1; log := log || ' [seed paid booking]'; end if;
+  if public.mask_contact('+27000000') = '•••••••00' and public.mask_contact('payer@example.com') = 'p***@example.com' and public.mask_contact(null) is null then ok := ok + 1; else fail := fail + 1; log := log || ' [mask_contact]'; end if;
+
+  /* ---- 0. booking correctness is independent of pg_cron: an expired hold stops consuming capacity
+          the moment it expires, without expire_holds() having run ---- */
+  update public.availability_rules set active = false;
+  insert into public.availability_rules (weekday, start_time, end_time, timezone) values (extract(isodow from (now() + interval '3 days'))::int, '10:00', '14:00', 'UTC');
+  j := public.create_hold('t-perm', ((now() + interval '3 days')::date + time '12:00') at time zone 'UTC', 1, 'a5555555-5555-4555-8555-555555555555', 'Hold Person', 'hold@example.com');
+  select count(*) into n from public.available_slots('t-perm', (now() + interval '3 days')::date, (now() + interval '3 days')::date, 'UTC') where start_at = ((now() + interval '3 days')::date + time '12:00') at time zone 'UTC';
+  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [live hold not consuming]'; end if;
+  update public.bookings set hold_expires_at = now() - interval '1 second' where reference = j ->> 'reference';   -- expired, status still 'hold', no cron
+  select count(*) into n from public.available_slots('t-perm', (now() + interval '3 days')::date, (now() + interval '3 days')::date, 'UTC') where start_at = ((now() + interval '3 days')::date + time '12:00') at time zone 'UTC';
+  if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [expired hold still consuming without cron]'; end if;
+  j := public.create_hold('t-perm', ((now() + interval '3 days')::date + time '12:00') at time zone 'UTC', 1, 'a6666666-6666-4666-8666-666666666666', 'Next Person', 'next@example.com');
+  if j ->> 'status' = 'hold' then ok := ok + 1; else fail := fail + 1; log := log || ' [rebook over expired hold]'; end if;
 
   /* ---- 1. anon: permission denied everywhere ---- */
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);
@@ -81,6 +95,7 @@ begin
   perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000002","email":"coach@test.local"}', true);
   execute 'set local role authenticated';
   if (public.my_permissions() -> 'permissions') = '["coach:operations"]'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || ' [coach my_permissions]'; end if;
+  -- (the 'contacts' message column: a coach's intended read; finance and analytics are refused it below)
   select count(*) into n from public.contacts where message = 'private message body'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach reads leads]'; end if;
   select count(*) into n from public.bookings where customer_contact = 'payer@example.com'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach reads bookings]'; end if;
   begin select count(*) into n from public.bookings where manage_token = 'secret-token'; fail := fail + 1; log := log || ' [coach manage_token readable]';
@@ -91,6 +106,16 @@ begin
   select count(*) into n from public.payments;         if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees payments]'; end if;
   select count(*) into n from public.partner_earnings; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees earnings]'; end if;
   begin perform public.finance_orders(); fail := fail + 1; log := log || ' [coach sees finance_orders]'; exception when insufficient_privilege then ok := ok + 1; end;
+  select count(*) into n from public.partner_settlements;      if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees settlements]'; end if;
+  select count(*) into n from public.partner_settlement_items; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees settlement items]'; end if;
+  select count(*) into n from public.refunds;                  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees refunds]'; end if;
+  select count(*) into n from public.chargebacks;              if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach sees chargebacks]'; end if;
+  begin perform public.finance_webhook_log(); fail := fail + 1; log := log || ' [coach webhook log]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin perform public.finance_mark_settlement_paid('ST-000000', 'x'); fail := fail + 1; log := log || ' [coach mark paid]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin select count(*) into n from public.webhook_events; fail := fail + 1; log := log || ' [coach raw webhook events]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin insert into public.app_permissions (email, permission) values ('coach@test.local', 'finance:manage'); fail := fail + 1; log := log || ' [coach grants self finance]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin update public.app_users set active = true; fail := fail + 1; log := log || ' [coach edits app_users]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin delete from public.app_permissions; fail := fail + 1; log := log || ' [coach deletes permissions]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.finance_create_settlement(current_date - 1, current_date + 1); fail := fail + 1; log := log || ' [coach finance rpc]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.analytics_summary(); fail := fail + 1; log := log || ' [coach analytics rpc]'; exception when insufficient_privilege then ok := ok + 1; end;
   select count(*) into n from public.app_users; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach app_users self only]'; end if;
@@ -132,6 +157,13 @@ begin
   select (to_jsonb(f) ? 'customer_name') or (to_jsonb(f) ? 'customer_contact') or to_jsonb(f)::text like '%Paying Person%' or to_jsonb(f)::text like '%payer@example.com%' into b
     from public.finance_orders() f where f.reference = oref;
   if not b then ok := ok + 1; else fail := fail + 1; log := log || ' [finance_orders exposes identity]'; end if;
+  select f.customer_hint into q from public.finance_orders() f where f.reference = oref;
+  if q = 'p***@example.com' then ok := ok + 1; else fail := fail + 1; log := log || ' [customer_hint ' || coalesce(q, 'null') || ']'; end if;
+  begin perform public.mask_contact('+27000000'); fail := fail + 1; log := log || ' [finance calls mask_contact]'; exception when insufficient_privilege then ok := ok + 1; end;
+  select count(*) into n from public.contacts where message is not null;  -- column is granted to the shared role; RLS returns no row to finance
+  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance reads message bodies]'; end if;
+  begin select count(*) into n from public.email_events; fail := fail + 1; log := log || ' [finance reads email_events]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin insert into public.app_permissions (email, permission) values ('finance@test.local', 'coach:operations'); fail := fail + 1; log := log || ' [finance grants self coach]'; exception when insufficient_privilege then ok := ok + 1; end;
   select count(*) into n from public.finance_webhook_log() w where w.event_id = 'evt_perm_1'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance webhook log]'; end if;
   begin select count(*) into n from public.webhook_events; fail := fail + 1; log := log || ' [finance raw webhook payloads]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.ops_set_booking_status('CG-TEST02', 'cancelled'); fail := fail + 1; log := log || ' [finance ops rpc]'; exception when insufficient_privilege then ok := ok + 1; end;
@@ -152,6 +184,7 @@ begin
   if (j -> 'leads' ->> 'total')::int >= 1 and (j -> 'revenue' -> 'totals' ->> 'gross')::int >= 4500 and (j -> 'bookings' -> 'by_status' ->> 'completed')::int >= 1 then ok := ok + 1;
   else fail := fail + 1; log := log || ' [analytics summary ' || j::text || ']'; end if;
   if j::text not like '%private message body%' and j::text not like '%lead@example.com%' and j::text not like '%Paying Person%' then ok := ok + 1; else fail := fail + 1; log := log || ' [analytics leaks PII]'; end if;
+  if j::text !~ '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' and j::text !~ '\+?[0-9][0-9 ]{6,}[0-9]' and j::text !~ 'CG-[0-9A-Z]{6}' then ok := ok + 1; else fail := fail + 1; log := log || ' [analytics contains email/phone/reference pattern]'; end if;
   select count(*) into n from public.contacts; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [analytics sees leads]'; end if;
   select count(*) into n from public.orders;   if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [analytics sees orders]'; end if;
   select count(*) into n from public.bookings; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [analytics sees bookings]'; end if;

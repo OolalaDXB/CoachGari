@@ -21,5 +21,28 @@ jobs:
       - name: Check internal links & assets
         run: node scripts/check-links.mjs
 
+      - name: Stripe webhook signature verification (offline, Stripe's scheme)
+        run: node scripts/test-webhook-signature.mjs
+
       - name: Verify config is valid ES module
         run: node --input-type=module -e "import('./config.js').then(m => { if (!m.CONFIG) { console.error('CONFIG export missing'); process.exit(1); } console.log('config.js OK'); })"
+
+  # Database boundary tests — booking, payments/ledger, permissions/RLS.
+  # Runs only when the SUPABASE_DB_URL secret is set (session-pooler URI);
+  # every suite is a rollback transaction, nothing is persisted. A violated
+  # access boundary fails the build.
+  db-boundary-tests:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skipped (no SUPABASE_DB_URL secret)
+        if: env.DATABASE_URL == ''
+        run: echo "::notice::SUPABASE_DB_URL not set — database boundary tests skipped. Add the secret to enforce them."
+      - name: Install psql
+        if: env.DATABASE_URL != ''
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+      - name: Run rollback suites
+        if: env.DATABASE_URL != ''
+        run: bash scripts/db-tests.sh

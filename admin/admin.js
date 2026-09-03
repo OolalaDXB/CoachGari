@@ -1,11 +1,14 @@
 /* =============================================================
    Coach Gari — back-office (CG-002.5)
-   Magic-link sign-in (Supabase Auth). What a signed-in person can see
-   and do is decided entirely by the database (RLS + app_permissions):
-   this file only chooses which tabs to draw.
-     coach:operations → Leads, Calendar, Bookings, Availability, Exceptions, Tour stops
-     finance:view     → Finance (finance:manage adds settlement actions)
-     analytics:view   → Analytics
+   One script, two areas:
+     /admin   (data-area="ops")     Gari    — coach:operations
+     /finance (data-area="finance") Oolala  — finance:view / finance:manage
+     analytics:view adds an Analytics tab to whichever area the person has.
+   Magic-link sign-in (Supabase Auth) with shouldCreateUser:false — an email
+   that was not provisioned by the owner cannot even create an auth user.
+   What a signed-in person can see and do is decided entirely by the
+   database (RLS + app_permissions); this file only chooses which tabs to
+   draw and never writes permissions.
    Column lists are explicit on purpose: the database grants columns, not
    tables, so `select *` would be refused.
    ============================================================= */
@@ -26,6 +29,7 @@ const WEEKDAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'S
 let me = null;            // {email, party, permissions:[]}
 let services = [];        // catalogue (read-only here)
 let tab = null;
+const AREA = document.body.dataset.area || 'ops';   // 'ops' (/admin) or 'finance' (/finance)
 
 /* ---------- time helpers (UTC in the database, wall-clock in a zone on screen) ---------- */
 function tzParts(date, tz) {
@@ -64,8 +68,8 @@ async function boot() {
     const email = new FormData(e.target).get('email').trim().toLowerCase();
     const m = $('#login-msg'); m.hidden = false; m.className = 'ad-msg';
     m.textContent = 'Sending…';
-    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/admin/`, shouldCreateUser: true } });
-    if (error) { m.className = 'ad-msg err'; m.textContent = error.message; return; }
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/${AREA === 'finance' ? 'finance' : 'admin'}/`, shouldCreateUser: false } });
+    if (error) { m.className = 'ad-msg err'; m.textContent = /signup|not allowed|not found/i.test(error.message) ? 'This email is not provisioned for the back-office. Ask the owner.' : error.message; return; }
     m.className = 'ad-msg ok'; m.textContent = 'Check your inbox and open the link on this device.';
   });
   document.addEventListener('click', (e) => { if (e.target.closest('[data-signout]')) sb.auth.signOut().then(() => location.reload()); });
@@ -82,12 +86,19 @@ async function render(session) {
   try {
     const { data, error } = await sb.rpc('my_permissions'); if (error) throw error;
     me = data;
-    if (!me.permissions?.length) { $('#noaccess').hidden = false; return; }
+    const opsOK = has('coach:operations'), finOK = has('finance:view');
+    const areaOK = AREA === 'finance' ? finOK : opsOK;
+    if (!areaOK) {
+      $('#noaccess').hidden = false;
+      const other = $('#other-area');
+      if (other && (AREA === 'finance' ? opsOK : finOK)) { other.hidden = false; other.innerHTML = AREA === 'finance' ? 'Your operations area is at <a href="/admin/">/admin</a>.' : 'Your finance area is at <a href="/finance/">/finance</a>.'; }
+      return;
+    }
     const { data: svc, error: e2 } = await sb.from('services').select('id,slug,title,category,duration_minutes,price_amount,currency,delivery_mode,default_capacity,active,listed,sort_order').order('sort_order'); if (e2) throw e2;
     services = svc || [];
     const tabs = [];
-    if (has('coach:operations')) tabs.push(['leads', 'Leads'], ['calendar', 'Calendar'], ['bookings', 'Bookings'], ['availability', 'Availability'], ['exceptions', 'Exceptions'], ['tours', 'Tour stops']);
-    if (has('finance:view')) tabs.push(['finance', 'Finance']);
+    if (AREA === 'ops') tabs.push(['leads', 'Leads'], ['calendar', 'Calendar'], ['bookings', 'Bookings'], ['availability', 'Availability'], ['exceptions', 'Exceptions'], ['tours', 'Tour stops']);
+    if (AREA === 'finance') tabs.push(['finance', 'Finance']);
     if (has('analytics:view')) tabs.push(['analytics', 'Analytics']);
     $('#tabs').innerHTML = tabs.map(([k, l]) => `<a data-tab="${k}">${l}</a>`).join('');
     $('#tabs').hidden = false; $('#app').hidden = false;
@@ -327,7 +338,7 @@ async function finance() {
   const sum = (arr, k) => arr.reduce((a, o) => a + (o[k] || 0), 0);
   const today = new Date(); const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
   view.innerHTML = `
-    <div class="ad-head"><div><h1>Finance</h1><p class="ad-muted">Stripe <b>test mode</b>. Orders, payments and the partner ledger — no customer identity on this screen. Refunds are issued in the Stripe dashboard and land here through the webhook.</p></div></div>
+    <div class="ad-head"><div><h1>Finance</h1><p class="ad-muted">Stripe <b>test mode</b>. Orders, payments and the partner ledger. No names, no contacts, no enquiries — only a masked hint to match a Stripe receipt. Refunds are issued in the Stripe dashboard and land here through the webhook.</p></div></div>
     <div class="ad-kpis">
       <div class="ad-kpi"><b>${money(sum(orders.filter((o) => o.paid_at), 'gross_amount'))}</b><span>Gross collected</span></div>
       <div class="ad-kpi"><b>${money(sum(orders, 'net_collected'))}</b><span>Net after fees, refunds, chargebacks</span></div>
@@ -344,9 +355,10 @@ async function finance() {
       ${manage ? `<form id="settle-form" class="ad-form" style="margin-top:16px"><div class="row"><label>Period from <input type="date" name="from" required value="${isoDate(monthStart)}"></label><label>to <input type="date" name="to" required value="${isoDate(today)}"></label><label>Currency <input name="currency" value="USD" pattern="[A-Z]{3}"></label></div>
         <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Create settlement for open earnings</button></div></form><p class="ad-note">Creates a settlement from every open earning whose payment date falls in the period, then freezes those earnings. Pay Gari by bank transfer and record the reference with "Mark paid".</p>` : '<p class="ad-note">View only. Settlement actions need the finance:manage permission.</p>'}</div>
     <div class="ad-panel"><h2>Orders</h2>
-      ${table(['Created', 'Order', 'Booking', 'Session', 'Gross', 'Fee', 'Refunds', 'CB', 'Net', 'Commission', 'Payable', 'Status'], orders.map((o) => `<tr>
+      ${table(['Created', 'Order', 'Booking', 'Session', 'Customer hint', 'Gross', 'Fee', 'Refunds', 'CB', 'Net', 'Commission', 'Payable', 'Status'], orders.map((o) => `<tr>
         <td>${fmt(o.created_at, 'Asia/Dubai')}</td><td>${esc(o.reference)}<br>${st(o.status)}</td><td>${esc(o.booking_reference)}<br>${st(o.booking_status)}</td>
         <td>${esc(o.service_title)}<br><span class="ad-muted" style="font-size:12px">${fmt(o.session_start_at, o.session_timezone)} · ${esc(o.delivery_mode)}</span></td>
+        <td class="ad-muted" style="font-size:12px">${esc(o.customer_hint || '—')}</td>
         <td class="num">${money(o.gross_amount, o.currency)}</td><td class="num">${money(o.stripe_fee, o.currency)}</td><td class="num">${money(o.refund_amount, o.currency)}</td><td class="num">${money(o.chargeback_amount, o.currency)}</td>
         <td class="num">${money(o.net_collected, o.currency)}</td><td class="num">${money(o.oolala_commission, o.currency)}</td><td class="num"><b>${money(o.gari_payable, o.currency)}</b></td>
         <td>${o.earning_status ? st(o.earning_status) : '—'}${o.adjusted_at ? '<div class="msg">adjusted after settlement</div>' : ''}</td></tr>`), 'No orders yet.')}</div>

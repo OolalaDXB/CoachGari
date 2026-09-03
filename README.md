@@ -185,26 +185,36 @@ Secrets (Supabase, never committed): `STRIPE_SECRET_KEY` (`sk_test_…`),
 ### Payment tests
 
 ```
-psql "$DATABASE_URL" -f supabase/tests/cg003_payments.sql
-node scripts/test-checkout.mjs --wait
+node scripts/test-webhook-signature.mjs                                # offline, CI: Stripe signature scheme, 24 cases
+STRIPE_WEBHOOK_SECRET=whsec_… node scripts/test-webhook.mjs            # laptop: signed probes against the deployed function
+psql "$DATABASE_URL" -f supabase/tests/cg003_payments.sql              # ledger / idempotency, rolls back
+node scripts/test-checkout.mjs --wait                                  # real Stripe round trip
 ```
+
+Signature verification is Stripe's own scheme, implemented in
+`supabase/functions/stripe-webhook/signature.js` and imported by the Edge
+Function: `Stripe-Signature: t=…,v1=…`, HMAC-SHA256 over `${t}.${raw body}`
+with `STRIPE_WEBHOOK_SECRET`, constant-time compare against every `v1`, 300 s
+tolerance on `t`. The raw request body is verified before any parsing.
 
 The database suite prints `CG003_TESTS ok=24 fail=0` and always rolls back.
 The laptop script creates a hold, proves a forged amount is ignored, prints
 the Checkout URL (pay with `4242 4242 4242 4242`) and waits for the webhook to
 confirm the booking.
 
-## Back-office (CG-002.5) — `/admin`
+## Back-office (CG-002.5) — `/admin` (Gari) and `/finance` (Oolala)
 
-Lightweight operational back-office, no CMS. Sign-in by Supabase Auth magic
-link; what a person sees is decided by the database, not by the page.
+Two utilitarian areas on one script, no CMS, no CRM. Sign-in by Supabase
+Auth magic link with `shouldCreateUser: false`: an email that the owner has
+not provisioned cannot even create an auth user. What a person sees is
+decided by the database, not by the page; the page never writes permissions.
 
 | Permission | Who | Gives |
 |---|---|---|
-| `coach:operations` | Gari | Leads (read + status), Calendar, Bookings (cancel / complete / no-show / confirm an unpriced hold), Availability, Exceptions, Tour stops |
-| `finance:view` | Oolala | Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`) — **without customer identity** |
-| `finance:manage` | Oolala | Create settlements, mark paid (bank reference), mark reconciled |
-| `analytics:view` | either | Aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month) |
+| `coach:operations` | Gari, `/admin` | Leads (read + status), Calendar, Bookings (cancel / complete / no-show / confirm an unpriced hold), Availability, Exceptions, Tour stops |
+| `finance:view` | Oolala, `/finance` | Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
+| `finance:manage` | Oolala, `/finance` | Create settlements, mark paid (bank reference), mark reconciled. Still no lead access |
+| `analytics:view` | either area | Aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month); output asserted free of names, emails, phones, references |
 
 There is no `content:*` permission: the website is edited in Git.
 
@@ -216,8 +226,12 @@ There is no `content:*` permission: the website is edited in Git.
   state changes go through `ops_set_booking_status`, `finance_*` and
   `analytics_summary` RPCs that check the permission themselves. `anon` keeps
   zero access.
-- **Granting access** (owner, SQL editor — the person signs in with the same
-  email afterwards):
+- **Provisioning** (owner, two steps, no personal email in any migration):
+  1. Supabase → Authentication → Users → *Invite user* (creates the auth
+     user; also turn off *Allow new users to sign up* under Auth settings as
+     belt and braces).
+  2. SQL editor — permissions live only here and are never writable through
+     the API:
   ```sql
   insert into public.app_users (email, display_name, party) values ('gari@example.com', 'Gari', 'gari');
   insert into public.app_permissions (email, permission) values ('gari@example.com', 'coach:operations');
@@ -234,18 +248,27 @@ There is no `content:*` permission: the website is edited in Git.
   project URL from `config.js`. Times are shown and entered in a chosen IANA
   zone and stored in UTC.
 
-### Permission tests
+### Permission tests — fail the build on a boundary violation
 
 ```
-psql "$DATABASE_URL" -f supabase/tests/cg0025_permissions.sql
+psql "$DATABASE_URL" -f supabase/tests/cg0025_permissions.sql   # one suite
+DATABASE_URL=postgresql://… scripts/db-tests.sh                   # all three suites, exit 1 on any fail
 ```
 
-Prints `CG0025_TESTS ok=73 fail=0` and rolls back. It switches role and JWT
-claims per persona (anon, signed-in stranger, inactive user, coach, finance,
-analytics) and asserts the negatives: anon is refused everywhere; a coach
-cannot read orders, payments, the ledger or `manage_token`; finance cannot
-read leads, bookings or customer names; analytics sees no row-level data and
-its output contains no lead body or contact.
+`CG0025_TESTS ok=93 fail=0`, always rolled back. It switches role and JWT
+claims per persona and asserts the negatives: anon is refused on every private
+table and RPC; a stranger or inactive user gets zero rows and every RPC
+refused; a coach cannot read orders, payments, refunds, chargebacks,
+settlements, settlement items, the webhook log, `manage_token` or `ip_hash`,
+and cannot insert, update or delete permissions; finance cannot read leads,
+the message column, bookings, customer names or `email_events`, and cannot
+grant itself operations; analytics output contains no lead body and matches
+no email, phone or booking-reference pattern. It also proves booking
+correctness does not depend on `pg_cron`: an expired hold frees its slot
+before `expire_holds()` runs. CI runs `scripts/db-tests.sh` when the
+`SUPABASE_DB_URL` repository secret (session-pooler URI) is set and fails the
+build otherwise-than-`fail=0`; without the secret the job is skipped with a
+notice.
 
 ## Supabase set-up (no secrets in this repo)
 
