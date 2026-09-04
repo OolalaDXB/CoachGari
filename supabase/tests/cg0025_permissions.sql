@@ -11,6 +11,8 @@
 --   attachments       → server-issued upload token (256-bit, 30 min, one enquiry); limits (3 files, 50 MB, strict MIME allowlist); only the coach reads rows and objects
 --   launch user       → composite coach+finance+analytics persona reaches every business area (CG-006)
 --   platform:admin    → access administration only; never a bypass of RLS on business data (CG-006)
+--   catalogue         → catalog:view reads the whole catalogue + audit; catalog:manage writes only through the audited RPC;
+--                       price / title changes never touch existing holds, bookings, orders (CG-007)
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
@@ -21,13 +23,14 @@ begin
   insert into public.app_users (email, display_name, party) values
     ('coach@test.local', 'Coach', 'gari'), ('finance@test.local', 'Finance', 'oolala'),
     ('analytics@test.local', 'Analytics', 'studio'), ('inactive@test.local', 'Gone', 'gari'),
-    ('launch@test.local', 'Launch user', 'gari'), ('padmin@test.local', 'Access admin', 'studio');
+    ('launch@test.local', 'Launch user', 'gari'), ('padmin@test.local', 'Access admin', 'studio'), ('catalog@test.local', 'Catalogue', 'studio');
   update public.app_users set active = false where email = 'inactive@test.local';
   insert into public.app_permissions (email, permission) values
     ('coach@test.local', 'coach:operations'), ('finance@test.local', 'finance:view'), ('finance@test.local', 'finance:manage'),
     ('analytics@test.local', 'analytics:view'), ('inactive@test.local', 'coach:operations'),
     ('launch@test.local', 'coach:operations'), ('launch@test.local', 'finance:view'), ('launch@test.local', 'finance:manage'), ('launch@test.local', 'analytics:view'),
-    ('padmin@test.local', 'platform:admin');
+    ('launch@test.local', 'catalog:view'), ('launch@test.local', 'catalog:manage'),
+    ('padmin@test.local', 'platform:admin'), ('catalog@test.local', 'catalog:view'), ('catalog@test.local', 'catalog:manage');
   insert into public.contacts (submission_id, name, contact, interest, message, country) values (gen_random_uuid(), 'Lead Person', 'lead@example.com', 'coaching', 'private message body', 'Zimbabwe');
   insert into public.services (slug, title, category, duration_minutes, price_amount, currency, delivery_mode, default_capacity, active, listed)
     values ('t-perm', 'Perm test session', 'mentoring', 60, 4500, 'USD', 'online', 1, true, false) returning id into svc;
@@ -127,7 +130,9 @@ begin
                            'select count(*) from public.app_permissions', 'select count(*) from public.contact_media', 'select public.my_permissions()', 'select public.analytics_summary()',
                            'select public.ops_set_booking_status(''CG-TEST03'', ''cancelled'')', 'select public.admin_list_access()', 'select public.admin_grant(''x@test.local'', ''platform:admin'')',
                            'select public.issue_upload_token(gen_random_uuid())', 'select public.reserve_contact_media(repeat(''a'', 64), ''x.png'', ''image/png'', 1)',
-                           'select public.set_app_access(''x@test.local'', ''x'', ''gari'', array[''platform:admin''])', 'select public.auth_identity_exists(''x@test.local'')'] loop
+                           'select public.set_app_access(''x@test.local'', ''x'', ''gari'', array[''platform:admin''])', 'select public.auth_identity_exists(''x@test.local'')',
+                           'select count(*) from public.services', 'select count(*) from public.catalog_audit', 'select public.catalog_save_service(''{"slug":"x","title":"x"}''::jsonb)',
+                           'update public.services set price_amount = 1'] loop
     begin execute q; fail := fail + 1; log := log || ' [anon allowed: ' || q || ']';
     exception when insufficient_privilege then ok := ok + 1; end;
   end loop;
@@ -176,6 +181,9 @@ begin
   begin perform public.admin_list_access(); fail := fail + 1; log := log || ' [coach lists access]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.admin_grant('coach@test.local', 'finance:manage'); fail := fail + 1; log := log || ' [coach self-grants via rpc]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.set_app_access('coach@test.local', 'Coach', 'gari', array['platform:admin']); fail := fail + 1; log := log || ' [coach calls set_app_access]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin perform public.catalog_save_service('{"slug":"conversation","title":"Hacked","price_amount":1}'::jsonb); fail := fail + 1; log := log || ' [coach edits catalogue]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin update public.services set price_amount = 1 where slug = 'conversation'; fail := fail + 1; log := log || ' [coach updates services directly]'; exception when insufficient_privilege then ok := ok + 1; end;
+  select count(*) into n from public.catalog_audit; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [coach reads catalog_audit]'; end if;
   begin select count(*) into n from public.bookings where manage_token = 'secret-token'; fail := fail + 1; log := log || ' [coach manage_token readable]';
   exception when insufficient_privilege then ok := ok + 1; end;
   begin select count(*) into n from public.contacts where ip_hash is null; fail := fail + 1; log := log || ' [coach ip_hash readable]';
@@ -275,7 +283,7 @@ begin
   /* ---- 6. launch user: coach + finance + analytics in one identity reaches every business area (no owner role needed) ---- */
   perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000006","email":"launch@test.local"}', true);
   execute 'set local role authenticated';
-  if (public.my_permissions() -> 'permissions') = '["analytics:view","coach:operations","finance:manage","finance:view"]'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || ' [launch my_permissions ' || (public.my_permissions() -> 'permissions')::text || ']'; end if;
+  if (public.my_permissions() -> 'permissions') = '["analytics:view","catalog:manage","catalog:view","coach:operations","finance:manage","finance:view"]'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || ' [launch my_permissions ' || (public.my_permissions() -> 'permissions')::text || ']'; end if;
   select count(*) into n from public.contacts where message = 'private message body'; if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [launch reads leads]'; end if;
   select count(*) into n from public.bookings where reference like 'CG-TEST%'; if n = 3 then ok := ok + 1; else fail := fail + 1; log := log || ' [launch reads bookings]'; end if;
   select count(*) into n from public.availability_rules; if n >= 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [launch reads calendar]'; end if;
@@ -356,6 +364,59 @@ begin
   /* ---- 8. set_app_access (service role / SQL editor path): idempotent, refuses an email with no auth identity ---- */
   begin perform public.set_app_access('ghost@test.local', 'Ghost', 'gari', array['coach:operations']); fail := fail + 1; log := log || ' [set_app_access without auth identity]'; exception when no_data_found then ok := ok + 1; end;
   select count(*) into n from public.app_users where email = 'ghost@test.local'; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [set_app_access ghost row]'; end if;
+
+
+  /* ---- 9. catalogue: catalog:manage writes only through the audited RPC; history is immutable ---- */
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000009","email":"catalog@test.local"}', true);
+  execute 'set local role authenticated';
+  select count(*) into n from public.services where slug in ('t-perm', 't-perm-free'); if n = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [catalog reads unlisted services]'; end if;
+  select count(*) into n from public.contacts; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [catalog sees leads]'; end if;
+  select count(*) into n from public.bookings; if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [catalog sees bookings]'; end if;
+  select count(*) into n from public.orders;   if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [catalog sees orders]'; end if;
+  begin perform public.finance_orders(); fail := fail + 1; log := log || ' [catalog finance_orders]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin update public.services set price_amount = 1 where slug = 't-perm'; fail := fail + 1; log := log || ' [catalog updates services directly]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin insert into public.services (slug, title, category, duration_minutes, delivery_mode) values ('t-direct', 'x', 'coaching', 60, 'online'); fail := fail + 1; log := log || ' [catalog inserts services directly]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin delete from public.services where slug = 't-perm-free'; fail := fail + 1; log := log || ' [catalog deletes services]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin insert into public.catalog_audit (service_id, slug, action, changed_by, changed_fields, after) values (svc, 't-perm', 'update', 'forged', '{}', '{}'); fail := fail + 1; log := log || ' [catalog forges audit]'; exception when insufficient_privilege then ok := ok + 1; end;
+  -- validation through the RPC
+  begin perform public.catalog_save_service('{"slug":"Bad Slug","title":"x"}'::jsonb); fail := fail + 1; log := log || ' [bad slug accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.catalog_save_service('{"slug":"t-perm","title":""}'::jsonb); fail := fail + 1; log := log || ' [empty title accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.catalog_save_service('{"slug":"t-perm","title":"x","price_amount":-5}'::jsonb); fail := fail + 1; log := log || ' [negative price accepted]'; exception when check_violation then ok := ok + 1; end;
+  begin perform public.catalog_save_service('{"slug":"t-perm","title":"x","booking_mode":"magic"}'::jsonb); fail := fail + 1; log := log || ' [unknown booking_mode accepted]'; exception when check_violation then ok := ok + 1; end;
+  -- a price change: audited, and only future holds see it
+  j := public.catalog_save_service('{"slug":"t-perm","title":"Perm test session","price_amount":9900,"features":["a","b"]}'::jsonb);
+  if (j -> 'changed') = '["features","price_amount"]'::jsonb and (select price_amount from public.services where slug = 't-perm') = 9900 then ok := ok + 1; else fail := fail + 1; log := log || ' [catalog price change ' || j::text || ']'; end if;
+  select count(*) into n from public.catalog_audit a where a.slug = 't-perm' and a.action = 'update' and a.changed_by = 'catalog@test.local'
+     and (a.before ->> 'price_amount')::int = 4500 and (a.after ->> 'price_amount')::int = 9900 and a.changed_fields @> array['price_amount'];
+  if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [catalog audit row]'; end if;
+  j := public.catalog_save_service('{"slug":"t-perm","title":"Perm test session","price_amount":9900}'::jsonb);   -- identical save: no audit row
+  select count(*) into n from public.catalog_audit a where a.slug = 't-perm'; if (j -> 'changed') = '[]'::jsonb and n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [idempotent save audited]'; end if;
+  j := public.catalog_save_service('{"slug":"t-perm","title":"Perm test session RENAMED","duration_minutes":90}'::jsonb);
+  if (j -> 'changed') = '["duration_minutes","title"]'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || ' [catalog rename]'; end if;
+  j := public.catalog_save_service('{"slug":"t-new","title":"Brand new","category":"group","booking_mode":"enquiry","price_amount":1500,"price_unit":"per month","active":true,"listed":true}'::jsonb);
+  select count(*) into n from public.catalog_audit a where a.slug = 't-new' and a.action = 'create' and a.before is null; if n = 1 and (j ->> 'slug') = 't-new' then ok := ok + 1; else fail := fail + 1; log := log || ' [catalog create]'; end if;
+  execute 'reset role';
+  -- historical integrity (as postgres): the paid booking and its order keep 4500 and the old title; a new hold gets 9900 / 90 min / the new title
+  if (select price_amount from public.bookings where reference = 'CG-TEST01') = 4500
+     and (select service_title from public.bookings where reference = 'CG-TEST01') = 'Perm test session'
+     and (select service_duration_minutes from public.bookings where reference = 'CG-TEST01') = 60
+     and (select gross_amount from public.orders where reference = oref) = 4500
+     and (select service_title from public.orders where reference = oref) = 'Perm test session'
+     and (select gari_payable from public.partner_earnings pe join public.orders o on o.id = pe.order_id where o.reference = oref) = 3905
+  then ok := ok + 1; else fail := fail + 1; log := log || ' [history changed by catalogue edit]'; end if;
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000003","email":"finance@test.local"}', true);
+  execute 'set local role authenticated';
+  select f.service_title into q from public.finance_orders() f where f.reference = oref;
+  if q = 'Perm test session' then ok := ok + 1; else fail := fail + 1; log := log || ' [finance_orders title not snapshotted: ' || coalesce(q, 'null') || ']'; end if;
+  execute 'reset role';
+  update public.availability_rules set active = true;
+  j := public.create_hold('t-perm', ((now() + interval '3 days')::date + time '10:00') at time zone 'UTC', 1, 'a8888888-8888-4888-8888-888888888888', 'Later Person', 'later@example.com');
+  if (j ->> 'price_amount')::int = 9900 and j -> 'service' ->> 'title' = 'Perm test session RENAMED' and (j -> 'service' ->> 'duration_minutes')::int = 90
+     and (select service_title from public.bookings where reference = j ->> 'reference') = 'Perm test session RENAMED' then ok := ok + 1; else fail := fail + 1; log := log || ' [new hold ignores catalogue ' || j::text || ']'; end if;
+  -- an enquiry-only product (active, listed) can never be held
+  begin perform public.create_hold('t-new', ((now() + interval '3 days')::date + time '11:00') at time zone 'UTC', 1, 'a9999999-9999-4999-8999-999999999999', 'Enq Person', 'enq@example.com'); fail := fail + 1; log := log || ' [enquiry product held]'; exception when no_data_found then ok := ok + 1; end;
+  -- postgres itself has no app permission: the RPC refuses it too (no superuser side door)
+  begin perform public.catalog_save_service('{"slug":"t-new","title":"x"}'::jsonb); fail := fail + 1; log := log || ' [rpc without permission]'; exception when insufficient_privilege then ok := ok + 1; end;
 
   raise exception 'CG0025_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

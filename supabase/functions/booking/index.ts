@@ -2,7 +2,8 @@
    CG-002 — booking
    Public Edge Function in front of the booking RPCs.
 
-   GET  ?action=services
+   GET  ?action=services      — the public catalogue (active + listed), the only
+                                source of the Route C cards and the picker (CG-007)
    GET  ?action=tour_stops
    GET  ?action=slots&service=<slug>&from=YYYY-MM-DD&to=YYYY-MM-DD&tz=<IANA>
    GET  ?action=state&ref=<CG-XXXXXX>&token=<manage_token>
@@ -139,7 +140,7 @@ Deno.serve(async (req: Request) => {
 
     if (action === "services") {
       const { data, error } = await withRetry("services", (c) => c.from("services")
-        .select("slug, title, category, description, duration_minutes, price_amount, currency, delivery_mode, default_capacity")
+        .select("slug, title, category, tagline, description, long_description, duration_minutes, price_amount, currency, price_unit, delivery_mode, default_capacity, booking_mode, features, featured, cta_label, sort_order")
         .eq("active", true).eq("listed", true).order("sort_order"));
       if (error) return rpcError(error, origin, allowed);
       return json(200, { ok: true, services: data }, origin, allowed);
