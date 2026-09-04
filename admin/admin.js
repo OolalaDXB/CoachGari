@@ -1,7 +1,10 @@
 /* =============================================================
-   Coach Gari — back-office (CG-002.5 / CG-008)
-   One workspace at /admin. Every capability is a tab, shown only when
-   the signed-in person holds the matching permission:
+   Coach Gari — back-office (CG-002.5 → CG-009)
+   One cockpit at /admin: a sidebar of destinations (mobile drawer), a
+   minimal top header with page context + an account menu (Sign Out lives
+   inside it), and — for people — a large client-profile popup. Every
+   destination is shown only when the signed-in person holds the matching
+   permission:
      coach:operations → Leads, Calendar, Bookings, Availability, Exceptions, Tour stops
      catalog:view     → Services (the commercial catalogue)
      finance:view     → Finance (orders, ledger, settlements)
@@ -31,13 +34,12 @@ const money = (n, cur = 'USD') => n == null ? '—' : (n / 100).toLocaleString('
 const st = (s) => `<span class="st st-${esc(s)}">${esc(String(s ?? '').replace('_', ' '))}</span>`;
 const BOOKING_COLS = 'id,reference,service_id,contact_id,customer_name,customer_contact,start_at,end_at,session_timezone,tour_stop_id,delivery_mode,participant_count,status,hold_expires_at,price_amount,currency,notes,cancel_reason,cancelled_at,cancelled_by,created_at,service_title,service_duration_minutes,services(title,slug),tour_stops(city,country)';
 const SERVICE_COLS = 'id,slug,title,category,tagline,description,long_description,duration_minutes,price_amount,currency,price_unit,delivery_mode,default_capacity,booking_mode,features,featured,cta_label,active,listed,sort_order,updated_at,updated_by';
-const CONTACT_COLS = 'id,name,contact,country,city,location_raw,interest,message,utm_source,utm_medium,utm_campaign,referrer,landing_page,page,status,created_at';
+const CONTACT_COLS = 'id,crm_contact_id,name,contact,country,city,location_raw,interest,message,utm_source,utm_medium,utm_campaign,utm_content,utm_term,referrer,landing_page,first_visit_at,page,source,status,submission_id,created_at';
 const TZS = ['Asia/Dubai', 'Africa/Harare', 'Africa/Johannesburg', 'Africa/Gaborone', 'Africa/Nairobi', 'Europe/London', 'Europe/Paris', 'UTC'];
 const WEEKDAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 let me = null;            // {email, party, permissions:[]}
 let services = [];        // catalogue (read-only here)
-let tab = null;
 
 /* ---------- time helpers (UTC in the database, wall-clock in a zone on screen) ---------- */
 function tzParts(date, tz) {
@@ -86,74 +88,178 @@ async function boot() {
   render(data.session);
 }
 
+/* ---------- navigation model: sections, permission-gated, some with sub-tabs ---------- */
+// A section renders either a single view (run) or a strip of sub-tabs.
+// Finance stays one destination (CG-008); Schedule merges the four
+// time-management domains (CG-009); CRM merges Leads + Contacts.
+function navModel() {
+  return [
+    { key: 'overview', label: 'Overview', icon: '▦', show: () => true, run: overview },
+    { key: 'crm', label: 'CRM', icon: '☺', show: () => has('coach:operations') || has('client_profile:view'),
+      subs: [ { key: 'leads', label: 'Leads', show: () => has('coach:operations'), run: leads },
+              { key: 'contacts', label: 'Contacts', show: () => has('client_profile:view'), run: crmContacts } ] },
+    { key: 'schedule', label: 'Schedule', icon: '◷', show: () => has('coach:operations'),
+      subs: [ { key: 'calendar', label: 'Calendar', show: () => true, run: calendar },
+              { key: 'availability', label: 'Weekly availability', show: () => true, run: availability },
+              { key: 'exceptions', label: 'Exceptions', show: () => true, run: exceptions },
+              { key: 'tours', label: 'Tour stops', show: () => true, run: tours } ] },
+    { key: 'bookings', label: 'Bookings', icon: '▤', show: () => has('coach:operations'), run: bookings },
+    { key: 'services', label: 'Services', icon: '❖', show: () => has('catalog:view'), run: catalogue },
+    { key: 'finance', label: 'Finance', icon: '$', show: () => has('finance:view'), run: finance },
+    { key: 'analytics', label: 'Analytics', icon: '◔', show: () => has('analytics:view'), run: analytics },
+    { key: 'access', label: 'Access', icon: '⚿', show: () => has('platform:admin'), run: access },
+  ];
+}
+let NAV = [];
+let cur = { section: null, sub: null };
+
 async function render(session) {
-  $('#who').innerHTML = session ? `<span class="ad-muted" style="font-size:13px;margin-right:10px">${esc(session.user.email)}</span><button class="btn btn-line btn-sm" data-signout>Sign out</button>` : '';
-  if (session && me && me.email === session.user.email && tab) return;   // already rendered for this user (token refresh)
-  $('#login').hidden = !!session; $('#app').hidden = true; $('#noaccess').hidden = true; $('#tabs').hidden = true;
-  if (!session) { me = null; tab = null; return; }
+  if (session && me && me.email === session.user.email && cur.section) { renderAccount(session); return; }
+  $('#login').hidden = !!session; $('#app').hidden = true; $('#noaccess').hidden = true;
+  $('#sidebar').hidden = true; $('#topbar').hidden = true; $('#subnav').hidden = true;
+  if (!session) { me = null; cur = { section: null, sub: null }; return; }
   try {
     const { data, error } = await sb.rpc('my_permissions'); if (error) throw error;
     me = data;
-    // One workspace: each tab appears only for the permission that unlocks it.
-    // Finance is a tab like any other — its independent finance:view permission
-    // gates it, and RLS/RPCs still enforce access under the hood.
-    const tabs = [];
-    if (has('coach:operations')) tabs.push(['leads', 'Leads'], ['calendar', 'Calendar'], ['bookings', 'Bookings'], ['availability', 'Availability'], ['exceptions', 'Exceptions'], ['tours', 'Tour stops']);
-    if (has('catalog:view')) tabs.push(['services', 'Services']);
-    if (has('finance:view')) tabs.push(['finance', 'Finance']);
-    if (has('analytics:view')) tabs.push(['analytics', 'Analytics']);
-    if (has('platform:admin')) tabs.push(['access', 'Access']);
-    if (!tabs.length) { $('#noaccess').hidden = false; return; }
+    const model = navModel();
+    const others = model.filter((s) => s.key !== 'overview' && s.show());
+    NAV = model.filter((s) => s.key === 'overview' ? others.length > 0 : s.show())
+               .map((s) => ({ ...s, subs: s.subs ? s.subs.filter((x) => x.show()) : null }))
+               .filter((s) => !s.subs || s.subs.length);
+    if (!NAV.length) { renderAccount(session); $('#noaccess').hidden = false; return; }
     const { data: svc, error: e2 } = await sb.from('services').select(SERVICE_COLS).order('sort_order'); if (e2) throw e2;
     services = svc || [];
-    $('#tabs').innerHTML = tabs.map(([k, l]) => `<a data-tab="${k}">${l}</a>`).join('');
-    $('#tabs').hidden = false; $('#app').hidden = false;
-    $('#tabs').onclick = (e) => { const a = e.target.closest('[data-tab]'); if (a) go(a.dataset.tab); };
-    go(location.hash.slice(1) && tabs.some(([k]) => k === location.hash.slice(1)) ? location.hash.slice(1) : tabs[0][0]);
+    // sidebar
+    $('#nav').innerHTML = NAV.map((s) => `<a data-section="${s.key}"><span class="ico">${s.icon}</span>${esc(s.label)}</a>`).join('');
+    $('#nav').onclick = (e) => { const a = e.target.closest('[data-section]'); if (a) { go(a.dataset.section); closeDrawer(); } };
+    $('#side-foot').textContent = session.user.email;
+    $('#sidebar').hidden = false; $('#topbar').hidden = false; $('#app').hidden = false;
+    renderAccount(session);
+    $('#burger').onclick = () => { $('#sidebar').classList.add('open'); $('#scrim').style.display = 'block'; };
+    $('#scrim').onclick = closeDrawer;
+    // initial route from the hash
+    const [hSec, hSub] = location.hash.slice(1).split('/');
+    go(NAV.some((s) => s.key === hSec) ? hSec : NAV[0].key, hSub);
   } catch (e) { fail(e); }
 }
+function closeDrawer() { $('#sidebar').classList.remove('open'); $('#scrim').style.display = 'none'; }
 
-function go(name) {
-  tab = name; location.hash = name;
-  for (const a of $('#tabs').querySelectorAll('a')) a.classList.toggle('on', a.dataset.tab === name);
-  view.innerHTML = '<p class="ad-empty">Loading…</p>';
-  ({ leads, calendar, bookings, availability, exceptions, tours, services: catalogue, finance, analytics, access })[name]().catch(fail);
+function renderAccount(session) {
+  const email = session.user.email;
+  const ini = (email || '?').slice(0, 2).toUpperCase();
+  $('#account').innerHTML = `<button class="acct" id="acct-btn" aria-haspopup="true"><span class="who">${esc(email)}</span><span class="ini">${esc(ini)}</span></button>`;
+  const btn = $('#acct-btn');
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if ($('.ad-acct-menu')) { $('.ad-acct-menu').remove(); return; }
+    const m = document.createElement('div'); m.className = 'ad-acct-menu';
+    m.innerHTML = `<div class="em">Signed in as<br><b>${esc(email)}</b></div><button data-signout>Sign out</button>`;
+    $('#account').appendChild(m);
+    setTimeout(() => document.addEventListener('click', function close() { m.remove(); document.removeEventListener('click', close); }), 0);
+  };
 }
 
-/* =============================== LEADS =============================== */
+// route to a section (and optional sub-tab); keeps the hash in sync
+function go(sectionKey, subKey) {
+  const section = NAV.find((s) => s.key === sectionKey) || NAV[0];
+  cur.section = section.key;
+  for (const a of $('#nav').querySelectorAll('[data-section]')) a.classList.toggle('on', a.dataset.section === section.key);
+  $('#topbar-title').textContent = section.label;
+  $('#topbar-sub').textContent = '';
+  if (section.subs && section.subs.length) {
+    const sub = section.subs.find((x) => x.key === subKey) || section.subs[0];
+    cur.sub = sub.key;
+    location.hash = `${section.key}/${sub.key}`;
+    $('#subnav').hidden = false;
+    $('#subnav').innerHTML = section.subs.map((x) => `<a data-sub="${x.key}" class="${x.key === sub.key ? 'on' : ''}">${esc(x.label)}</a>`).join('');
+    $('#subnav').onclick = (e) => { const a = e.target.closest('[data-sub]'); if (a) go(section.key, a.dataset.sub); };
+    view.innerHTML = '<p class="ad-empty">Loading…</p>';
+    sub.run().catch(fail);
+  } else {
+    cur.sub = null;
+    location.hash = section.key;
+    $('#subnav').hidden = true;
+    view.innerHTML = '<p class="ad-empty">Loading…</p>';
+    section.run().catch(fail);
+  }
+}
+
+/* =============================== CRM · LEADS =============================== */
+// Leads are enquiry submissions. Each row is clickable and opens the client
+// profile popup, focused on that enquiry. Coach:operations only.
 async function leads() {
   const status = view.dataset.leadStatus || '';
-  let q = sb.from('contacts').select(CONTACT_COLS).order('created_at', { ascending: false }).limit(200);
+  const search = (view.dataset.leadSearch || '').trim();
+  let q = sb.from('contacts').select(CONTACT_COLS).order('created_at', { ascending: false }).limit(300);
   if (status) q = q.eq('status', status);
+  if (search) q = q.or(`name.ilike.%${search}%,contact.ilike.%${search}%,interest.ilike.%${search}%,city.ilike.%${search}%,country.ilike.%${search}%,message.ilike.%${search}%`);
   const { data, error } = await q; if (error) throw error;
   const ids = data.map((c) => c.id);
-  const { data: mediaRows } = ids.length ? await sb.from('contact_media').select('id,contact_id,original_name,content_type,size_bytes,status,storage_path').in('contact_id', ids).eq('status', 'uploaded') : { data: [] };
-  const mediaBy = {}; for (const m of mediaRows || []) (mediaBy[m.contact_id] ||= []).push(m);
-  const mb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  const { data: mediaRows } = ids.length ? await sb.from('contact_media').select('contact_id').in('contact_id', ids).eq('status', 'uploaded') : { data: [] };
+  const mediaCount = {}; for (const m of mediaRows || []) mediaCount[m.contact_id] = (mediaCount[m.contact_id] || 0) + 1;
   const opts = ['new', 'contacted', 'qualified', 'closed', 'spam'];
   view.innerHTML = `
-    <div class="ad-head"><div><h1>Leads</h1><p class="ad-muted">Enquiries from the website form. Only you see these.</p></div>
-      <div class="ad-filters"><select id="lead-status"><option value="">All statuses</option>${opts.map((o) => `<option ${o === status ? 'selected' : ''}>${o}</option>`).join('')}</select></div></div>
-    <div class="ad-panel">${table(['When', 'Who', 'Where', 'Interest', 'Message', 'Source', 'Status'], data.map((c) => `<tr>
+    <div class="ad-head"><div><h1>Leads</h1><p class="ad-muted">Website enquiries, newest first. Click a lead to open the client.</p></div>
+      <div class="ad-filters">
+        <input id="lead-search" placeholder="Search name, contact, city…" value="${esc(search)}">
+        <select id="lead-status"><option value="">All statuses</option>${opts.map((o) => `<option ${o === status ? 'selected' : ''}>${o}</option>`).join('')}</select>
+      </div></div>
+    <div class="ad-panel">${table(['When', 'Who', 'Where', 'Interest', 'Message', 'Status', ''], data.map((c) => `<tr class="clik" data-crm="${esc(c.crm_contact_id || '')}" data-enquiry="${c.id}">
       <td>${fmt(c.created_at, 'Asia/Dubai')}</td>
-      <td><b>${esc(c.name)}</b><br><a href="${c.contact.includes('@') ? 'mailto:' + esc(c.contact) : 'https://wa.me/' + esc(c.contact.replace(/\D/g, ''))}">${esc(c.contact)}</a></td>
+      <td><b>${esc(c.name)}</b><br><span class="ad-muted" style="font-size:12px">${esc(c.contact)}</span></td>
       <td>${esc(c.location_raw || [c.city, c.country].filter(Boolean).join(', ') || '—')}</td>
       <td>${esc(c.interest || '—')}</td>
-      <td class="msg">${esc(c.message || '')}${(mediaBy[c.id] || []).map((m) => `<div><a href="#" data-media-path="${esc(m.storage_path)}">${m.content_type.startsWith('video/') ? '🎬' : '🖼'} ${esc(m.original_name)}</a> <span class="ad-muted">${mb(m.size_bytes)}</span></div>`).join('')}</td>
-      <td class="ad-muted" style="font-size:12px">${esc([c.utm_source, c.utm_medium, c.utm_campaign].filter(Boolean).join(' / ') || (c.referrer ? new URL(c.referrer).hostname : 'direct'))}<br>${esc(c.page || '')}</td>
-      <td><select data-lead="${c.id}">${opts.map((o) => `<option ${o === c.status ? 'selected' : ''}>${o}</option>`).join('')}</select></td>
-    </tr>`), 'No leads yet.')}</div>`;
+      <td class="msg">${esc((c.message || '').slice(0, 140))}${(c.message || '').length > 140 ? '…' : ''}</td>
+      <td>${st(c.status)}</td>
+      <td class="ad-muted">${mediaCount[c.id] ? ('📎 ' + mediaCount[c.id]) : ''}</td>
+    </tr>`), 'No leads match.')}</div>`;
   $('#lead-status').onchange = (e) => { view.dataset.leadStatus = e.target.value; leads().catch(fail); };
-  view.querySelectorAll('[data-media-path]').forEach((a) => a.onclick = async (e) => {
-    e.preventDefault();
-    const { data, error } = await sb.storage.from('enquiry-media').createSignedUrl(a.dataset.mediaPath, 600);
-    if (error || !data?.signedUrl) return fail(error || new Error('Could not open the file'));
-    window.open(data.signedUrl, '_blank', 'noopener');
-  });
-  view.querySelectorAll('[data-lead]').forEach((s) => s.onchange = async () => {
-    const { error } = await sb.from('contacts').update({ status: s.value }).eq('id', s.dataset.lead);
-    if (error) return fail(error); toast('Lead updated');
-  });
+  $('#lead-search').onchange = (e) => { view.dataset.leadSearch = e.target.value.trim(); leads().catch(fail); };
+  view.querySelectorAll('tr.clik').forEach((tr) => tr.onclick = () => openProfile(tr.dataset.crm || null, tr.dataset.enquiry, 'enquiries'));
+}
+
+/* =============================== CRM · CONTACTS =============================== */
+// Canonical people (crm_contacts) with enquiry/booking counts. client_profile:view.
+async function crmContacts() {
+  const search = (view.dataset.cSearch || '').trim();
+  const status = view.dataset.cStatus || '';
+  const { data, error } = await sb.rpc('crm_list_contacts', { p_search: search || null }); if (error) throw error;
+  const rows = (data || []).filter((c) => !status || c.status === status);
+  const opts = ['lead', 'active', 'past', 'archived'];
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Contacts</h1><p class="ad-muted">Every person who has enquired or booked. Click to open the profile.</p></div>
+      <div class="ad-filters">
+        <input id="c-search" placeholder="Search name, email, phone, city…" value="${esc(search)}">
+        <select id="c-status"><option value="">All statuses</option>${opts.map((o) => `<option ${o === status ? 'selected' : ''}>${o}</option>`).join('')}</select>
+        ${has('client_profile:manage') ? '<button class="btn btn-accent btn-sm" id="c-new">New contact</button>' : ''}
+      </div></div>
+    <div class="ad-panel">${table(['Name', 'Where', 'Contact', 'Interest', 'Enquiries', 'Bookings', 'Last activity', 'Status'], rows.map((c) => `<tr class="clik" data-crm="${c.id}">
+      <td><b>${esc(c.display_name || '—')}</b>${c.needs_review ? ' <span class="ad-badge-rev">review</span>' : ''}</td>
+      <td>${esc([c.city, c.country].filter(Boolean).join(', ') || '—')}</td>
+      <td class="ad-muted" style="font-size:12px">${esc(c.email || c.phone || '—')}</td>
+      <td>${esc(c.main_interest || '—')}</td>
+      <td class="num">${c.enquiry_count}</td>
+      <td class="num">${c.booking_count}</td>
+      <td>${fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td>
+      <td>${st(c.status)}</td>
+    </tr>`), 'No contacts match.')}</div>`;
+  $('#c-status').onchange = (e) => { view.dataset.cStatus = e.target.value; crmContacts().catch(fail); };
+  $('#c-search').onchange = (e) => { view.dataset.cSearch = e.target.value.trim(); crmContacts().catch(fail); };
+  const nb = $('#c-new'); if (nb) nb.onclick = () => openContactEditor(null);
+  view.querySelectorAll('tr.clik').forEach((tr) => tr.onclick = () => openProfile(tr.dataset.crm, null, 'overview'));
+}
+
+/* =============================== OVERVIEW =============================== */
+async function overview() {
+  const { data, error } = await sb.rpc('admin_overview'); if (error) throw error;
+  const o = data.operations, f = data.finance, c = data.crm;
+  const cards = [];
+  if (o) cards.push(['New leads · 7 days', o.new_leads_7d], ["Today's sessions", o.today_sessions], ['Upcoming bookings', o.upcoming_bookings]);
+  if (f) cards.push(['Orders awaiting payment', f.pending_payment_orders], ['Unsettled Gari payable', money(f.unsettled_payable)]);
+  if (c) cards.push(['CRM contacts', c.total_contacts], ['Flagged for review', c.needs_review]);
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Overview</h1><p class="ad-muted">A quick read on what needs attention. Only what you're allowed to see.</p></div></div>
+    <div class="ad-kpis">${cards.map(([l, v]) => `<div class="ad-kpi"><b>${v}</b><span>${esc(l)}</span></div>`).join('') || '<p class="ad-empty">Nothing to show yet.</p>'}</div>`;
 }
 
 /* =============================== BOOKINGS / CALENDAR =============================== */
@@ -535,6 +641,320 @@ async function access() {
     if (error) return fail(error);
     for (const p of f.getAll('perm')) { const { error: e2 } = await sb.rpc('admin_grant', { p_email: f.get('email'), p_permission: p }); if (e2) return fail(e2); }
     toast('Access saved'); access().catch(fail);
+  };
+}
+
+/* =============================== CLIENT PROFILE POPUP =============================== */
+/* A large responsive dialog opened from Leads or Contacts. It overlays the
+   list (never navigates away), so closing it returns to the same tab,
+   filters, search and scroll position. Each section is permission-gated:
+   the canonical profile/notes need client_profile:*, progress needs
+   health_metrics:*, enquiries/bookings/media need coach:operations, payments
+   needs finance:view. Media reuses the private enquiry bucket via short-lived
+   signed URLs — no second copy. */
+let pf = null;   // { crmId, enquiryId, contact, enquiry, section }
+
+const pfName = () => pf.contact?.display_name || pf.enquiry?.name || 'Client';
+function pfPrimary() {
+  const em = pf.contact?.email || (pf.enquiry && pf.enquiry.contact?.includes('@') ? pf.enquiry.contact : null);
+  const ph = pf.contact?.phone || (pf.enquiry && !pf.enquiry.contact?.includes('@') ? pf.enquiry.contact : null);
+  return { em, ph };
+}
+const waHref = (p) => 'https://wa.me/' + String(p || '').replace(/\D/g, '');
+const initials = (n) => (n || '?').trim().split(/\s+/).slice(0, 2).map((x) => x[0]?.toUpperCase() || '').join('') || '?';
+
+async function openProfile(crmId, enquiryId, section = 'overview') {
+  const host = $('#profile'); host.hidden = false; document.body.style.overflow = 'hidden';
+  host.innerHTML = '<div class="sheet"><div class="pf-body"><p class="ad-empty">Loading…</p></div></div>';
+  let enquiry = null, contact = null;
+  if (enquiryId) { const { data } = await sb.from('contacts').select(CONTACT_COLS).eq('id', enquiryId).maybeSingle(); enquiry = data; if (!crmId) crmId = data?.crm_contact_id; }
+  if (crmId && has('client_profile:view')) { const { data } = await sb.from('crm_contacts').select('*').eq('id', crmId).maybeSingle(); contact = data; }
+  pf = { crmId, enquiryId, contact, enquiry, section };
+  renderProfile(section);
+}
+function pfClose() { const host = $('#profile'); host.hidden = true; host.innerHTML = ''; document.body.style.overflow = ''; pf = null; }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#profile').hidden) pfClose(); });
+
+function pfSections() {
+  const s = [];
+  if (has('client_profile:view') && pf.contact) s.push(['overview', 'Overview', pfOverview], ['notes', 'Notes', pfNotes]);
+  if (has('health_metrics:view') && pf.contact) s.push(['progress', 'Progress', pfProgress]);
+  if (has('coach:operations')) s.push(['enquiries', 'Enquiries', pfEnquiries], ['bookings', 'Bookings', pfBookings]);
+  if (has('finance:view') && has('coach:operations')) s.push(['payments', 'Payments', pfPayments]);
+  if (has('coach:operations')) s.push(['media', 'Media', pfMedia], ['attribution', 'Attribution', pfAttribution]);
+  return s;
+}
+
+function renderProfile(section) {
+  const secs = pfSections();
+  const active = secs.find(([k]) => k === section) || secs[0];
+  pf.section = active ? active[0] : null;
+  const { em, ph } = pfPrimary();
+  const c = pf.contact;
+  const meta = [c ? st(c.status) : null,
+    [c?.city || pf.enquiry?.city, c?.country || pf.enquiry?.country].filter(Boolean).join(', ') || null,
+    em, ph].filter(Boolean);
+  const host = $('#profile');
+  host.innerHTML = `<div class="sheet">
+    <div class="pf-head">
+      <div class="pf-avatar">${esc(initials(pfName()))}</div>
+      <div class="pf-id"><h2>${esc(pfName())}</h2><div class="pf-meta">${meta.map((m) => `<span>${typeof m === 'string' && m.startsWith('<span') ? m : esc(m)}</span>`).join('')}</div></div>
+      <div class="pf-actions">
+        ${ph ? `<a class="btn btn-line btn-xs" href="${waHref(ph)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+        ${em ? `<a class="btn btn-line btn-xs" href="mailto:${esc(em)}">Email</a>` : ''}
+        ${(c && has('client_profile:manage')) ? '<button class="btn btn-line btn-xs" id="pf-edit">Edit</button>' : ''}
+        <button class="pf-close" id="pf-x" aria-label="Close">×</button>
+      </div>
+    </div>
+    ${secs.length ? `<div class="pf-tabs">${secs.map(([k, l]) => `<a data-pf="${k}" class="${k === pf.section ? 'on' : ''}">${l}</a>`).join('')}</div>` : ''}
+    <div class="pf-body" id="pf-body"><p class="ad-empty">Loading…</p></div>
+  </div>`;
+  $('#pf-x').onclick = pfClose;
+  const eb = $('#pf-edit'); if (eb) eb.onclick = () => openContactEditor(pf.contact);
+  const tabs = host.querySelector('.pf-tabs');
+  if (tabs) tabs.onclick = (e) => { const a = e.target.closest('[data-pf]'); if (a) { for (const x of tabs.querySelectorAll('a')) x.classList.toggle('on', x === a); renderProfileBody(a.dataset.pf); } };
+  if (active) renderProfileBody(active[0]); else $('#pf-body').innerHTML = '<p class="pf-sec-empty">No sections you can view.</p>';
+}
+function renderProfileBody(key) {
+  pf.section = key;
+  const run = pfSections().find(([k]) => k === key)?.[2];
+  $('#pf-body').innerHTML = '<p class="ad-empty">Loading…</p>';
+  if (run) run().catch(fail);
+}
+
+/* ---- profile sections ---- */
+async function pfOverview() {
+  const c = pf.contact;
+  const kv = [
+    ['Status', c.status], ['City', c.city], ['Country', c.country],
+    ['Email', c.email], ['Phone / WhatsApp', c.phone],
+    ['Preferred timezone', c.preferred_timezone], ['Preferred language', c.preferred_language],
+    ['Height', c.height_cm != null ? c.height_cm + ' cm' : null],
+    ['Goals', c.goals],
+    ['First seen', fmt(c.first_seen_at, 'Asia/Dubai', { dateStyle: 'medium' })],
+    ['Last activity', fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })],
+  ];
+  $('#pf-body').innerHTML = `
+    ${c.needs_review ? '<p class="ad-note">This person was auto-created from an ambiguous match and is <b>flagged for review</b>. A manual merge can be added later.</p>' : ''}
+    <dl class="pf-kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v ? esc(v) : '—'}</dd>`).join('')}</dl>
+    <details class="pf-tech"><summary>Technical</summary><dl class="pf-kv" style="margin-top:10px"><dt>CRM id</dt><dd>${esc(c.id)}</dd><dt>Created by</dt><dd>${esc(c.created_by || '—')}</dd><dt>Updated by</dt><dd>${esc(c.updated_by || '—')}</dd></dl></details>`;
+}
+
+async function pfNotes() {
+  const { data, error } = await sb.from('crm_notes').select('*').eq('crm_contact_id', pf.crmId).order('pinned', { ascending: false }).order('created_at', { ascending: false });
+  if (error) throw error;
+  const canManage = has('client_profile:manage');
+  const cats = ['general', 'session', 'goal', 'admin'];
+  $('#pf-body').innerHTML = `
+    ${canManage ? `<form id="pf-note-form" class="ad-form" style="margin:0 0 16px">
+      <textarea name="body" required placeholder="Add a note — visible only to the back-office."></textarea>
+      <div class="actions"><select name="category"><option value="">No category</option>${cats.map((c) => `<option>${c}</option>`).join('')}</select>
+      <label style="flex-direction:row;align-items:center;gap:6px;font-weight:600"><input type="checkbox" name="pinned"> Pin</label>
+      <button class="btn btn-accent btn-sm" type="submit">Add note</button></div></form>` : ''}
+    <div id="pf-note-list">${(data || []).map(noteHtml).join('') || '<p class="pf-sec-empty">No notes yet.</p>'}</div>`;
+  const form = $('#pf-note-form');
+  if (form) form.onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(form);
+    const { error } = await sb.rpc('crm_add_note', { p_contact_id: pf.crmId, p_body: f.get('body'), p_category: f.get('category') || null, p_pinned: !!f.get('pinned') });
+    if (error) return fail(error); toast('Note added'); pfNotes().catch(fail);
+  };
+  bindNoteActions();
+}
+function noteHtml(n) {
+  return `<div class="pf-note ${n.pinned ? 'pinned' : ''}" data-note="${n.id}">
+    <div class="body">${esc(n.body)}</div>
+    <div class="meta">${n.pinned ? '📌 ' : ''}${n.category ? esc(n.category) + ' · ' : ''}${esc(n.author)} · ${fmt(n.created_at, 'Asia/Dubai')}${n.updated_at && n.updated_at !== n.created_at ? ' · edited' : ''}
+      ${has('client_profile:manage') ? `<button class="btn btn-line btn-xs" data-note-edit="${n.id}">Edit</button><button class="btn btn-line btn-xs" data-note-pin="${n.id}" data-to="${!n.pinned}">${n.pinned ? 'Unpin' : 'Pin'}</button>` : ''}</div></div>`;
+}
+function bindNoteActions() {
+  $('#pf-body').querySelectorAll('[data-note-pin]').forEach((b) => b.onclick = async () => {
+    const note = $('#pf-body').querySelector(`[data-note="${b.dataset.notePin}"] .body`).textContent;
+    const { error } = await sb.rpc('crm_edit_note', { p_note_id: b.dataset.notePin, p_body: note, p_pinned: b.dataset.to === 'true' });
+    if (error) return fail(error); pfNotes().catch(fail);
+  });
+  $('#pf-body').querySelectorAll('[data-note-edit]').forEach((b) => b.onclick = () => {
+    const card = $('#pf-body').querySelector(`[data-note="${b.dataset.noteEdit}"]`);
+    const body = card.querySelector('.body').textContent;
+    card.innerHTML = `<textarea class="ad-edit" style="width:100%;min-height:70px;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px">${esc(body)}</textarea>
+      <div class="actions" style="display:flex;gap:8px;margin-top:8px"><button class="btn btn-accent btn-xs" data-save>Save</button><button class="btn btn-line btn-xs" data-cancel>Cancel</button></div>`;
+    card.querySelector('[data-cancel]').onclick = () => pfNotes().catch(fail);
+    card.querySelector('[data-save]').onclick = async () => {
+      const { error } = await sb.rpc('crm_edit_note', { p_note_id: b.dataset.noteEdit, p_body: card.querySelector('textarea').value });
+      if (error) return fail(error); toast('Note updated'); pfNotes().catch(fail);
+    };
+  });
+}
+
+async function pfProgress() {
+  const { data, error } = await sb.from('body_measurements').select('*').eq('crm_contact_id', pf.crmId).order('measured_at', { ascending: false }).order('created_at', { ascending: false });
+  if (error) throw error;
+  const rows = data || [];
+  const latest = rows[0], prev = rows[1];
+  const canManage = has('health_metrics:manage');
+  const delta = (a, b, unit, goodDown) => {
+    if (a == null || b == null) return '';
+    const d = +(a - b).toFixed(1); if (d === 0) return `<div class="delta flat">no change</div>`;
+    const down = d < 0; const good = goodDown ? down : !down;
+    return `<div class="delta ${good ? 'up' : 'down'}">${down ? '↓' : '↑'} ${Math.abs(d)}${unit}</div>`;
+  };
+  const metric = (lbl, val, unit, d) => val == null ? '' : `<div class="pf-metric"><div class="lbl">${lbl}</div><div class="val">${val}${unit}</div>${d}</div>`;
+  const chron = rows.slice().reverse().filter((r) => r.weight_kg != null);
+  $('#pf-body').innerHTML = `
+    ${latest ? `<div class="pf-metrics">
+      ${metric('Weight', latest.weight_kg, ' kg', delta(latest.weight_kg, prev?.weight_kg, ' kg', true))}
+      ${metric('BMI', latest.bmi, '', delta(latest.bmi, prev?.bmi, '', true))}
+      ${metric('Body fat', latest.body_fat_pct, '%', delta(latest.body_fat_pct, prev?.body_fat_pct, ' pts', true))}
+      ${metric('Muscle', latest.muscle_pct, '%', delta(latest.muscle_pct, prev?.muscle_pct, ' pts', false))}
+      <div class="pf-metric"><div class="lbl">Measured</div><div class="val" style="font-size:16px">${fmt(latest.measured_at, 'UTC', { dateStyle: 'medium' })}</div></div>
+    </div>${sparkline(chron)}` : '<p class="pf-sec-empty">No measurements yet.</p>'}
+    ${canManage ? `<form id="pf-mform" class="ad-form" style="margin-top:16px">
+      <div class="row"><label>Date <input type="date" name="measured_at" value="${new Date().toISOString().slice(0, 10)}"></label>
+      <label>Weight (kg) <input type="number" step="0.1" min="20" max="500" name="weight"></label>
+      <label>Body fat (%) <input type="number" step="0.1" min="1" max="75" name="body_fat"></label>
+      <label>Muscle (%) <input type="number" step="0.1" min="1" max="80" name="muscle"></label>
+      <label>Height (cm) <input type="number" step="0.1" min="50" max="260" name="height" placeholder="${pf.contact?.height_cm ?? ''}"></label></div>
+      <label>Note <input name="note" placeholder="Optional"></label>
+      <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Add measurement</button><span class="ad-muted" style="font-size:12px">BMI is computed from weight and the height on record.</span></div></form>` : ''}
+    ${rows.length ? `<div class="ad-panel" style="margin-top:16px;padding:0"><div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>Date</th><th class="num">Weight</th><th class="num">BMI</th><th class="num">Body fat</th><th class="num">Muscle</th><th>Note</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td>${fmt(r.measured_at, 'UTC', { dateStyle: 'medium' })}</td><td class="num">${r.weight_kg ?? '—'}</td><td class="num">${r.bmi ?? '—'}</td><td class="num">${r.body_fat_pct ?? '—'}</td><td class="num">${r.muscle_pct ?? '—'}</td><td class="msg">${esc(r.note || '')}</td></tr>`).join('')}
+      </tbody></table></div></div>` : ''}`;
+  const form = $('#pf-mform');
+  if (form) form.onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(form);
+    const num = (k) => f.get(k) === '' ? null : Number(f.get(k));
+    if (num('weight') == null && num('body_fat') == null && num('muscle') == null) return toast('Enter at least a weight, body fat or muscle value', true);
+    const { error } = await sb.rpc('metrics_add', { p_contact_id: pf.crmId, p_measured_at: f.get('measured_at') || null, p_weight: num('weight'), p_body_fat: num('body_fat'), p_muscle: num('muscle'), p_height: num('height'), p_note: f.get('note') || null });
+    if (error) return fail(error); toast('Measurement recorded'); pfProgress().catch(fail);
+  };
+}
+function sparkline(rows) {
+  if (rows.length < 2) return '';
+  const ws = rows.map((r) => Number(r.weight_kg));
+  const min = Math.min(...ws), max = Math.max(...ws), span = max - min || 1;
+  const W = 260, H = 44, n = ws.length;
+  const pts = ws.map((w, i) => `${(i / (n - 1) * W).toFixed(1)},${(H - 4 - (w - min) / span * (H - 8)).toFixed(1)}`).join(' ');
+  return `<svg class="pf-spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="Weight trend"><polyline fill="none" stroke="var(--accent)" stroke-width="2" points="${pts}"/></svg>`;
+}
+
+async function pfEnquiries() {
+  let list = [];
+  if (pf.crmId) { const { data } = await sb.from('contacts').select(CONTACT_COLS).eq('crm_contact_id', pf.crmId).order('created_at', { ascending: false }); list = data || []; }
+  else if (pf.enquiry) list = [pf.enquiry];
+  if (!list.length) { $('#pf-body').innerHTML = '<p class="pf-sec-empty">No enquiries.</p>'; return; }
+  const opts = ['new', 'contacted', 'qualified', 'closed', 'spam'];
+  $('#pf-body').innerHTML = list.map((c) => {
+    const open = c.id === pf.enquiryId || list.length === 1;
+    const where = [c.city, c.country].filter(Boolean).join(', ') || c.location_raw || '—';
+    return `<details class="pf-tech" ${open ? 'open' : ''} style="border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px">
+      <summary style="color:var(--black)"><b>${esc(c.interest || 'Enquiry')}</b> · ${fmt(c.created_at, 'Asia/Dubai')} · ${st(c.status)}</summary>
+      <dl class="pf-kv" style="margin-top:10px">
+        <dt>Name</dt><dd>${esc(c.name || '—')}</dd>
+        <dt>Contact</dt><dd>${esc(c.contact || '—')}</dd>
+        <dt>Where</dt><dd>${esc(where)}</dd>
+        <dt>Interest</dt><dd>${esc(c.interest || '—')}</dd>
+        <dt>Message</dt><dd style="white-space:pre-wrap">${esc(c.message || '—')}</dd>
+        <dt>Submitted</dt><dd>${fmt(c.created_at, 'Asia/Dubai')}</dd>
+      </dl>
+      <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+        ${has('coach:operations') ? `<select data-estatus="${c.id}">${opts.map((o) => `<option ${o === c.status ? 'selected' : ''}>${o}</option>`).join('')}</select>` : ''}
+        ${c.contact?.includes('@') ? `<a class="btn btn-line btn-xs" href="mailto:${esc(c.contact)}">Email</a>` : (c.contact ? `<a class="btn btn-line btn-xs" href="${waHref(c.contact)}" target="_blank" rel="noopener">WhatsApp</a>` : '')}
+      </div>
+      <details class="pf-tech"><summary>Technical</summary><dl class="pf-kv" style="margin-top:8px"><dt>Enquiry id</dt><dd>${esc(c.id)}</dd><dt>Submission id</dt><dd>${esc(c.submission_id || '—')}</dd><dt>Source</dt><dd>${esc(c.source || '—')}</dd></dl></details>
+    </details>`;
+  }).join('');
+  $('#pf-body').querySelectorAll('[data-estatus]').forEach((s) => s.onchange = async () => {
+    const { error } = await sb.from('contacts').update({ status: s.value }).eq('id', s.dataset.estatus);
+    if (error) return fail(error); toast('Lead status updated');
+  });
+}
+
+async function pfBookings() {
+  if (!pf.crmId) { $('#pf-body').innerHTML = '<p class="pf-sec-empty">No bookings.</p>'; return; }
+  const { data, error } = await sb.from('bookings').select(BOOKING_COLS).eq('crm_contact_id', pf.crmId).order('start_at', { ascending: false });
+  if (error) throw error;
+  const rows = data || [];
+  pf._bookingRefs = rows.map((b) => b.reference);
+  $('#pf-body').innerHTML = rows.length ? `<div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>When</th><th>Session</th><th>Ref · status</th><th class="num">Price</th></tr></thead><tbody>
+    ${rows.map((b) => `<tr><td>${fmt(b.start_at, b.session_timezone, { dateStyle: 'medium', timeStyle: 'short' })}<br><span class="ad-muted" style="font-size:12px">${esc(b.session_timezone)}</span></td>
+      <td>${esc(b.service_title || b.services?.title || '—')}<br><span class="ad-muted" style="font-size:12px">${esc(b.delivery_mode)}</span></td>
+      <td>${esc(b.reference)}<br>${st(b.status)}</td><td class="num">${b.price_amount == null ? 'on request' : money(b.price_amount, b.currency)}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="pf-sec-empty">No bookings yet.</p>';
+}
+
+async function pfPayments() {
+  if (!has('coach:operations')) { $('#pf-body').innerHTML = '<p class="pf-sec-empty">Open this client from Finance to see payment detail.</p>'; return; }
+  if (!pf._bookingRefs) { const { data } = await sb.from('bookings').select('reference').eq('crm_contact_id', pf.crmId); pf._bookingRefs = (data || []).map((b) => b.reference); }
+  const refs = new Set(pf._bookingRefs);
+  const { data, error } = await sb.rpc('finance_orders'); if (error) throw error;
+  const rows = (data || []).filter((o) => refs.has(o.booking_reference));
+  $('#pf-body').innerHTML = rows.length ? `<div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>Order</th><th>Session</th><th class="num">Gross</th><th class="num">Net</th><th class="num">Commission</th><th class="num">Payable</th><th>Status</th></tr></thead><tbody>
+    ${rows.map((o) => `<tr><td>${esc(o.reference)}<br>${st(o.status)}</td><td>${esc(o.service_title)}</td><td class="num">${money(o.gross_amount, o.currency)}</td><td class="num">${money(o.net_collected, o.currency)}</td><td class="num">${money(o.oolala_commission, o.currency)}</td><td class="num"><b>${money(o.gari_payable, o.currency)}</b></td><td>${o.earning_status ? st(o.earning_status) : '—'}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="pf-sec-empty">No payments for this client.</p>';
+}
+
+async function pfMedia() {
+  let cids = [];
+  if (pf.crmId) { const { data } = await sb.from('contacts').select('id').eq('crm_contact_id', pf.crmId); cids = (data || []).map((c) => c.id); }
+  else if (pf.enquiryId) cids = [pf.enquiryId];
+  if (!cids.length) { $('#pf-body').innerHTML = '<p class="pf-sec-empty">No attachments.</p>'; return; }
+  const { data, error } = await sb.from('contact_media').select('id,contact_id,original_name,content_type,size_bytes,storage_path,status').in('contact_id', cids).eq('status', 'uploaded');
+  if (error) throw error;
+  const rows = data || [];
+  const mb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  $('#pf-body').innerHTML = rows.length ? `<p class="ad-note">Attachments from this client's enquiries. Files stay in the private bucket; links open for 10 minutes.</p>
+    <div class="ad-table-wrap"><table class="ad-table"><tbody>${rows.map((m) => `<tr><td>${m.content_type.startsWith('video/') ? '🎬' : '🖼'} <a href="#" data-media="${esc(m.storage_path)}">${esc(m.original_name)}</a></td><td class="ad-muted num">${mb(m.size_bytes)}</td></tr>`).join('')}</tbody></table></div>`
+    : '<p class="pf-sec-empty">No attachments.</p>';
+  $('#pf-body').querySelectorAll('[data-media]').forEach((a) => a.onclick = async (e) => {
+    e.preventDefault();
+    const { data, error } = await sb.storage.from('enquiry-media').createSignedUrl(a.dataset.media, 600);
+    if (error || !data?.signedUrl) return fail(error || new Error('Could not open the file'));
+    window.open(data.signedUrl, '_blank', 'noopener');
+  });
+}
+
+async function pfAttribution() {
+  let c = pf.enquiry;
+  if (!c && pf.crmId) { const { data } = await sb.from('contacts').select(CONTACT_COLS).eq('crm_contact_id', pf.crmId).order('created_at', { ascending: false }).limit(1); c = (data || [])[0]; }
+  if (!c) { $('#pf-body').innerHTML = '<p class="pf-sec-empty">No attribution captured.</p>'; return; }
+  const entry = (c.page || '').includes('entry_point=') ? decodeURIComponent(c.page.split('entry_point=')[1]) : null;
+  const kv = [['Source', c.utm_source], ['Medium', c.utm_medium], ['Campaign', c.utm_campaign], ['Content', c.utm_content], ['Term', c.utm_term],
+    ['CTA / entry point', entry], ['Referrer', c.referrer], ['Landing page', c.landing_page], ['First visit', c.first_visit_at ? fmt(c.first_visit_at, 'Asia/Dubai') : null], ['Submitted from', c.page]];
+  $('#pf-body').innerHTML = `<dl class="pf-kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v ? esc(v) : '—'}</dd>`).join('')}</dl>`;
+}
+
+/* ---- create / edit canonical contact ---- */
+function openContactEditor(c) {
+  const host = $('#profile'); host.hidden = false; document.body.style.overflow = 'hidden';
+  const v = (x) => x == null ? '' : x;
+  const stOpts = ['lead', 'active', 'past', 'archived'];
+  host.innerHTML = `<div class="sheet"><div class="pf-head"><div class="pf-id"><h2>${c ? 'Edit ' + esc(c.display_name || 'contact') : 'New contact'}</h2></div><div class="pf-actions"><button class="pf-close" id="ce-x">×</button></div></div>
+    <div class="pf-body"><form id="ce-form" class="ad-form">
+      <div class="row"><label>Display name <input name="display_name" required value="${esc(v(c?.display_name))}"></label>
+      <label>Status <select name="status">${stOpts.map((s) => `<option ${c && c.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div>
+      <div class="row"><label>Email <input name="email" type="email" value="${esc(v(c?.email))}"></label>
+      <label>Phone / WhatsApp <input name="phone" value="${esc(v(c?.phone))}"></label></div>
+      <div class="row"><label>City <input name="city" value="${esc(v(c?.city))}"></label>
+      <label>Country <input name="country" value="${esc(v(c?.country))}"></label></div>
+      <div class="row"><label>Preferred timezone <input name="preferred_timezone" value="${esc(v(c?.preferred_timezone))}" placeholder="Asia/Dubai"></label>
+      <label>Preferred language <input name="preferred_language" value="${esc(v(c?.preferred_language))}" placeholder="en"></label>
+      <label>Height (cm) <input name="height_cm" type="number" step="0.1" min="50" max="260" value="${esc(v(c?.height_cm))}"></label></div>
+      <label>Coaching goals <textarea name="goals">${esc(v(c?.goals))}</textarea></label>
+      <div class="actions"><button class="btn btn-accent btn-sm" type="submit">${c ? 'Save' : 'Create'}</button>
+      <button class="btn btn-line btn-sm" type="button" id="ce-cancel">Cancel</button></div>
+    </form></div></div>`;
+  $('#ce-x').onclick = () => c ? renderProfile('overview') : pfClose();
+  $('#ce-cancel').onclick = () => c ? renderProfile('overview') : pfClose();
+  $('#ce-form').onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const p = { display_name: f.get('display_name'), status: f.get('status'), email: f.get('email'), phone: f.get('phone'),
+      city: f.get('city'), country: f.get('country'), preferred_timezone: f.get('preferred_timezone'),
+      preferred_language: f.get('preferred_language'), height_cm: f.get('height_cm') || null, goals: f.get('goals') };
+    if (c) p.id = c.id;
+    const { data, error } = await sb.rpc('crm_save_contact', { p }); if (error) return fail(error);
+    toast(c ? 'Profile saved' : 'Contact created');
+    pf = { crmId: data.id, enquiryId: null, contact: data, enquiry: null, section: 'overview' };
+    renderProfile('overview');
+    if (cur.section === 'crm' && cur.sub === 'contacts') { /* refresh list underneath */ crmContacts().catch(() => {}); }
   };
 }
 

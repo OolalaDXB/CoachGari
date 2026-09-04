@@ -13,40 +13,51 @@
 </head>
 <body class="admin">
 
-<nav class="nav">
-  <div class="wrap nav-in">
-    <a class="logo" href="/">Coach Gari<i>.</i></a>
-    <div class="nav-links" id="tabs" hidden></div>
-    <div class="nav-right" id="who"></div>
+<div class="ad-shell">
+  <aside class="ad-side" id="sidebar" hidden>
+    <div class="ad-brand"><a href="/">Coach Gari<i>.</i></a><span>Back-office</span></div>
+    <nav class="ad-nav" id="nav"></nav>
+    <div class="ad-side-foot" id="side-foot"></div>
+  </aside>
+
+  <div class="ad-scrim" id="scrim" hidden></div>
+
+  <div class="ad-content">
+    <header class="ad-top" id="topbar" hidden>
+      <button class="ad-burger" id="burger" type="button" aria-label="Open menu">☰</button>
+      <div class="ad-top-ctx"><h2 id="topbar-title"></h2><p id="topbar-sub" class="ad-muted"></p></div>
+      <div class="ad-account" id="account"></div>
+    </header>
+
+    <div class="ad-subnav" id="subnav" hidden></div>
+
+    <main class="ad-main">
+      <section id="login" class="ad-card ad-login" hidden>
+        <p class="ad-eyebrow">Coach Gari · Back-office</p>
+        <h1>Sign in</h1>
+        <p class="ad-muted">Enter the email the owner provisioned. You'll receive a one-time sign-in link. There is no self-registration.</p>
+        <form id="login-form" class="ad-form">
+          <label>Email <input type="email" name="email" required autocomplete="email" placeholder="you@example.com"></label>
+          <button class="btn btn-accent" type="submit">Send me a sign-in link</button>
+        </form>
+        <p id="login-msg" class="ad-msg" hidden></p>
+      </section>
+
+      <section id="noaccess" class="ad-card" hidden>
+        <p class="ad-eyebrow">Signed in</p>
+        <h1>No back-office access</h1>
+        <p class="ad-muted">This email has no back-office permission yet. Access is granted by the owner in the database, never from this page.</p>
+        <button class="btn btn-line btn-sm" data-signout>Sign out</button>
+      </section>
+
+      <section id="app" hidden>
+        <div id="view"></div>
+      </section>
+    </main>
   </div>
-</nav>
+</div>
 
-<main class="wrap ad-main">
-
-  <section id="login" class="ad-card ad-login" hidden>
-    <p class="ad-eyebrow">Coach Gari · Back-office</p>
-    <h1>Sign in</h1>
-    <p class="ad-muted">Enter the email the owner provisioned. You'll receive a one-time sign-in link. There is no self-registration.</p>
-    <form id="login-form" class="ad-form">
-      <label>Email <input type="email" name="email" required autocomplete="email" placeholder="you@example.com"></label>
-      <button class="btn btn-accent" type="submit">Send me a sign-in link</button>
-    </form>
-    <p id="login-msg" class="ad-msg" hidden></p>
-  </section>
-
-  <section id="noaccess" class="ad-card" hidden>
-    <p class="ad-eyebrow">Signed in</p>
-    <h1>No back-office access</h1>
-    <p class="ad-muted">This email has no back-office permission yet. Access is granted by the owner in the database, never from this page.</p>
-    <button class="btn btn-line btn-sm" data-signout>Sign out</button>
-  </section>
-
-  <section id="app" hidden>
-    <div id="view"></div>
-  </section>
-
-</main>
-
+<div class="ad-modal" id="profile" hidden aria-modal="true" role="dialog"></div>
 <p id="toast" class="ad-toast" hidden></p>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
