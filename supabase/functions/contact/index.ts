@@ -312,5 +312,11 @@ Deno.serve(async (req: Request) => {
     await supabase.from("contacts").update({ notified_at: new Date().toISOString() }).eq("id", inserted.id);
   }
 
-  return json(200, { ok: true, id: inserted.id, notified }, origin, allowed);
+  // Server-issued upload credential (CG-006): 256-bit, 30 minutes, tied to this enquiry only.
+  // Only the creating response carries it; duplicates / retries never re-issue it.
+  let uploadToken: string | null = null;
+  const { data: tok, error: tokErr } = await supabase.rpc("issue_upload_token", { p_contact_id: inserted.id });
+  if (tokErr) log("upload_token_failed", { code: tokErr.code }); else uploadToken = tok as string;
+
+  return json(200, { ok: true, id: inserted.id, notified, upload_token: uploadToken, upload_expires_in: uploadToken ? 1800 : 0 }, origin, allowed);
 });
