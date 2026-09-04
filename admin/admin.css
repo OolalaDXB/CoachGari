@@ -3,6 +3,8 @@
 .admin .nav-links{display:flex;gap:4px;flex-wrap:wrap;}
 .admin .nav-links a{padding:8px 12px;border-radius:999px;font-size:14px;font-weight:600;cursor:pointer;}
 .admin .nav-links a.on{background:var(--black);color:#fff;}
+.admin .nav-links a.ad-area{margin-left:8px;color:var(--grey-text);border:1.5px solid var(--line);text-decoration:none;}
+.admin .nav-links a.ad-area:hover{color:var(--black);border-color:var(--black);}
 .ad-main{padding:36px 0 80px;}
 .ad-card{background:#fff;border-radius:18px;padding:32px;max-width:720px;}
 .ad-login{max-width:520px;margin:60px auto;}

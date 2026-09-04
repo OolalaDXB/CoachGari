@@ -1,9 +1,10 @@
 /* =============================================================
    Coach Gari — back-office (CG-002.5)
    One script, two areas:
-     /admin   (data-area="ops")     Gari    — coach:operations
-     /finance (data-area="finance") Oolala  — finance:view / finance:manage
-     analytics:view adds an Analytics tab to whichever area the person has.
+     /admin   (data-area="ops")     coach:operations
+     /finance (data-area="finance") finance:view / finance:manage
+     analytics:view adds an Analytics tab; platform:admin adds Access.
+     A person holding both sets sees an understated link to the other area.
    Magic-link sign-in (Supabase Auth) with shouldCreateUser:false — an email
    that was not provisioned by the owner cannot even create an auth user.
    What a signed-in person can see and do is decided entirely by the
@@ -100,7 +101,10 @@ async function render(session) {
     if (AREA === 'ops') tabs.push(['leads', 'Leads'], ['calendar', 'Calendar'], ['bookings', 'Bookings'], ['availability', 'Availability'], ['exceptions', 'Exceptions'], ['tours', 'Tour stops']);
     if (AREA === 'finance') tabs.push(['finance', 'Finance']);
     if (has('analytics:view')) tabs.push(['analytics', 'Analytics']);
-    $('#tabs').innerHTML = tabs.map(([k, l]) => `<a data-tab="${k}">${l}</a>`).join('');
+    if (has('platform:admin')) tabs.push(['access', 'Access']);
+    // cross-area link, only when the person actually holds the other permission
+    const other = AREA === 'finance' ? (opsOK ? '<a class="ad-area" href="/admin/">Operations ↗</a>' : '') : (finOK ? '<a class="ad-area" href="/finance/">Finance ↗</a>' : '');
+    $('#tabs').innerHTML = tabs.map(([k, l]) => `<a data-tab="${k}">${l}</a>`).join('') + other;
     $('#tabs').hidden = false; $('#app').hidden = false;
     $('#tabs').onclick = (e) => { const a = e.target.closest('[data-tab]'); if (a) go(a.dataset.tab); };
     go(location.hash.slice(1) && tabs.some(([k]) => k === location.hash.slice(1)) ? location.hash.slice(1) : tabs[0][0]);
@@ -111,7 +115,7 @@ function go(name) {
   tab = name; location.hash = name;
   for (const a of $('#tabs').querySelectorAll('a')) a.classList.toggle('on', a.dataset.tab === name);
   view.innerHTML = '<p class="ad-empty">Loading…</p>';
-  ({ leads, calendar, bookings, availability, exceptions, tours, finance, analytics })[name]().catch(fail);
+  ({ leads, calendar, bookings, availability, exceptions, tours, finance, analytics, access })[name]().catch(fail);
 }
 
 /* =============================== LEADS =============================== */
@@ -410,6 +414,47 @@ async function analytics() {
       <div class="ad-panel"><h2>Sessions by service</h2>${table(['Service', 'Sessions'], a.bookings.by_service.map((s) => `<tr><td>${esc(s.service)}</td><td class="num">${s.count}</td></tr>`))}</div>
       <div class="ad-panel"><h2>Revenue by month</h2>${table(['Month', 'Orders', 'Gross', 'Net', 'Commission', 'Payable'], a.revenue.by_month.map((m) => `<tr><td>${m.month}</td><td class="num">${m.orders}</td><td class="num">${money(m.gross)}</td><td class="num">${money(m.net)}</td><td class="num">${money(m.commission)}</td><td class="num">${money(m.payable)}</td></tr>`), 'No paid orders yet.')}</div>
     </div>`;
+}
+
+/* =============================== ACCESS (platform:admin) =============================== */
+/* Access administration only. Granting a permission here never bypasses RLS:
+   business data still requires the explicit business permissions. */
+const PERMS = ['coach:operations', 'finance:view', 'finance:manage', 'analytics:view', 'platform:admin'];
+async function access() {
+  const { data: users, error } = await sb.rpc('admin_list_access'); if (error) throw error;
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Access</h1><p class="ad-muted">Who can sign in and what each person may do. Invitations are created in Supabase Auth; this screen attaches application access to an invited email. Nothing here bypasses the row-level rules.</p></div></div>
+    <div class="ad-panel">${table(['Email', 'Name', 'Party', 'Auth', 'Active', ...PERMS.map((p) => p.replace(':', ':<wbr>'))], users.map((u) => `<tr>
+      <td>${esc(u.email)}</td><td>${esc(u.display_name || '')}</td><td>${esc(u.party)}</td>
+      <td>${u.auth_exists ? st('confirmed') : st('pending')}</td>
+      <td><input type="checkbox" data-active="${esc(u.email)}" ${u.active ? 'checked' : ''} ${u.email === me.email ? 'disabled' : ''}></td>
+      ${PERMS.map((p) => `<td><input type="checkbox" data-perm="${p}" data-email="${esc(u.email)}" ${u.permissions.includes(p) ? 'checked' : ''} ${u.email === me.email && p === 'platform:admin' ? 'disabled' : ''}></td>`).join('')}
+    </tr>`), 'No application users yet.')}
+      <p class="ad-note">"Auth pending" means the email has no Supabase Auth identity yet — invite it under Authentication → Users, then it can sign in.</p></div>
+    <div class="ad-panel"><h2>Add a person</h2>
+      <form id="access-form" class="ad-form"><div class="row">
+        <label>Email <input type="email" name="email" required></label>
+        <label>Name <input name="display_name" required></label>
+        <label>Party <select name="party"><option value="gari">gari</option><option value="oolala">oolala</option><option value="studio">studio</option></select></label></div>
+        <label>Permissions<div style="display:grid;gap:6px">${PERMS.map((p) => `<label style="display:flex;gap:8px;align-items:center;font-weight:500"><input type="checkbox" name="perm" value="${p}"> ${p}</label>`).join('')}</div></label>
+        <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Add</button></div></form>
+      <p class="ad-note">The person must already have been invited in Supabase Auth, otherwise this is refused.</p></div>`;
+  view.querySelectorAll('[data-perm]').forEach((cb) => cb.onchange = async () => {
+    const { error } = await sb.rpc(cb.checked ? 'admin_grant' : 'admin_revoke', { p_email: cb.dataset.email, p_permission: cb.dataset.perm });
+    if (error) { cb.checked = !cb.checked; return fail(error); } toast((cb.checked ? 'Granted ' : 'Revoked ') + cb.dataset.perm);
+  });
+  view.querySelectorAll('[data-active]').forEach((cb) => cb.onchange = async () => {
+    const u = users.find((x) => x.email === cb.dataset.active);
+    const { error } = await sb.rpc('admin_set_user', { p_email: u.email, p_display_name: u.display_name, p_party: u.party, p_active: cb.checked });
+    if (error) { cb.checked = !cb.checked; return fail(error); } toast(cb.checked ? 'Activated' : 'Deactivated');
+  });
+  $('#access-form').onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const { error } = await sb.rpc('admin_set_user', { p_email: f.get('email'), p_display_name: f.get('display_name'), p_party: f.get('party'), p_active: true });
+    if (error) return fail(error);
+    for (const p of f.getAll('perm')) { const { error: e2 } = await sb.rpc('admin_grant', { p_email: f.get('email'), p_permission: p }); if (e2) return fail(e2); }
+    toast('Access saved'); access().catch(fail);
+  };
 }
 
 boot().catch(fail);

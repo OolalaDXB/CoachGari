@@ -265,6 +265,7 @@ var CATEGORIES = {
    PUTs the file to the private bucket, then confirms. The lead is
    never lost because an upload failed.                            */
 var MEDIA_MAX_FILES = 3, MEDIA_MAX_TOTAL = 50 * 1024 * 1024;
+var MEDIA_TYPES = ['image/jpeg','image/png','image/webp','image/heic','image/heif','image/gif','video/mp4','video/quicktime','video/webm','video/x-m4v','video/3gpp'];
 function fmtBytes(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
 
 function mediaSetup(form){
@@ -280,8 +281,8 @@ function mediaSetup(form){
     var total = 0, problems = [];
     files.forEach(function(f){
       total += f.size;
-      var ok = /^(image|video)\//.test(f.type);
-      if (!ok) problems.push(f.name + ': only photos and videos');
+      var ok = MEDIA_TYPES.indexOf(f.type) !== -1;
+      if (!ok) problems.push(f.name + ': only photos and videos (jpeg, png, webp, heic, gif, mp4, mov, webm)');
       var li = document.createElement('li'); if (!ok) li.className = 'err';
       li.innerHTML = '<b></b><span></span>';
       li.querySelector('b').textContent = f.name; li.querySelector('span').textContent = fmtBytes(f.size);
@@ -296,16 +297,16 @@ function mediaSetup(form){
   return { input: input, files: function(){ return Array.prototype.slice.call(input.files || []); }, clear: function(){ if (list) { list.innerHTML = ''; list.hidden = true; } } };
 }
 
-function uploadOne(submissionId, file){
+function uploadOne(uploadToken, file){
   var H = { 'Content-Type': 'application/json' };
-  return fetch(CONFIG.UPLOAD_ENDPOINT, { method: 'POST', headers: H, body: JSON.stringify({ action: 'sign', submission_id: submissionId, filename: file.name, content_type: file.type, size: file.size }) })
+  return fetch(CONFIG.UPLOAD_ENDPOINT, { method: 'POST', headers: H, body: JSON.stringify({ action: 'sign', upload_token: uploadToken, filename: file.name, content_type: file.type, size: file.size }) })
     .then(function(r){ return r.json().then(function(j){ if (!r.ok || !j.ok) throw new Error(j.message || j.error || 'sign failed'); return j; }); })
     .then(function(sig){
       return fetch(sig.url, { method: 'PUT', headers: { 'Content-Type': file.type, 'x-upsert': 'false' }, body: file })
         .then(function(r){ if (!r.ok) throw new Error('upload failed ' + r.status); return sig; });
     })
     .then(function(sig){
-      return fetch(CONFIG.UPLOAD_ENDPOINT, { method: 'POST', headers: H, body: JSON.stringify({ action: 'confirm', submission_id: submissionId, path: sig.path }) })
+      return fetch(CONFIG.UPLOAD_ENDPOINT, { method: 'POST', headers: H, body: JSON.stringify({ action: 'confirm', upload_token: uploadToken, path: sig.path }) })
         .then(function(r){ return r.json(); }).then(function(j){ if (!j.ok || j.status !== 'uploaded') throw new Error('confirm failed'); return true; });
     });
 }
@@ -377,7 +378,7 @@ function uploadOne(submissionId, file){
     .then(function(res){
       if (res.status === 200 && res.body && res.body.ok) {
         var files = media ? media.files() : [];
-        var sent = submissionId;
+        var sent = res.body.upload_token || '';   // server-issued, 30-minute upload credential (absent on a duplicate submission)
         var done = travelEntry
           ? 'You’re on the list. If enough people ask for your city, Coach Gari may bring a session there.'
           : 'Thanks — that’s with Coach Gari. You’ll hear back soon.';
@@ -387,7 +388,8 @@ function uploadOne(submissionId, file){
           say(done + (extra || ''), 'ok');
           if (travelEntry && form.resetTravel) form.resetTravel();
         };
-        if (!files.length || !res.body.id) { finish(''); return; }
+        if (!files.length) { finish(''); return; }
+        if (!sent) { finish(' Your files could not be attached this time — send them on WhatsApp.'); return; }
         var okCount = 0, i = 0;
         var next = function(){
           if (i >= files.length) { finish(okCount === files.length ? ' ' + okCount + ' file' + (okCount > 1 ? 's' : '') + ' attached.' : ' ' + okCount + ' of ' + files.length + ' files attached — you can send the rest on WhatsApp.'); return; }
