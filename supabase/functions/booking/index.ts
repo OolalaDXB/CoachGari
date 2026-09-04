@@ -82,14 +82,32 @@ function rpcError(e: { code?: string; message?: string }, origin: string | null,
   return json(500, { ok: false, error: "server_error", code: e.code ?? null }, origin, allowed);
 }
 
-const db = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+/* Credential: the platform-injected SUPABASE_SERVICE_ROLE_KEY, a static
+   string passed to createClient as the apikey and as the Bearer token for
+   every PostgREST request. No session, no refresh, no token cache: a new
+   client carries the same credential. Diagnostics below log only the
+   token's public claims (role / iat / exp), never the token. */
+const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+function keyClaims() {
+  try {
+    const parts = SERVICE_KEY.split(".");
+    if (parts.length !== 3) return { kind: SERVICE_KEY.startsWith("sb_secret_") ? "sb_secret" : "opaque", jwt: false };
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return { kind: "jwt", jwt: true, role: payload.role, iss: payload.iss, iat: payload.iat, exp: payload.exp, now: Math.floor(Date.now() / 1000) };
+  } catch { return { kind: "unparseable", jwt: false }; }
+}
+log("boot", { credential: keyClaims() });
+
+const db = () => createClient(Deno.env.get("SUPABASE_URL")!, SERVICE_KEY, {
   auth: { persistSession: false },
 });
 
-/* Transient PostgREST failures seen on cold starts (PGRST303 "JWT expired" /
-   "not yet valid" from clock skew, PGRST301, connection errors) are retried
-   up to twice with a fresh client before surfacing a 500. Business errors
-   (P0002/P0003/22023) are never retried. */
+/* Transient PostgREST failures (PGRST303 "JWT expired / not yet valid" seen
+   intermittently on the first request after a cold boot — cause not
+   established, see docs/DECISIONS.md — PGRST301, connection errors) are
+   retried up to twice before surfacing a 500. The retry re-sends the same
+   static credential; it only helps because the failure is transient on the
+   gateway/PostgREST side. Business errors (P0002/P0003/22023) never retry. */
 const TRANSIENT = new Set(["PGRST301", "PGRST303", "PGRST000", "PGRST001", "PGRST002"]);
 type DbResult<T> = { data: T | null; error: { code?: string; message?: string } | null };
 async function withRetry<T>(label: string, run: (c: ReturnType<typeof db>) => PromiseLike<DbResult<T>>): Promise<DbResult<T>> {
@@ -99,7 +117,7 @@ async function withRetry<T>(label: string, run: (c: ReturnType<typeof db>) => Pr
     catch (e) { last = { data: null, error: { code: "FETCH", message: (e as Error).message } }; }
     const code = last.error?.code ?? "";
     if (!last.error || !(TRANSIENT.has(code) || code === "FETCH")) return last;
-    log("transient_retry", { label, code, attempt });
+    log("transient_retry", { label, code, attempt, message: (last.error?.message ?? "").slice(0, 160), isolate_time: new Date().toISOString(), credential: keyClaims() });
     await new Promise((r) => setTimeout(r, 150 * attempt));
   }
   return last;

@@ -25,26 +25,51 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ## Incident 2026-09-04 — booking picker replaced by "Booking opens soon"
 
-**Root cause.** Not a code regression on the page. The `booking` Edge
-Function answered `?action=services` with HTTP 500 three times (2026-09-03
-23:14 UTC, 2026-09-04 06:01 and 06:50 UTC), each time on the first request
-after a cold boot, with PostgREST error `PGRST303` ("JWT expired / not yet
-valid" — clock skew between the fresh isolate and PostgREST); the
-`?action=tour_stops` call in the same second succeeded. The page treated
-the 500 as "no services" and showed the empty-catalogue message, hiding the
-cause. Catalogue (`conversation` active + listed), config, CORS and RLS
-were all correct.
+**Status: mitigated, root cause OPEN (monitoring).**
 
-**Fix.** `booking` v2 retries transient PostgREST errors (`PGRST303`,
-`PGRST301`, connection errors) up to twice with a fresh client before
-returning 500, and logs the error message. `assets/booking.js` now keeps
-three states apart: API OK with services → picker; API OK with no service
-→ "Booking opens soon" plus `console.warn('booking_init_failed:
-no_active_services')`; API or network failure → one retry after 1.5 s,
-then "Booking is temporarily unavailable" plus
-`console.error('booking_init_failed: http <status> <error> (<code>) — endpoint …')`.
-Slot loading failures log `booking_slots_failed: <reason>`. The fallback
-never depends on the domain, Resend, Plausible or Stripe.
+**What happened.** The `booking` Edge Function answered `?action=services`
+with HTTP 500 three times (2026-09-03 23:14:36, 2026-09-04 06:01:36 and
+06:50:49 UTC). The page treated the 500 as an empty catalogue and showed
+the "opens soon" message, hiding the cause. Catalogue, config, CORS and RLS
+were correct throughout.
+
+**Evidence (API-gateway `edge_logs`, `function_logs`).** Each failure is a
+`GET /rest/v1/services…` answered **401** with
+`proxy_status: PostgREST; error=PGRST303` (JWT expired / not yet valid),
+`origin_time` 302–947 ms. In the same second, from the same boot, the
+`GET /rest/v1/tour_stops…` request with the **same credential hash**
+(`request.sb.apikey.*.hash` identical) returned 200. PostgREST's own logs
+show nothing for those seconds. Each failure was the first `services` call
+of a fresh isolate (`booted` logged just before).
+
+**Credential facts (verified in code and in the gateway logs).**
+- The client is `createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {auth:{persistSession:false}})`.
+  `SUPABASE_SERVICE_ROLE_KEY` is injected by the platform; the gateway logs
+  show it is a **new-format secret key** (`sb_secret_…` prefix), not a
+  legacy JWT. supabase-js sends it verbatim as `apikey` and as the
+  `Authorization: Bearer` value on every request.
+- No user JWT is involved anywhere in `booking`; no session is created,
+  refreshed or cached; nothing is memoised across the isolate lifecycle. A
+  "new client" therefore carries the **same static credential** — the retry
+  is a retry of the same request, not a different credential.
+- With `sb_secret_` keys, the JWT that PostgREST validates is minted by the
+  Supabase API gateway per request, not by our code. A `PGRST303` on that
+  minted token, intermittent, first-request-after-boot, with the same key
+  succeeding 30 ms later, points at the gateway/PostgREST side (token
+  minting or validation timing). Clock skew is one hypothesis consistent
+  with the evidence; it is **not proven** and is not recorded as the cause.
+
+**Mitigation in place.** `booking` retries `PGRST301/303`, `PGRST00x` and
+connection errors up to twice (150/300 ms) with a fresh client before
+returning 500, and logs `transient_retry` with the error message, the
+isolate time and the credential's public claims (kind / role / iat / exp —
+never the key). `assets/booking.js` separates outage from empty catalogue,
+retries once, and logs `booking_init_failed: <reason>`.
+
+**Monitoring.** Watch `function_logs` for `transient_retry` (retry absorbed
+it) and `rpc_failed` (retry did not). If `PGRST303` recurs with the
+diagnostics attached, open a Supabase support ticket with the
+`request_id`s above rather than adding an auth workaround here.
 
 ---
 
