@@ -93,7 +93,8 @@ function init(){
       if (bad) {
         throw new Error('http ' + bad.status + (bad.body && bad.body.error ? ' ' + bad.body.error : '') + (bad.body && bad.body.code ? ' (' + bad.body.code + ')' : ''));
       }
-      state.services = res[0].body.services || [];
+      // the picker offers only bookable services; enquiry-only products are cards on the page
+      state.services = (res[0].body.services || []).filter(function(s){ return s.booking_mode !== 'enquiry'; });
       state.tourStops = res[1].body.tour_stops || [];
       if (!state.services.length) {
         console.warn('booking_init_failed: no_active_services (API reachable, catalogue empty)');

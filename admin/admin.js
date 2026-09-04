@@ -3,7 +3,8 @@
    One script, two areas:
      /admin   (data-area="ops")     coach:operations
      /finance (data-area="finance") finance:view / finance:manage
-     analytics:view adds an Analytics tab; platform:admin adds Access.
+     analytics:view adds an Analytics tab; platform:admin adds Access;
+     catalog:view / catalog:manage add Services (the commercial catalogue).
      A person holding both sets sees an understated link to the other area.
    Magic-link sign-in (Supabase Auth) with shouldCreateUser:false — an email
    that was not provisioned by the owner cannot even create an auth user.
@@ -22,7 +23,8 @@ const view = $('#view');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n, cur = 'USD') => n == null ? '—' : (n / 100).toLocaleString('en-US', { style: 'currency', currency: cur });
 const st = (s) => `<span class="st st-${esc(s)}">${esc(String(s ?? '').replace('_', ' '))}</span>`;
-const BOOKING_COLS = 'id,reference,service_id,contact_id,customer_name,customer_contact,start_at,end_at,session_timezone,tour_stop_id,delivery_mode,participant_count,status,hold_expires_at,price_amount,currency,notes,cancel_reason,cancelled_at,cancelled_by,created_at,services(title,slug),tour_stops(city,country)';
+const BOOKING_COLS = 'id,reference,service_id,contact_id,customer_name,customer_contact,start_at,end_at,session_timezone,tour_stop_id,delivery_mode,participant_count,status,hold_expires_at,price_amount,currency,notes,cancel_reason,cancelled_at,cancelled_by,created_at,service_title,service_duration_minutes,services(title,slug),tour_stops(city,country)';
+const SERVICE_COLS = 'id,slug,title,category,tagline,description,long_description,duration_minutes,price_amount,currency,price_unit,delivery_mode,default_capacity,booking_mode,features,featured,cta_label,active,listed,sort_order,updated_at,updated_by';
 const CONTACT_COLS = 'id,name,contact,country,city,location_raw,interest,message,utm_source,utm_medium,utm_campaign,referrer,landing_page,page,status,created_at';
 const TZS = ['Asia/Dubai', 'Africa/Harare', 'Africa/Johannesburg', 'Africa/Gaborone', 'Africa/Nairobi', 'Europe/London', 'Europe/Paris', 'UTC'];
 const WEEKDAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -87,18 +89,19 @@ async function render(session) {
   try {
     const { data, error } = await sb.rpc('my_permissions'); if (error) throw error;
     me = data;
-    const opsOK = has('coach:operations'), finOK = has('finance:view');
-    const areaOK = AREA === 'finance' ? finOK : opsOK;
+    const opsOK = has('coach:operations'), finOK = has('finance:view'), catOK = has('catalog:view');
+    const areaOK = AREA === 'finance' ? finOK : (opsOK || catOK);
     if (!areaOK) {
       $('#noaccess').hidden = false;
       const other = $('#other-area');
       if (other && (AREA === 'finance' ? opsOK : finOK)) { other.hidden = false; other.innerHTML = AREA === 'finance' ? 'Your operations area is at <a href="/admin/">/admin</a>.' : 'Your finance area is at <a href="/finance/">/finance</a>.'; }
       return;
     }
-    const { data: svc, error: e2 } = await sb.from('services').select('id,slug,title,category,duration_minutes,price_amount,currency,delivery_mode,default_capacity,active,listed,sort_order').order('sort_order'); if (e2) throw e2;
+    const { data: svc, error: e2 } = await sb.from('services').select(SERVICE_COLS).order('sort_order'); if (e2) throw e2;
     services = svc || [];
     const tabs = [];
-    if (AREA === 'ops') tabs.push(['leads', 'Leads'], ['calendar', 'Calendar'], ['bookings', 'Bookings'], ['availability', 'Availability'], ['exceptions', 'Exceptions'], ['tours', 'Tour stops']);
+    if (AREA === 'ops' && opsOK) tabs.push(['leads', 'Leads'], ['calendar', 'Calendar'], ['bookings', 'Bookings'], ['availability', 'Availability'], ['exceptions', 'Exceptions'], ['tours', 'Tour stops']);
+    if (AREA === 'ops' && catOK) tabs.push(['services', 'Services']);
     if (AREA === 'finance') tabs.push(['finance', 'Finance']);
     if (has('analytics:view')) tabs.push(['analytics', 'Analytics']);
     if (has('platform:admin')) tabs.push(['access', 'Access']);
@@ -115,7 +118,7 @@ function go(name) {
   tab = name; location.hash = name;
   for (const a of $('#tabs').querySelectorAll('a')) a.classList.toggle('on', a.dataset.tab === name);
   view.innerHTML = '<p class="ad-empty">Loading…</p>';
-  ({ leads, calendar, bookings, availability, exceptions, tours, finance, analytics, access })[name]().catch(fail);
+  ({ leads, calendar, bookings, availability, exceptions, tours, services: catalogue, finance, analytics, access })[name]().catch(fail);
 }
 
 /* =============================== LEADS =============================== */
@@ -165,7 +168,7 @@ function bookingRow(b, tz, withActions = true) {
   const where = b.tour_stops ? `${b.tour_stops.city}, ${b.tour_stops.country}` : b.delivery_mode;
   return `<tr>
     <td><b>${fmt(b.start_at, tz, { timeStyle: 'short' })}</b>–${fmt(b.end_at, tz, { timeStyle: 'short' })}<br><span class="ad-muted" style="font-size:12px">${fmt(b.start_at, tz, { dateStyle: 'medium' })} · ${esc(tz)}</span></td>
-    <td>${esc(b.services?.title || svcTitle(b.service_id))}<br><span class="ad-muted" style="font-size:12px">${esc(where)}${b.participant_count > 1 ? ' · ' + b.participant_count + ' people' : ''}</span></td>
+    <td>${esc(b.service_title || b.services?.title || svcTitle(b.service_id))}<br><span class="ad-muted" style="font-size:12px">${esc(where)}${b.participant_count > 1 ? ' · ' + b.participant_count + ' people' : ''}</span></td>
     <td><b>${esc(b.customer_name)}</b><br><a href="${b.customer_contact.includes('@') ? 'mailto:' + esc(b.customer_contact) : 'https://wa.me/' + esc(b.customer_contact.replace(/\D/g, ''))}">${esc(b.customer_contact)}</a>${b.notes ? `<div class="msg">${esc(b.notes)}</div>` : ''}</td>
     <td>${esc(b.reference)}<br>${st(b.status)}${b.cancel_reason ? `<div class="msg">${esc(b.cancel_reason)}</div>` : ''}</td>
     <td class="num">${b.price_amount == null ? 'on request' : money(b.price_amount, b.currency)}</td>
@@ -340,6 +343,85 @@ async function tours() {
   };
 }
 
+/* =============================== SERVICES (catalogue, CG-007) =============================== */
+/* The commercial catalogue is the only admin-editable content. Writes go
+   through catalog_save_service (catalog:manage) which audits every change.
+   Changing a price / title / duration affects future bookings only:
+   holds, bookings and orders keep the snapshot taken when they were made. */
+async function catalogue() {
+  const manage = has('catalog:manage');
+  const [{ data: rows, error }, { data: audit }] = await Promise.all([
+    sb.from('services').select(SERVICE_COLS).order('sort_order').order('title'),
+    sb.from('catalog_audit').select('slug,action,changed_by,changed_at,changed_fields').order('changed_at', { ascending: false }).limit(40),
+  ]); if (error) throw error;
+  services = rows || [];
+  const editing = view.dataset.editSvc === 'new' ? {} : (view.dataset.editSvc ? services.find((s) => s.slug === view.dataset.editSvc) : null);
+  const opt = (list, v) => list.map((x) => `<option value="${x}" ${x === v ? 'selected' : ''}>${x}</option>`).join('');
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Services</h1><p class="ad-muted">The commercial catalogue: what the website shows and what can be booked. Bookable = offered in the picker at the listed price; enquiry = a card whose button opens the form. Existing bookings and orders keep the price, title and duration they were sold with.</p></div>
+      ${manage ? '<div class="ad-filters"><button class="btn btn-accent btn-sm" data-new-svc>Add a service</button></div>' : ''}</div>
+    <div class="ad-panel">${table(['Order', 'Service', 'Mode', 'Price', 'Duration', 'Delivery', 'Capacity', 'Public', ''], services.map((s) => `<tr>
+      <td class="num">${s.sort_order}</td>
+      <td><b>${esc(s.title)}</b>${s.featured ? ' ' + st('featured') : ''}<br><span class="ad-muted" style="font-size:12px">${esc(s.slug)} · ${esc(s.category)}${s.tagline ? ' · ' + esc(s.tagline) : ''}</span></td>
+      <td>${st(s.booking_mode === 'slot' ? 'bookable' : 'enquiry')}</td>
+      <td class="num">${s.price_amount == null ? 'on request' : money(s.price_amount, s.currency)}<br><span class="ad-muted" style="font-size:12px">${esc(s.price_unit)}</span></td>
+      <td class="num">${s.duration_minutes} min</td><td>${esc(s.delivery_mode)}</td><td class="num">${s.default_capacity}</td>
+      <td>${s.active ? st('open') : st('closed')} ${s.listed ? st('ready') : st('hold')}<br><span class="ad-muted" style="font-size:12px">${s.active ? 'active' : 'inactive'} · ${s.listed ? 'listed' : 'hidden'}</span></td>
+      <td class="acts">${manage ? `<button class="btn btn-line btn-xs" data-edit-svc="${esc(s.slug)}">Edit</button>` : ''}</td></tr>`), 'No service yet.')}
+      <p class="ad-note">"Active" means the service can be booked or enquired about; "listed" means it appears on the website. Services are never deleted — deactivate and hide them instead, so history stays intact.</p></div>
+    ${editing ? `<div class="ad-panel"><h2>${editing.id ? 'Edit ' + esc(editing.title) : 'New service'}</h2>
+      <form id="svc-form" class="ad-form">
+        <div class="row">
+          <label>Slug (identity, cannot change later) <input name="slug" required pattern="[a-z0-9-]{2,60}" value="${esc(editing.slug || '')}" ${editing.id ? 'readonly' : ''}></label>
+          <label>Title <input name="title" required maxlength="120" value="${esc(editing.title || '')}"></label>
+          <label>Tagline (small label above the title) <input name="tagline" maxlength="40" value="${esc(editing.tagline || '')}"></label></div>
+        <label>Short description (the card) <textarea name="description" maxlength="300">${esc(editing.description || '')}</textarea></label>
+        <label>Long description (internal / future detail page) <textarea name="long_description" maxlength="2000">${esc(editing.long_description || '')}</textarea></label>
+        <label>Features, one per line (max 8) <textarea name="features">${esc((editing.features || []).join('\n'))}</textarea></label>
+        <div class="row">
+          <label>Price (major units, empty = on request) <input name="price" type="number" min="0" step="0.01" value="${editing.price_amount == null ? '' : (editing.price_amount / 100)}"></label>
+          <label>Currency <input name="currency" pattern="[A-Z]{3}" value="${esc(editing.currency || 'USD')}"></label>
+          <label>Price unit <select name="price_unit">${opt(['per session', 'per month', 'one-off', 'per person'], editing.price_unit || 'per session')}</select></label>
+          <label>Duration (minutes) <input name="duration_minutes" type="number" min="15" max="480" required value="${editing.duration_minutes || 60}"></label></div>
+        <div class="row">
+          <label>Booking mode <select name="booking_mode">${opt(['slot', 'enquiry'], editing.booking_mode || 'enquiry')}</select></label>
+          <label>Delivery <select name="delivery_mode">${opt(['online', 'onsite'], editing.delivery_mode || 'online')}</select></label>
+          <label>Category <select name="category">${opt(['coaching', 'mentoring', 'onsite', 'programme', 'group'], editing.category || 'coaching')}</select></label>
+          <label>Default capacity <input name="default_capacity" type="number" min="1" max="100" value="${editing.default_capacity || 1}"></label></div>
+        <div class="row">
+          <label>Button label (optional) <input name="cta_label" maxlength="40" value="${esc(editing.cta_label || '')}" placeholder="Book a session → / Enquire →"></label>
+          <label>Display order <input name="sort_order" type="number" value="${editing.sort_order ?? 100}"></label></div>
+        <div class="row">
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="active" ${editing.active ? 'checked' : ''}> Active</label>
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="listed" ${editing.listed ? 'checked' : ''}> Listed on the website</label>
+          <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="featured" ${editing.featured ? 'checked' : ''}> Highlighted card</label></div>
+        <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button><button class="btn btn-line btn-sm" type="button" data-cancel-edit>Cancel</button></div>
+      </form>
+      <p class="ad-note">A bookable service with a price is charged exactly this amount at Checkout. Prices of enquiry-only products are shown on the website only when commerce is switched on in config.js.</p></div>` : ''}
+    <div class="ad-panel"><h2>Change log</h2>${table(['When', 'Who', 'Service', 'Action', 'Fields'], (audit || []).map((a) => `<tr><td>${fmt(a.changed_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'short' })}</td><td>${esc(a.changed_by)}</td><td>${esc(a.slug)}</td><td>${st(a.action === 'create' ? 'new' : 'contacted')}</td><td class="msg">${esc((a.changed_fields || []).join(', '))}</td></tr>`), 'No change recorded yet.')}</div>`;
+  view.querySelector('[data-new-svc]')?.addEventListener('click', () => { view.dataset.editSvc = 'new'; catalogue().catch(fail); });
+  view.querySelectorAll('[data-edit-svc]').forEach((b) => b.onclick = () => { view.dataset.editSvc = b.dataset.editSvc; catalogue().catch(fail); });
+  view.querySelector('[data-cancel-edit]')?.addEventListener('click', () => { delete view.dataset.editSvc; catalogue().catch(fail); });
+  $('#svc-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const priceRaw = String(f.get('price') || '').trim();
+    const p = {
+      slug: f.get('slug'), title: f.get('title'), tagline: f.get('tagline'), description: f.get('description'), long_description: f.get('long_description'),
+      features: String(f.get('features') || '').split('\n').map((x) => x.trim()).filter(Boolean),
+      price_amount: priceRaw === '' ? null : Math.round(Number(priceRaw) * 100), currency: String(f.get('currency') || 'USD').toUpperCase(), price_unit: f.get('price_unit'),
+      duration_minutes: Number(f.get('duration_minutes')), booking_mode: f.get('booking_mode'), delivery_mode: f.get('delivery_mode'), category: f.get('category'),
+      default_capacity: Number(f.get('default_capacity')), cta_label: f.get('cta_label'), sort_order: Number(f.get('sort_order')),
+      active: f.get('active') === 'on', listed: f.get('listed') === 'on', featured: f.get('featured') === 'on',
+    };
+    if (p.price_amount !== null && (!Number.isFinite(p.price_amount) || p.price_amount < 0)) return toast('Price must be a positive amount', true);
+    const { data, error } = await sb.rpc('catalog_save_service', { p });
+    if (error) return fail(error);
+    const changed = data?.changed || [];
+    toast(changed.length ? `Saved — changed: ${changed.join(', ')}` : 'No change');
+    delete view.dataset.editSvc; catalogue().catch(fail);
+  });
+}
+
 /* =============================== FINANCE =============================== */
 async function finance() {
   const manage = has('finance:manage');
@@ -419,7 +501,7 @@ async function analytics() {
 /* =============================== ACCESS (platform:admin) =============================== */
 /* Access administration only. Granting a permission here never bypasses RLS:
    business data still requires the explicit business permissions. */
-const PERMS = ['coach:operations', 'finance:view', 'finance:manage', 'analytics:view', 'platform:admin'];
+const PERMS = ['coach:operations', 'finance:view', 'finance:manage', 'analytics:view', 'catalog:view', 'catalog:manage', 'platform:admin'];
 async function access() {
   const { data: users, error } = await sb.rpc('admin_list_access'); if (error) throw error;
   view.innerHTML = `

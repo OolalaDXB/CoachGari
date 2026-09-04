@@ -7,7 +7,7 @@
 
    Responsibilities:
      1. Reveal-on-scroll (IntersectionObserver)
-     2. SHOWCASE <-> SHOP toggle (CONFIG.COMMERCE)
+     2. Catalogue cards from the database (CG-007)
      3. WhatsApp links built from CONFIG.WHATSAPP + button context
      4. First-touch attribution (UTM, referrer, landing page)
      5. Enquiry form -> CONFIG.FORM_ENDPOINT (idempotent, honeypot)
@@ -35,35 +35,74 @@ import { CONFIG } from '/config.js';
   els.forEach(function(e){ io.observe(e); });
 })();
 
-/* ---- 2. showcase <-> shop --------------------------------- */
-/* false = vitrine: no prices, every CTA goes to the form.
-   true  = boutique: prices shown, buy buttons use data-checkout.
-   To switch on payments: set COMMERCE:true in config.js and
-   paste each product's Payment Link into its data-checkout.     */
-(function commerce(){
-  var items = document.querySelectorAll('.item');
-  if (!items.length) return;
+/* ---- 2. catalogue cards (CG-007) ----------------------------- */
+/* The programme cards render from the authoritative catalogue
+   (services table, through the public booking function). Nothing
+   commercial is hard-coded here: title, copy, price, duration,
+   features and the CTA all come from the database.
+     booking_mode 'slot'    → CTA goes to the booking picker (#book)
+     booking_mode 'enquiry' → CTA goes to the enquiry form, interest preselected
+   Prices: a bookable service always shows its price (it is what
+   Checkout charges). Enquiry-only products show their price only
+   when CONFIG.COMMERCE is true, otherwise "On request".              */
+(function catalogue(){
+  var host = document.querySelector('[data-catalogue]');
+  if (!host) return;
+  if (!CONFIG.BOOKING_ENDPOINT) { host.innerHTML = ''; return; }
 
-  items.forEach(function(item){
-    var priceEl = item.querySelector('.price');
-    var buyEl   = item.querySelector('.buy');
-    var isFeat  = item.classList.contains('feat');
-    if (!priceEl || !buyEl) return;
-
-    if (CONFIG.COMMERCE) {
-      priceEl.className = 'price';
-      priceEl.innerHTML = item.dataset.price + ' <small>' + item.dataset.unit + '</small>';
-      buyEl.innerHTML =
-        '<a class="btn btn-full btn-sm ' + (isFeat ? 'btn-accent' : 'btn-soft') + '" href="' +
-        (item.dataset.checkout || '#enquiry') + '">' +
-        (isFeat ? 'Start coaching →' : 'Buy now') + '</a>';
-    } else {
-      priceEl.className = 'price enquire';
-      priceEl.textContent = 'On request';
-      buyEl.innerHTML =
-        '<a class="btn btn-full btn-sm ' + (isFeat ? 'btn-accent' : 'btn-soft') +
-        '" href="#enquiry">Enquire →</a>';
+  var SYMBOL = { USD: '$', EUR: '€', GBP: '£' };
+  var INTEREST = { 'online-coaching': 'Online coaching', 'programme-12w': 'The 12-week programme', 'live-group': 'Live group sessions', 'conversation': 'A conversation' };
+  function price(s){
+    if (s.price_amount === null || s.price_amount === undefined) return null;
+    if (s.booking_mode !== 'slot' && !CONFIG.COMMERCE) return null;
+    var units = s.price_amount / 100;
+    var num = (units % 1 === 0) ? String(units) : units.toFixed(2);
+    return SYMBOL[s.currency] ? SYMBOL[s.currency] + num : num + ' ' + s.currency;
+  }
+  function node(tag, cls, text){ var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function card(s){
+    var item = node('div', 'item' + (s.featured ? ' feat' : ''));
+    item.setAttribute('data-sku', s.slug);
+    if (s.tagline) item.appendChild(node('div', 'tagline', s.tagline));
+    item.appendChild(node('h3', '', s.title));
+    var p = price(s);
+    var priceEl = node('div', p ? 'price' : 'price enquire');
+    if (p) { priceEl.appendChild(document.createTextNode(p + ' ')); var small = node('small', '', s.price_unit || ''); priceEl.appendChild(small); }
+    else priceEl.textContent = 'On request';
+    item.appendChild(priceEl);
+    if (s.description) item.appendChild(node('p', '', s.description));
+    if (s.features && s.features.length) {
+      var ul = node('ul');
+      s.features.forEach(function(f){ var li = node('li'); li.appendChild(node('b', '', '›')); li.appendChild(document.createTextNode(' ' + f)); ul.appendChild(li); });
+      item.appendChild(ul);
     }
+    var buy = node('div', 'buy');
+    var a = node('a', 'btn btn-full btn-sm ' + (s.featured ? 'btn-accent' : 'btn-soft'));
+    var bookable = s.booking_mode === 'slot';
+    a.href = bookable ? '#book' : '#enquiry';
+    a.textContent = s.cta_label || (bookable ? 'Book a session →' : 'Enquire →');
+    if (!bookable && INTEREST[s.slug]) a.setAttribute('data-preselect', INTEREST[s.slug]);
+    buy.appendChild(a);
+    item.appendChild(buy);
+    return item;
+  }
+
+  fetch(CONFIG.BOOKING_ENDPOINT + '?action=services').then(function(r){ return r.json(); }).then(function(j){
+    var list = (j && j.services) || [];
+    host.innerHTML = '';
+    if (!list.length) { console.warn('catalogue_empty: no active, listed service'); host.appendChild(node('p', 'catalogue-wait', 'Programmes are being updated. Use the form below and Coach Gari will come back to you.')); return; }
+    list.forEach(function(s){ host.appendChild(card(s)); });
+    host.querySelectorAll('[data-preselect]').forEach(function(a){
+      a.addEventListener('click', function(){
+        var sel = document.querySelector('form[data-enquiry] select[name="interest"]');
+        if (!sel) return;
+        for (var i = 0; i < sel.options.length; i++) if (sel.options[i].text === a.dataset.preselect) { sel.selectedIndex = i; sel.dispatchEvent(new Event('change')); break; }
+      });
+    });
+  }).catch(function(e){
+    console.error('catalogue_load_failed: ' + (e && e.message ? e.message : e) + ' — endpoint ' + CONFIG.BOOKING_ENDPOINT);
+    host.innerHTML = '';
+    host.appendChild(node('p', 'catalogue-wait', 'The programmes are taking a moment to load. Use the form below or message Coach Gari on WhatsApp.'));
   });
 
   if (CONFIG.COMMERCE) {
