@@ -278,7 +278,7 @@ psql "$DATABASE_URL" -f supabase/tests/cg0025_permissions.sql   # one suite
 DATABASE_URL=postgresql://… scripts/db-tests.sh                   # all three suites, exit 1 on any fail
 ```
 
-`CG0025_TESTS ok=113 fail=0`, always rolled back. It switches role and JWT
+`CG0025_TESTS ok=118 fail=0`, always rolled back. It switches role and JWT
 claims per persona and asserts the negatives: anon is refused on every private
 table and RPC; a stranger or inactive user gets zero rows and every RPC
 refused; a coach cannot read orders, payments, refunds, chargebacks,

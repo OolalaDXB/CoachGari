@@ -23,6 +23,22 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-005 — The Conversation: 100 USD / 60 min
+
+Approved Route C price applied where it lives: `services.price_amount = 10000`
+(`20260906_cg005_conversation_price.sql`). The chain that makes the frontend
+irrelevant to the amount is unchanged: `create_hold` snapshots the service
+price on the booking, `create_order_for_booking` copies the snapshot to the
+order, `checkout` creates the Stripe session with the order's amount, and
+`process_stripe_event` refuses a `checkout.session.completed` whose
+`amount_total`/currency differ from the order (logged `ignored`, never
+confirms). The card renders the API value as `60 min · 100 USD · online`.
+Commission stays 10 % of net. Verified in the suite: snapshot 10000, order
+10000, a 4500 completion ignored, ledger 10000 / fee 320 → net 9680,
+commission 968, payable 8712.
+
+---
+
 ## Incident 2026-09-04 — booking picker replaced by "Booking opens soon"
 
 **Status: mitigated, root cause OPEN (monitoring).**
@@ -104,7 +120,7 @@ diagnostics attached, open a Supabase support ticket with the
 
 ## CG-002.5 — Back-office, permissions, RLS
 
-**Status: built; database suite 113/113 (rollback harness, persona switching);
+**Status: built; database suite 118/118 (rollback harness, persona switching);
 `/admin` (Gari) and `/finance` (Oolala) deployed (noindex). Inviting the first
 auth users, granting their permissions and adding the redirect URLs in
 Supabase Auth are owner actions.**
@@ -160,7 +176,7 @@ Supabase Auth are owner actions.**
 
 ### Tests
 
-`supabase/tests/cg0025_permissions.sql` — `CG0025_TESTS ok=113 fail=0` on
+`supabase/tests/cg0025_permissions.sql` — `CG0025_TESTS ok=118 fail=0` on
 2026-09-03, rolled back. Personas: anon (10 refusals), stranger and inactive
 user (11 each), coach (35: intended reads and edits, refusals on orders,
 payments, refunds, chargebacks, settlements, settlement items, webhook log,
@@ -302,7 +318,7 @@ front flow live on the homepage; laptop API script ready.**
   (`available_slots`, `create_hold`, `get_booking`, `cancel_booking`,
   `expire_holds`), fronted by the public `booking` Edge Function.
 - **Services normalised from the Route C catalogue, no invented prices.** Only
-  **The Conversation** is bookable and payable now (USD 45, 60 min, online,
+  **The Conversation** is bookable and payable now (USD 100, 60 min, online,
   capacity 1). `online-coaching-session` and `onsite-one-to-one` exist but are
   inactive and unpriced: the catalogue prices coaching per month and in-person
   "on request", so a per-session price is a business decision before

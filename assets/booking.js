@@ -35,9 +35,10 @@ function api(path, opts){
   });
 }
 function money(amount, currency){
+  // Always the server's amount (minor units) — "100 USD", "12.50 USD". Never a frontend constant.
   if (amount === null || amount === undefined) return 'On request';
-  try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency, maximumFractionDigits: 0 }).format(amount / 100); }
-  catch (e) { return (amount / 100) + ' ' + currency; }
+  var units = amount / 100;
+  return (Number.isInteger(units) ? String(units) : units.toFixed(2)) + ' ' + currency;
 }
 function fmtTime(iso, tz){
   try { return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', timeZone: tz }).format(new Date(iso)); }

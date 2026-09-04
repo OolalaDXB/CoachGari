@@ -76,6 +76,26 @@ begin
   j := public.create_hold('t-perm', ((now() + interval '3 days')::date + time '12:00') at time zone 'UTC', 1, 'a6666666-6666-4666-8666-666666666666', 'Next Person', 'next@example.com');
   if j ->> 'status' = 'hold' then ok := ok + 1; else fail := fail + 1; log := log || ' [rebook over expired hold]'; end if;
 
+  /* ---- 0b. CG-005 price chain on the real catalogue: 100 USD is the only amount that can be paid ---- */
+  if (select price_amount from public.services where slug = 'conversation') = 10000 then ok := ok + 1; else fail := fail + 1; log := log || ' [conversation price]'; end if;
+  j := public.create_hold('conversation', ((now() + interval '3 days')::date + time '13:00') at time zone 'UTC', 1, 'a7777777-7777-4777-8777-777777777777', 'Price Person', 'price@example.com');
+  if (j ->> 'price_amount')::int = 10000 and j ->> 'currency' = 'USD' then ok := ok + 1; else fail := fail + 1; log := log || ' [hold snapshot ' || coalesce(j ->> 'price_amount', 'null') || ']'; end if;
+  s := public.create_order_for_booking(j ->> 'reference', j ->> 'manage_token');
+  if (s ->> 'gross_amount')::int = 10000 then ok := ok + 1; else fail := fail + 1; log := log || ' [order amount]'; end if;
+  perform public.attach_checkout(s ->> 'reference', 'cs_price_' || replace(gen_random_uuid()::text, '-', ''), 'https://checkout.stripe.com/p', now() + interval '30 minutes');
+  -- the old 45 USD amount arriving from Stripe is ignored and never confirms
+  b := (public.process_stripe_event(jsonb_build_object('id', 'evt_price_45', 'type', 'checkout.session.completed', 'livemode', false,
+         'data', jsonb_build_object('object', jsonb_build_object('id', (select stripe_checkout_session_id from public.orders where reference = s ->> 'reference'), 'payment_status', 'paid', 'amount_total', 4500, 'currency', 'usd', 'payment_intent', 'pi_price_45')))) ->> 'status') = 'ignored';
+  if b and (select status from public.orders where reference = s ->> 'reference') = 'pending_payment' then ok := ok + 1; else fail := fail + 1; log := log || ' [45 USD not refused]'; end if;
+  -- the correct amount confirms and the ledger applies the unchanged 10 % rule
+  perform public.process_stripe_event(jsonb_build_object('id', 'evt_price_100', 'type', 'checkout.session.completed', 'livemode', false,
+         'data', jsonb_build_object('object', jsonb_build_object('id', (select stripe_checkout_session_id from public.orders where reference = s ->> 'reference'), 'payment_status', 'paid', 'amount_total', 10000, 'currency', 'usd', 'payment_intent', 'pi_price_100')),
+         '_enrich', jsonb_build_object('charge_id', 'ch_price', 'balance_transaction_id', 'txn_price', 'fee_amount', 320)));
+  if (select pe.gross_amount || '/' || pe.stripe_fee || '/' || pe.net_collected || '/' || pe.oolala_commission || '/' || pe.gari_payable
+        from public.partner_earnings pe join public.orders o on o.id = pe.order_id where o.reference = s ->> 'reference') = '10000/320/9680/968/8712'
+     and (select status from public.bookings where reference = j ->> 'reference') = 'confirmed' then ok := ok + 1;
+  else fail := fail + 1; log := log || ' [ledger 100 USD]'; end if;
+
   /* ---- 1. anon: permission denied everywhere ---- */
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);
   execute 'set local role anon';
@@ -198,7 +218,7 @@ begin
   if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance edits calendar]'; end if;
   begin perform public.analytics_summary(); fail := fail + 1; log := log || ' [finance analytics rpc]'; exception when insufficient_privilege then ok := ok + 1; end;
   s := public.finance_create_settlement(current_date - 1, current_date + 1, 'USD');
-  if (s ->> 'items')::int = 1 and (s ->> 'amount_payable')::int = 3905 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance settlement ' || s::text || ']'; end if;
+  if (s ->> 'items')::int = 2 and (s ->> 'amount_payable')::int = 3905 + 8712 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance settlement ' || s::text || ']'; end if;
   s := public.finance_mark_settlement_paid(s ->> 'reference', 'BANK-REF-1');
   s := public.finance_mark_settlement_reconciled(s ->> 'reference');
   if s ->> 'status' = 'reconciled' and (select count(*) from public.partner_settlements where status = 'reconciled') = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [finance settlement flow]'; end if;
