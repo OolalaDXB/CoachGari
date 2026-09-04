@@ -233,31 +233,37 @@ The laptop script creates a hold, proves a forged amount is ignored, prints
 the Checkout URL (pay with `4242 4242 4242 4242`) and waits for the webhook to
 confirm the booking.
 
-## Back-office (CG-002.5 / CG-006) — `/admin` (Operations) and `/finance`
+## Back-office (CG-002.5 / CG-006 / CG-008) — one workspace at `/admin`
 
-Two utilitarian areas on one script, no CMS, no CRM. Sign-in by Supabase
-Auth magic link with `shouldCreateUser: false`: an email that the owner has
-not invited cannot even create an auth user. What a person sees is
+One utilitarian workspace, no CMS, no CRM. Every capability is a tab, shown
+only when the signed-in person holds the matching permission. Sign-in by
+Supabase Auth magic link with `shouldCreateUser: false`: an email that the
+owner has not invited cannot even create an auth user. What a person sees is
 decided by the database, not by the page; the page never writes permissions
 directly.
 
-| Permission | Gives |
+| Permission | Tab(s) it unlocks in `/admin` |
 |---|---|
-| `coach:operations` | `/admin`: Leads (read + status, attachments), Calendar, Bookings (cancel / complete / no-show / confirm an unpriced hold), Availability, Exceptions, Tour stops |
-| `finance:view` | `/finance`: Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
-| `finance:manage` | `/finance`: create settlements, mark paid (bank reference), mark reconciled |
-| `analytics:view` | Aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month); output asserted free of names, emails, phones, references |
-| `catalog:view` | Services tab (`/admin`): the whole commercial catalogue, listed or not, and its change log |
-| `catalog:manage` | Services tab: create / edit services through the audited `catalog_save_service` RPC (title, descriptions, price, currency, duration, delivery, capacity, booking mode, active, listed, order, features) |
-| `platform:admin` | Access tab (`/admin`): list application users, activate / deactivate, grant / revoke permissions. **Nothing else**: no lead, booking, order or ledger row becomes visible through it (tested) |
+| `coach:operations` | Leads (read + status, attachments), Calendar, Bookings (cancel / complete / no-show / confirm an unpriced hold), Availability, Exceptions, Tour stops |
+| `catalog:view` | Services — the whole commercial catalogue, listed or not, and its change log |
+| `catalog:manage` | Services — create / edit through the audited `catalog_save_service` RPC (title, descriptions, price, currency, duration, delivery, capacity, booking mode, active, listed, order, features) |
+| `finance:view` | Finance — Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
+| `finance:manage` | Finance — create settlements, mark paid (bank reference), mark reconciled |
+| `analytics:view` | Analytics — aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month); output asserted free of names, emails, phones, references |
+| `platform:admin` | Access — list application users, activate / deactivate, grant / revoke permissions. **Nothing else**: no lead, booking, order or ledger row becomes visible through it (tested) |
 
-Permissions are additive. A person holding operations *and* finance
-permissions sees both areas, with a discreet "Finance ↗" / "Operations ↗"
-link in the header — only rendered when the other permission is held. There
-is no owner, superadmin or RLS-bypass role, and no `content:*` permission:
-the website is edited in Git.
+**One cockpit, independent permissions (CG-008).** Finance is a tab in
+`/admin`, not a separate app — the earlier `/admin` vs `/finance` split
+reflected a superseded access model. `/finance` is kept only as a deep link
+that redirects to the Finance tab (`/admin#finance`). Merging the *UI* does
+not merge the *rights*: `finance:view` and `finance:manage` remain
+independent permissions, tab visibility is permission-driven, and the
+Finance tab plus its RPCs (under RLS) disappear the moment the permission is
+removed. Permissions are additive; a person simply sees one tab per
+permission they hold. There is no owner, superadmin or RLS-bypass role, and
+no `content:*` permission: the website is edited in Git.
 
-- **Mechanics** (`20260905_cg0025_backoffice.sql`, `20260907_cg006_access_and_upload_tokens.sql`, `20260908_cg007_catalogue.sql`):
+- **Mechanics** (`20260905_cg0025_backoffice.sql`, `20260907_cg006_access_and_upload_tokens.sql`, `20260908_cg007_catalogue.sql`; navigation unified in CG-008):
   `app_users` + `app_permissions` keyed by email; `has_permission(text)` reads
   the JWT; grants to `authenticated` are on explicit column lists (never
   `manage_token`, `ip_hash`, `idempotency_key`, `upload_token_hash`, webhook
@@ -282,13 +288,14 @@ the website is edited in Git.
   write `app_users` / `app_permissions` directly through the API. Revoke by
   unticking a permission or deactivating the user; effect is immediate.
 - **Auth set-up** (owner, Supabase dashboard → Authentication → URL
-  configuration): add `https://coachgariv0.vercel.app/admin/`, `…/finance/`
-  and, later, the `https://coachgari.com` equivalents to *Redirect URLs*.
-  Magic links use Supabase's built-in mailer until a custom SMTP (Resend) is
-  configured there.
+  configuration): add `https://coachgariv0.vercel.app/admin/` and, later, the
+  `https://coachgari.com` equivalent to *Redirect URLs*. Sign-in always lands
+  on `/admin/` now; `/finance` is a Vercel redirect to `/admin#finance`, not a
+  sign-in target. Magic links use Supabase's built-in mailer until a custom
+  SMTP (Resend) is configured there.
 - **Frontend**: `admin/index.html` + `admin/admin.js` (supabase-js UMD from
-  jsdelivr, allowed by a dedicated CSP on `/admin*` and `/finance*`),
-  publishable key and project URL from `config.js`. Times are shown and
+  jsdelivr, allowed by a dedicated CSP on `/admin*`), publishable key and
+  project URL from `config.js`. Times are shown and
   entered in a chosen IANA zone and stored in UTC.
 
 ### Permission tests — fail the build on a boundary violation

@@ -23,6 +23,46 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-008 — One back-office cockpit (`/admin`), Finance as a tab
+
+**Status: built and deployed. UI/navigation change only — no schema, RLS,
+RPC, permission or data-model change.**
+
+### Decisions
+
+- **A single operational workspace.** The `/admin` vs `/finance` split
+  reflected the earlier access model (Gari operational, Oolala/Mickaël
+  finance, strongly separated). Launch users now hold the same full business
+  access, so two back-offices were artificial. Everything lives in `/admin`
+  as tabs, in order: Leads, Calendar, Bookings, Availability, Exceptions,
+  Tour stops, Services, Finance, Analytics, Access.
+- **Finance is a tab, not a merge of rights.** `finance:view` and
+  `finance:manage` stay independent permissions in the database. Tab
+  visibility is permission-driven (`has('finance:view')`), and the Finance
+  tab plus its RPCs (`finance_orders`, `finance_webhook_log`,
+  `finance_*settlement*`) remain gated by RLS and their own
+  `has_permission` checks. Remove `finance:view` and the tab and its data
+  disappear — the security boundary is unchanged and still independently
+  tested (the single-permission personas in the suite are untouched).
+- **`/finance` kept as a deep link.** A Vercel redirect sends `/finance`
+  (and `/finance/*`) to `/admin#finance`; the hash selects the Finance tab
+  when the person has it, else the back-office opens on their first tab. The
+  separate `finance/index.html` is removed — one UI, not two. Sign-in always
+  lands on `/admin/`.
+- **No Overview tab built.** An Overview/dashboard was floated but is a new
+  feature; Analytics already covers the aggregate view. Left for the backlog.
+- **Nothing else touched.** No change to the finance data model, the ledger,
+  the catalogue, the booking engine or any permission definition. The
+  `access:` and `analytics:` tabs, and the platform-admin narrowness, are
+  exactly as in CG-006.
+
+### Owner action
+
+Redirect URLs in Supabase Auth now only need `/admin/` (sign-in always lands
+there). The `/finance/` redirect URL, if already added, is harmless.
+
+---
+
 ## CG-007 — Admin-editable service catalogue
 
 **Status: built and deployed; suites 236 / 28 / 24 green. Attaching
@@ -283,7 +323,9 @@ Supabase Auth are owner actions.**
 - **Two routes, one script.** `/admin` shows only the six operational tabs;
   `/finance` shows only Finance. Analytics appears on whichever area the
   person has, when granted. No super-admin: a person with both permissions
-  simply has both areas.
+  simply has both areas. *Superseded by CG-008: a single `/admin` workspace
+  with Finance as one tab; `/finance` redirects there. Permissions stay
+  independent.*
 - **Column grants, not table grants.** `authenticated` is granted explicit
   column lists: leads without `ip_hash`; bookings without `manage_token`,
   `idempotency_key`, `ip_hash`; orders without `customer_name` /
