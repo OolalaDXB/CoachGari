@@ -23,6 +23,31 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Incident 2026-09-04 — booking picker replaced by "Booking opens soon"
+
+**Root cause.** Not a code regression on the page. The `booking` Edge
+Function answered `?action=services` with HTTP 500 three times (2026-09-03
+23:14 UTC, 2026-09-04 06:01 and 06:50 UTC), each time on the first request
+after a cold boot, with PostgREST error `PGRST303` ("JWT expired / not yet
+valid" — clock skew between the fresh isolate and PostgREST); the
+`?action=tour_stops` call in the same second succeeded. The page treated
+the 500 as "no services" and showed the empty-catalogue message, hiding the
+cause. Catalogue (`conversation` active + listed), config, CORS and RLS
+were all correct.
+
+**Fix.** `booking` v2 retries transient PostgREST errors (`PGRST303`,
+`PGRST301`, connection errors) up to twice with a fresh client before
+returning 500, and logs the error message. `assets/booking.js` now keeps
+three states apart: API OK with services → picker; API OK with no service
+→ "Booking opens soon" plus `console.warn('booking_init_failed:
+no_active_services')`; API or network failure → one retry after 1.5 s,
+then "Booking is temporarily unavailable" plus
+`console.error('booking_init_failed: http <status> <error> (<code>) — endpoint …')`.
+Slot loading failures log `booking_slots_failed: <reason>`. The fallback
+never depends on the domain, Resend, Plausible or Stripe.
+
+---
+
 ## CG-004 — Enquiry attachments (photos / videos)
 
 **Status: built and deployed; covered by the permissions suite.**

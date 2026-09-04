@@ -79,12 +79,36 @@ function init(){
     return;
   }
 
-  Promise.all([api('?action=services'), api('?action=tour_stops')]).then(function(res){
-    state.services = (res[0].body && res[0].body.services) || [];
-    state.tourStops = (res[1].body && res[1].body.tour_stops) || [];
-    if (!state.services.length) { say('Booking opens soon — message on WhatsApp in the meantime.', 'err'); return; }
-    renderServices();
-  }).catch(function(){ say('Could not load the booking options. Try again in a moment.', 'err'); });
+  /* Catalogue load. Three outcomes, never confused:
+       - API answered 200 with services      → picker
+       - API answered 200 with no service    → "opens soon"   (a real catalogue state)
+       - API error / network error           → "temporarily unavailable", after one retry,
+         and always console.error('booking_init_failed: <reason>') so a regression
+         is diagnosable from the browser. */
+  function loadCatalogue(attempt){
+    say('Loading…');
+    return Promise.all([api('?action=services'), api('?action=tour_stops')]).then(function(res){
+      var bad = res.find(function(r){ return r.status !== 200 || !r.body || r.body.ok === false; });
+      if (bad) {
+        throw new Error('http ' + bad.status + (bad.body && bad.body.error ? ' ' + bad.body.error : '') + (bad.body && bad.body.code ? ' (' + bad.body.code + ')' : ''));
+      }
+      state.services = res[0].body.services || [];
+      state.tourStops = res[1].body.tour_stops || [];
+      if (!state.services.length) {
+        console.warn('booking_init_failed: no_active_services (API reachable, catalogue empty)');
+        say('Booking opens soon — message on WhatsApp in the meantime.', 'err');
+        return;
+      }
+      say('');
+      renderServices();
+    }).catch(function(e){
+      var reason = (e && e.message) || 'network_error';
+      if (attempt < 2) { console.warn('booking_init_retry: ' + reason); return new Promise(function(r){ setTimeout(r, 1500); }).then(function(){ return loadCatalogue(attempt + 1); }); }
+      console.error('booking_init_failed: ' + reason + ' — endpoint ' + CONFIG.BOOKING_ENDPOINT);
+      say('Booking is temporarily unavailable — message Coach Gari on WhatsApp in the meantime.', 'err');
+    });
+  }
+  loadCatalogue(1);
 
   function renderServices(){
     stepService.innerHTML = '';
@@ -144,7 +168,7 @@ function init(){
         });
         stepSlots.appendChild(grid);
       })
-      .catch(function(){ say('Could not load times. Try again in a moment.', 'err'); });
+      .catch(function(e){ console.error('booking_slots_failed: ' + ((e && e.message) || 'network_error')); say('Could not load times. Try again in a moment.', 'err'); });
   }
 
   function renderForm(){

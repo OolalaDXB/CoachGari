@@ -78,13 +78,33 @@ function rpcError(e: { code?: string; message?: string }, origin: string | null,
   if (e.code === "P0002") return json(404, { ok: false, error: "not_found", message: msg }, origin, allowed);
   if (e.code === "P0003") return json(409, { ok: false, error: "conflict", message: msg }, origin, allowed);
   if (e.code === "22023") return json(400, { ok: false, error: "validation", message: msg }, origin, allowed);
-  log("rpc_failed", { code: e.code });
-  return json(500, { ok: false, error: "server_error" }, origin, allowed);
+  log("rpc_failed", { code: e.code, message: (e.message ?? "").slice(0, 160) });
+  return json(500, { ok: false, error: "server_error", code: e.code ?? null }, origin, allowed);
 }
 
 const db = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false },
 });
+
+/* Transient PostgREST failures seen on cold starts (PGRST303 "JWT expired" /
+   "not yet valid" from clock skew, PGRST301, connection errors) are retried
+   up to twice with a fresh client before surfacing a 500. Business errors
+   (P0002/P0003/22023) are never retried. */
+const TRANSIENT = new Set(["PGRST301", "PGRST303", "PGRST000", "PGRST001", "PGRST002"]);
+type DbResult<T> = { data: T | null; error: { code?: string; message?: string } | null };
+async function withRetry<T>(label: string, run: (c: ReturnType<typeof db>) => PromiseLike<DbResult<T>>): Promise<DbResult<T>> {
+  let last: DbResult<T> = { data: null, error: { message: "no attempt" } };
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try { last = await run(db()); }
+    catch (e) { last = { data: null, error: { code: "FETCH", message: (e as Error).message } }; }
+    const code = last.error?.code ?? "";
+    if (!last.error || !(TRANSIENT.has(code) || code === "FETCH")) return last;
+    log("transient_retry", { label, code, attempt });
+    await new Promise((r) => setTimeout(r, 150 * attempt));
+  }
+  return last;
+}
+
 
 Deno.serve(async (req: Request) => {
   const origin = req.headers.get("origin");
@@ -100,17 +120,17 @@ Deno.serve(async (req: Request) => {
     const action = url.searchParams.get("action");
 
     if (action === "services") {
-      const { data, error } = await supabase.from("services")
+      const { data, error } = await withRetry("services", (c) => c.from("services")
         .select("slug, title, category, description, duration_minutes, price_amount, currency, delivery_mode, default_capacity")
-        .eq("active", true).eq("listed", true).order("sort_order");
+        .eq("active", true).eq("listed", true).order("sort_order"));
       if (error) return rpcError(error, origin, allowed);
       return json(200, { ok: true, services: data }, origin, allowed);
     }
 
     if (action === "tour_stops") {
-      const { data, error } = await supabase.from("tour_stops")
+      const { data, error } = await withRetry("tour_stops", (c) => c.from("tour_stops")
         .select("slug, city, country, timezone, start_at, end_at, booking_opens_at, booking_closes_at, venue, location_notes, tour_stop_services(services(slug))")
-        .eq("status", "open").gte("end_at", new Date().toISOString()).order("start_at");
+        .eq("status", "open").gte("end_at", new Date().toISOString()).order("start_at"));
       if (error) return rpcError(error, origin, allowed);
       const stops = (data ?? []).map((t: Record<string, unknown>) => ({
         ...t,
@@ -126,7 +146,7 @@ Deno.serve(async (req: Request) => {
       if (!isSlug(service) || !isDate(from) || !isDate(to) || !isTz(tz)) {
         return json(400, { ok: false, error: "validation", fields: ["service", "from", "to", "tz"] }, origin, allowed);
       }
-      const { data, error } = await supabase.rpc("available_slots", { p_service_slug: service, p_from: from, p_to: to, p_tz: tz });
+      const { data, error } = await withRetry("slots", (c) => c.rpc("available_slots", { p_service_slug: service, p_from: from, p_to: to, p_tz: tz }));
       if (error) return rpcError(error, origin, allowed);
       return json(200, { ok: true, service, tz, slots: data }, origin, allowed);
     }
@@ -134,7 +154,7 @@ Deno.serve(async (req: Request) => {
     if (action === "state") {
       const ref = url.searchParams.get("ref"), token = url.searchParams.get("token");
       if (!ref || !token) return json(400, { ok: false, error: "validation", fields: ["ref", "token"] }, origin, allowed);
-      const { data, error } = await supabase.rpc("get_booking", { p_reference: ref, p_manage_token: token });
+      const { data, error } = await withRetry("state", (c) => c.rpc("get_booking", { p_reference: ref, p_manage_token: token }));
       if (error) return rpcError(error, origin, allowed);
       return json(200, { ok: true, booking: data }, origin, allowed);
     }
