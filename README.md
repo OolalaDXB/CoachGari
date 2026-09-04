@@ -113,27 +113,35 @@ Migadu mailboxes are set up separately when the domain is connected.
 - **Location**: the single "City and country" field is stored verbatim in
   `location_raw` and split on the last comma into `city` / `country`.
 
-## Enquiry attachments (CG-004)
+## Enquiry attachments (CG-004 / CG-006)
 
 Every category of the enquiry form accepts up to **3 photos or videos, 50 MB
 in total**. The lead is stored first; files follow and never block it.
 
-- **Flow**: `contact` stores the enquiry → for each file the browser calls
-  `supabase/functions/upload` with `{action:"sign", submission_id, filename,
+- **Flow**: `contact` stores the enquiry and returns a one-off `upload_token`
+  (256-bit random, only its SHA-256 is stored on the enquiry, valid 30
+  minutes, one enquiry only) → for each file the browser calls
+  `supabase/functions/upload` with `{action:"sign", upload_token, filename,
   content_type, size}` → gets a signed upload URL for the private bucket
-  `enquiry-media` → `PUT`s the raw file → calls `{action:"confirm", path}`.
-  Ownership is proven by the `submission_id` the browser generated for its
-  own enquiry; the window closes 30 minutes after the enquiry.
+  `enquiry-media` → `PUT`s the raw file → calls `{action:"confirm",
+  upload_token, path}`. The browser-generated `submission_id` is only an
+  idempotency key; it is never accepted as an upload credential. A duplicate
+  or retried enquiry never receives a token again.
 - **Limits, enforced three times**: browser (validation before Send), database
-  (`reserve_contact_media`: 3 files, 50 MB total, `image/*` or `video/*`,
-  window, advisory lock) and bucket (`file_size_limit` 50 MB,
-  `allowed_mime_types`).
+  (`reserve_contact_media`: token, 3 files, 50 MB total, strict MIME
+  allowlist, advisory lock) and bucket (`file_size_limit` 50 MB,
+  `allowed_mime_types`). Allowlist: `image/jpeg, png, webp, heic, heif, gif`
+  and `video/mp4, quicktime, webm, x-m4v, 3gpp` — no SVG, no PDF, nothing
+  executable, no `image/*` wildcard. A check constraint on `contact_media`
+  uses the same list.
 - **Table** `public.contact_media` (`storage_path`, `original_name`,
   `content_type`, `size_bytes`, `status` pending/uploaded/failed).
 - **Access**: only `coach:operations` reads rows and objects (RLS on the table
   and on `storage.objects`); the Leads tab lists the files and opens each one
-  with a 10-minute signed URL. Finance, analytics and anon see nothing.
+  with a 10-minute signed URL. Finance, analytics, `platform:admin` and anon
+  see nothing. No browser holds a privileged key.
 - **Off switch**: empty `UPLOAD_ENDPOINT` in `config.js` hides the field.
+- Not done on purpose: virus scanning, transcoding.
 
 ## Booking (CG-002)
 
@@ -225,51 +233,61 @@ The laptop script creates a hold, proves a forged amount is ignored, prints
 the Checkout URL (pay with `4242 4242 4242 4242`) and waits for the webhook to
 confirm the booking.
 
-## Back-office (CG-002.5) — `/admin` (Gari) and `/finance` (Oolala)
+## Back-office (CG-002.5 / CG-006) — `/admin` (Operations) and `/finance`
 
 Two utilitarian areas on one script, no CMS, no CRM. Sign-in by Supabase
 Auth magic link with `shouldCreateUser: false`: an email that the owner has
-not provisioned cannot even create an auth user. What a person sees is
-decided by the database, not by the page; the page never writes permissions.
+not invited cannot even create an auth user. What a person sees is
+decided by the database, not by the page; the page never writes permissions
+directly.
 
-| Permission | Who | Gives |
-|---|---|---|
-| `coach:operations` | Gari, `/admin` | Leads (read + status), Calendar, Bookings (cancel / complete / no-show / confirm an unpriced hold), Availability, Exceptions, Tour stops |
-| `finance:view` | Oolala, `/finance` | Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
-| `finance:manage` | Oolala, `/finance` | Create settlements, mark paid (bank reference), mark reconciled. Still no lead access |
-| `analytics:view` | either area | Aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month); output asserted free of names, emails, phones, references |
+| Permission | Gives |
+|---|---|
+| `coach:operations` | `/admin`: Leads (read + status, attachments), Calendar, Bookings (cancel / complete / no-show / confirm an unpriced hold), Availability, Exceptions, Tour stops |
+| `finance:view` | `/finance`: Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
+| `finance:manage` | `/finance`: create settlements, mark paid (bank reference), mark reconciled |
+| `analytics:view` | Aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month); output asserted free of names, emails, phones, references |
+| `platform:admin` | Access tab (`/admin`): list application users, activate / deactivate, grant / revoke permissions. **Nothing else**: no lead, booking, order or ledger row becomes visible through it (tested) |
 
-There is no `content:*` permission: the website is edited in Git.
+Permissions are additive. A person holding operations *and* finance
+permissions sees both areas, with a discreet "Finance ↗" / "Operations ↗"
+link in the header — only rendered when the other permission is held. There
+is no owner, superadmin or RLS-bypass role, and no `content:*` permission:
+the website is edited in Git.
 
-- **Mechanics** (`supabase/migrations/20260905_cg0025_backoffice.sql`):
+- **Mechanics** (`20260905_cg0025_backoffice.sql`, `20260907_cg006_access_and_upload_tokens.sql`):
   `app_users` + `app_permissions` keyed by email; `has_permission(text)` reads
   the JWT; grants to `authenticated` are on explicit column lists (never
-  `manage_token`, `ip_hash`, `idempotency_key`, webhook payloads, and no
-  customer columns on `orders`); RLS policies gate rows by permission;
-  state changes go through `ops_set_booking_status`, `finance_*` and
-  `analytics_summary` RPCs that check the permission themselves. `anon` keeps
-  zero access.
-- **Provisioning** (owner, two steps, no personal email in any migration):
-  1. Supabase → Authentication → Users → *Invite user* (creates the auth
-     user; also turn off *Allow new users to sign up* under Auth settings as
-     belt and braces).
-  2. SQL editor — permissions live only here and are never writable through
-     the API:
+  `manage_token`, `ip_hash`, `idempotency_key`, `upload_token_hash`, webhook
+  payloads, and no customer columns on `orders`); RLS policies gate rows by
+  permission; state changes go through `ops_set_booking_status`, `finance_*`,
+  `analytics_summary` and `admin_*` RPCs that check the permission
+  themselves. `anon` keeps zero access.
+- **Provisioning is operational data, never a migration.** Invitation only,
+  no fake records: every provisioning path refuses an email that has no
+  `auth.users` identity (`P0002`). Two steps for the owner:
+  1. Supabase → Authentication → Users → *Invite user* (also turn off *Allow
+     new users to sign up* under Auth settings as belt and braces).
+  2. Attach access, idempotently (re-running replaces the permission set):
   ```sql
-  insert into public.app_users (email, display_name, party) values ('gari@example.com', 'Gari', 'gari');
-  insert into public.app_permissions (email, permission) values ('gari@example.com', 'coach:operations');
-  insert into public.app_users (email, display_name, party) values ('finance@example.com', 'Oolala', 'oolala');
-  insert into public.app_permissions (email, permission) values ('finance@example.com', 'finance:view'), ('finance@example.com', 'finance:manage'), ('finance@example.com', 'analytics:view');
+  -- SQL editor (runs as service role). Placeholders — real emails are never committed.
+  select public.set_app_access('<owner-email>',   'Name', 'studio', array['coach:operations','finance:view','finance:manage','analytics:view','platform:admin']);
+  select public.set_app_access('<coach-email>',   'Name', 'gari',   array['coach:operations','finance:view','finance:manage','analytics:view']);
   ```
-  Revoke by deleting the permission row or setting `app_users.active = false`.
+  From then on a `platform:admin` can do the same from the Access tab
+  (`admin_set_user`, `admin_grant`, `admin_revoke`); a person can never
+  deactivate themselves or revoke their own `platform:admin`, and nobody can
+  write `app_users` / `app_permissions` directly through the API. Revoke by
+  unticking a permission or deactivating the user; effect is immediate.
 - **Auth set-up** (owner, Supabase dashboard → Authentication → URL
-  configuration): add `https://coachgariv0.vercel.app/admin/` and, later,
-  `https://coachgari.com/admin/` to *Redirect URLs*. Magic links use Supabase's
-  built-in mailer until a custom SMTP (Resend) is configured there.
+  configuration): add `https://coachgariv0.vercel.app/admin/`, `…/finance/`
+  and, later, the `https://coachgari.com` equivalents to *Redirect URLs*.
+  Magic links use Supabase's built-in mailer until a custom SMTP (Resend) is
+  configured there.
 - **Frontend**: `admin/index.html` + `admin/admin.js` (supabase-js UMD from
-  jsdelivr, allowed by a dedicated CSP on `/admin*`), publishable key and
-  project URL from `config.js`. Times are shown and entered in a chosen IANA
-  zone and stored in UTC.
+  jsdelivr, allowed by a dedicated CSP on `/admin*` and `/finance*`),
+  publishable key and project URL from `config.js`. Times are shown and
+  entered in a chosen IANA zone and stored in UTC.
 
 ### Permission tests — fail the build on a boundary violation
 
@@ -278,20 +296,34 @@ psql "$DATABASE_URL" -f supabase/tests/cg0025_permissions.sql   # one suite
 DATABASE_URL=postgresql://… scripts/db-tests.sh                   # all three suites, exit 1 on any fail
 ```
 
-`CG0025_TESTS ok=118 fail=0`, always rolled back. It switches role and JWT
+`CG0025_TESTS ok=206 fail=0`, always rolled back. It switches role and JWT
 claims per persona and asserts the negatives: anon is refused on every private
-table and RPC; a stranger or inactive user gets zero rows and every RPC
-refused; a coach cannot read orders, payments, refunds, chargebacks,
-settlements, settlement items, the webhook log, `manage_token` or `ip_hash`,
-and cannot insert, update or delete permissions; finance cannot read leads,
-the message column, bookings, customer names or `email_events`, and cannot
-grant itself operations; analytics output contains no lead body and matches
-no email, phone or booking-reference pattern. It also proves booking
-correctness does not depend on `pg_cron`: an expired hold frees its slot
-before `expire_holds()` runs. CI runs `scripts/db-tests.sh` when the
-`SUPABASE_DB_URL` repository secret (session-pooler URI) is set and fails the
-build otherwise-than-`fail=0`; without the secret the job is skipped with a
-notice.
+table and RPC (including the `admin_*`, `set_app_access`, `issue_upload_token`
+and `reserve_contact_media` functions); a stranger or inactive user gets zero
+rows and every RPC refused; a coach cannot read orders, payments, refunds,
+chargebacks, settlements, settlement items, the webhook log, `manage_token`,
+`ip_hash` or `upload_token_hash`, cannot issue upload tokens, and cannot
+insert, update or delete permissions (directly or through `admin_grant`);
+finance cannot read leads, the message column, bookings, customer names or
+`email_events`, and cannot grant itself operations; analytics output contains
+no lead body and matches no email, phone or booking-reference pattern.
+CG-006 adds a **composite launch persona** (operations + finance + analytics
+in one identity reaches leads, bookings, calendar, attachments, orders,
+payments, ledger, settlements, webhook log and analytics, still without
+`manage_token`, customer columns, raw payloads or access administration) and a
+**`platform:admin`-only persona** (lists and edits access; sees zero rows in
+every business table and is refused every business RPC; cannot write the
+access tables directly, cannot call `set_app_access`, cannot revoke its own
+`platform:admin`, cannot create a user without an auth identity; a business
+permission it grants itself is the only thing that opens business data, and
+revoking it closes them again). The upload-token block proves the
+`submission_id` and the contact id are refused as credentials, wrong, null and
+expired tokens are refused, re-issuing rotates the token, and PDF, SVG, EXE,
+HTML, octet-stream and MKV are rejected by the RPC, the table constraint and
+the bucket. It also proves booking correctness does not depend on `pg_cron`.
+CI runs `scripts/db-tests.sh` when the `SUPABASE_DB_URL` repository secret
+(session-pooler URI) is set and fails the build otherwise-than-`fail=0`;
+without the secret the job is skipped with a notice.
 
 ## Supabase set-up (no secrets in this repo)
 

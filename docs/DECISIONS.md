@@ -23,6 +23,95 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-006 — Launch access model, platform:admin, upload credential hardening
+
+**Status: built and deployed; suite 206/206. Attaching the two launch users is
+an owner action (Auth invitations first — see Owner actions).**
+
+### Decisions
+
+- **Launch access is identical full business access for both principals,
+  expressed as the existing granular permissions, not as a role.** The owner
+  (The Studio MT) and the coach each hold `coach:operations`, `finance:view`,
+  `finance:manage` and `analytics:view`, so both can run `/admin` (leads,
+  calendar, bookings, availability, exceptions, tour stops, attachments) and
+  `/finance` (orders, payments, refunds, chargebacks, earnings, commission,
+  payable, settlements, reconciliation). The permission model, the column
+  grants and the RLS policies are unchanged: nobody gets `manage_token`,
+  `ip_hash`, raw webhook payloads or customer columns on `orders`. The
+  canonical rule still governs the *schema*; at launch the two people have
+  simply chosen to share the operational view. Any permission can be taken
+  back later without a code change.
+- **`platform:admin` is narrow and belongs to the owner only.** It unlocks an
+  Access tab (list application users, activate / deactivate, grant / revoke)
+  through `admin_list_access`, `admin_set_user`, `admin_grant`,
+  `admin_revoke`. It is not a superadmin: it opens no business row and no
+  business RPC (tested persona), it cannot write the access tables directly,
+  it cannot call the service-role `set_app_access`, cannot revoke its own
+  `platform:admin` and cannot deactivate itself. If a platform admin grants
+  themself a business permission, that explicit permission — and only it —
+  opens the corresponding data; revoking it closes them. No service-role key
+  ever reaches a browser.
+- **Invitation only, no fake records.** `auth.users` is empty today. Rather
+  than inserting `app_users` rows for emails that cannot sign in, every
+  provisioning path (`set_app_access`, `admin_set_user`) refuses an email with
+  no auth identity (`P0002`). Provisioning is operational data run in the SQL
+  editor or the Access tab; **no personal email is committed to a migration or
+  to this repository**. `set_app_access` is idempotent: re-running it replaces
+  the permission set.
+- **Cross navigation, not a redesign.** A single understated "Finance ↗" /
+  "Operations ↗" link in the back-office header, rendered only when the
+  person actually holds the other permission.
+- **Upload authorisation no longer relies on the client `submission_id`.**
+  `contact` now returns a server-issued `upload_token` (256 random bits,
+  hex; only its SHA-256 is stored on the enquiry; 30-minute expiry; one
+  enquiry). `reserve_contact_media` / `confirm_contact_media` take the token;
+  the `submission_id`, the contact id, wrong, null and expired tokens are
+  refused (tested), re-issuing rotates the credential, and a duplicate or
+  retried enquiry never receives a token. `upload_token_hash` is not granted
+  to any browser role.
+- **Strict MIME allowlist, three layers.** `image/jpeg, png, webp, heic,
+  heif, gif` and `video/mp4, quicktime, webm, x-m4v, 3gpp`. No SVG, no PDF,
+  nothing executable, no `image/*` wildcard — enforced by
+  `media_type_allowed()` in the RPC and a check constraint on
+  `contact_media`, by the bucket's `allowed_mime_types`, and by the Edge
+  Function. Unchanged: 3 files, 50 MB total, private bucket, 10-minute
+  signed read URLs for `coach:operations` only. Still no antivirus or
+  transcoding.
+- **Booking picker incident stays "mitigated / root cause open."** The retry
+  strategy is kept as is; no clock-skew claim, no wider auth workaround.
+- **Stripe remains TEST mode only**; every CG-003 hardening is preserved.
+
+### Tests
+
+`CG0025_TESTS ok=206 fail=0` on 2026-09-04 (rollback harness). New blocks:
+upload-token issuance, refusal of `submission_id` / contact id / wrong / null
+/ expired tokens, token rotation, six rejected MIME types at RPC, table and
+bucket level; anon refused on all new RPCs; stranger / inactive refused on
+`admin_list_access` and see no other user's row; coach refused on
+`issue_upload_token`, `upload_token_hash`, `admin_*`, `set_app_access`;
+**composite launch persona** (21 checks); **platform:admin-only persona**
+(37 checks, no bypass); `set_app_access` refusing a ghost email. Webhook
+signature suite 24/24, htmlhint and link check clean. Supabase advisors: no
+ERROR; the WARN class "signed-in users can execute SECURITY DEFINER function"
+is the documented, intentional pattern (every such function checks
+`has_permission` first); INFO items unchanged.
+
+### Owner actions
+
+1. Supabase → Authentication → Users → *Invite user* for the owner and for the
+   coach (their emails are known to the parties and deliberately not written
+   here).
+2. SQL editor: the two `set_app_access(...)` lines from the README with the
+   real emails (owner: all five permissions; coach: the four business
+   permissions). Re-run at any time; refuses until the invitation exists.
+3. Redirect URLs for `/admin/` and `/finance/`; *Allow new users to sign up*
+   off.
+4. Unchanged from earlier sprints: `SUPABASE_DB_URL` secret for CI, Plausible
+   activation, Resend / custom SMTP, production domain.
+
+---
+
 ## CG-005 — The Conversation: 100 USD / 60 min
 
 Approved Route C price applied where it lives: `services.price_amount = 10000`
@@ -102,10 +191,10 @@ diagnostics attached, open a Supabase support ticket with the
   before; uploads follow one by one and a failed upload never loses the lead.
   The success message says how many files were attached.
 - **No key in the browser.** The `upload` Edge Function issues signed upload
-  URLs for the private bucket `enquiry-media`; the browser proves ownership
-  with the `submission_id` it generated itself, within 30 minutes of the
-  enquiry. `confirm` checks the object exists before marking the row
-  `uploaded`, and removes stray objects.
+  URLs for the private bucket `enquiry-media`; ownership was originally
+  proven with the browser's `submission_id` — **superseded by CG-006**, which
+  issues a server-side upload token instead. `confirm` checks the object
+  exists before marking the row `uploaded`, and removes stray objects.
 - **People belong to Gari.** Only `coach:operations` can read
   `contact_media` rows and the objects (policy on `storage.objects`); the
   Leads tab opens each file with a short-lived signed URL. Finance,
@@ -120,7 +209,7 @@ diagnostics attached, open a Supabase support ticket with the
 
 ## CG-002.5 — Back-office, permissions, RLS
 
-**Status: built; database suite 118/118 (rollback harness, persona switching);
+**Status: built; database suite 118/118 at the time (206/206 after CG-006, rollback harness, persona switching);
 `/admin` (Gari) and `/finance` (Oolala) deployed (noindex). Inviting the first
 auth users, granting their permissions and adding the redirect URLs in
 Supabase Auth are owner actions.**
@@ -196,8 +285,8 @@ the build on any `fail>0`.
    `coachgari.com` equivalents once live). Auth settings: turn off *Allow new
    users to sign up*.
 2. Authentication → Users → *Invite user* for Gari and for Oolala.
-3. SQL editor: insert the same emails in `app_users` + `app_permissions`
-   (snippet in README).
+3. SQL editor: attach access with `set_app_access(...)` (CG-006; snippet in
+   README — direct inserts are no longer the documented path).
 4. GitHub → repository secret `SUPABASE_DB_URL` (session-pooler URI) so CI
    enforces the boundary tests on every push.
 5. Optional: custom SMTP for auth emails (Resend) once the domain is verified.
