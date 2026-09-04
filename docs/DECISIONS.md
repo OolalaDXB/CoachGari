@@ -23,6 +23,83 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-009 — Admin cockpit, CRM canonical model, client profile, progress
+
+**Status: built and deployed; DB suite `CG009_TESTS ok=43 fail=0` plus a
+regression probe (9/0) confirming the existing per-persona RLS is unchanged;
+advisors clean of new findings. Frontend is a vanilla-JS rewrite of the
+back-office shell and CRM; no browser-run e2e in this environment.**
+
+### Pattern source
+
+The `OolalaDXB/maison-collection` React app was used strictly as a **UI
+pattern library** (sidebar `AdminLayout`, `GuestProfileDialog`, contacts
+list, calendar tabs). No logic, schema, permissions, environment values or
+secrets were copied; its `.env` was never read. Patterns were re-implemented
+in Coach Gari's existing vanilla-JS + Supabase stack. The repo is attached
+read-only and not registered (its CLAUDE.md/plugins are not loaded).
+
+### Decisions
+
+- **One cockpit.** The dense horizontal nav is replaced by a sidebar
+  (desktop) / drawer (mobile) with a minimal top header carrying the page
+  name and an account menu; Sign Out moved into that menu. Destinations:
+  Overview, CRM, Schedule, Bookings, Services, Finance, Analytics, Access
+  (platform:admin). Visibility stays permission-driven. Calendar,
+  Availability, Exceptions and Tour stops are no longer four top-level
+  items — they are sub-tabs of **Schedule**. Finance stays one destination
+  (CG-008). No booking-engine change; the UI only reorganises.
+- **An enquiry is not a person.** New `crm_contacts` canonical model;
+  `contacts.crm_contact_id` and `bookings.crm_contact_id` link to it, added
+  and back-filled without rewriting a single enquiry. A `before insert`
+  trigger keeps new rows linked, including a **direct booking** with no prior
+  enquiry.
+- **Conservative matching only.** `crm_link_contact` matches an exact
+  normalised email (single match), then an exact normalised phone (single
+  match), else creates. Never a fuzzy name merge; two same-name people stay
+  separate. An ambiguous match creates a fresh record flagged
+  `needs_review` — a manual merge can be added later, but no merge engine is
+  built now.
+- **Client profile is a popup, not a page.** Clicking a Lead or Contact opens
+  a large responsive dialog over the list, so closing it returns to the exact
+  tab / filters / search / scroll. Sections: Overview, Notes, Progress,
+  Enquiries, Bookings, Payments, Media, Attribution — each gated by its own
+  permission. Media reuses the private `enquiry-media` bucket via short-lived
+  signed URLs; no second bucket.
+- **Notes are a history.** `crm_notes` (author, timestamp, category, pin);
+  editable, edits audited. Internal only; never in analytics or public paths.
+- **Body metrics are longitudinal, BMI is derived.** `body_measurements`
+  snapshots the height used per row; `bmi` is a generated column, never
+  typed or independently editable, so historical BMI is reproducible. Server
+  validates plausible ranges (rejects, does not coerce), accepts partial
+  measurements, and produces no medical interpretation. Height also lives as
+  the current value on `crm_contacts`.
+- **Sensitive data is independently permissionable.** New
+  `client_profile:view/manage` and `health_metrics:view/manage`. `finance:*`
+  and `analytics:*` never imply either. Both launch users get all four; only
+  Mickaël keeps `platform:admin`. Permissions stay granular.
+- **Writes are RPC-only and audited.** `crm_save_contact`, `crm_add_note`,
+  `crm_edit_note`, `metrics_add`, `metrics_edit` check the permission and log
+  to `admin_audit` (who / what / when). The CRM tables have no direct
+  insert/update/delete grant for `authenticated`; anon has nothing. The two
+  link trigger functions are not callable as RPCs (advisor 0028 addressed).
+- **Overview** is a light `admin_overview` RPC returning only the cards the
+  caller may see (new leads, today's sessions, upcoming bookings, pending
+  payments, unsettled payable, CRM counts). No vanity charts.
+
+### Not built (backlog)
+
+A manual merge engine, fuzzy matching, medical interpretation, meal plans,
+paid Video Review, and every other item on the sprint's out-of-scope list.
+
+### Owner action
+
+Re-run the two `set_app_access(...)` lines from the README — they now include
+`client_profile:*` and `health_metrics:*`. Mickaël's existing Auth identity
+and access are untouched; the call is idempotent.
+
+---
+
 ## CG-008 — One back-office cockpit (`/admin`), Finance as a tab
 
 **Status: built and deployed. UI/navigation change only — no schema, RLS,

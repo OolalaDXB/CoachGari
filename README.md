@@ -233,18 +233,26 @@ The laptop script creates a hold, proves a forged amount is ignored, prints
 the Checkout URL (pay with `4242 4242 4242 4242`) and waits for the webhook to
 confirm the booking.
 
-## Back-office (CG-002.5 / CG-006 / CG-008) — one workspace at `/admin`
+## Back-office (CG-002.5 → CG-009) — one cockpit at `/admin`
 
-One utilitarian workspace, no CMS, no CRM. Every capability is a tab, shown
-only when the signed-in person holds the matching permission. Sign-in by
-Supabase Auth magic link with `shouldCreateUser: false`: an email that the
-owner has not invited cannot even create an auth user. What a person sees is
-decided by the database, not by the page; the page never writes permissions
-directly.
+One operating cockpit: a sidebar of destinations (a drawer on mobile), a
+minimal top header with the page name and an account menu (Sign Out lives
+inside it), and — for people — a large client-profile popup. Every
+destination is a permission-gated tab; sign-in is a Supabase Auth magic link
+with `shouldCreateUser: false`, so an email the owner has not invited cannot
+even create an auth user. What a person sees is decided by the database, not
+the page; the page never writes permissions directly. Navigation:
+**Overview · CRM · Schedule · Bookings · Services · Finance · Analytics ·
+Access**. Schedule merges the four time-management domains (Calendar, Weekly
+availability, Exceptions, Tour stops) as sub-tabs; CRM has Leads + Contacts.
 
-| Permission | Tab(s) it unlocks in `/admin` |
+| Permission | What it unlocks in `/admin` |
 |---|---|
-| `coach:operations` | Leads (read + status, attachments), Calendar, Bookings (cancel / complete / no-show / confirm an unpriced hold), Availability, Exceptions, Tour stops |
+| `coach:operations` | CRM › Leads (enquiries, clickable to the client popup), Schedule (Calendar / Availability / Exceptions / Tour stops), Bookings; the Enquiries / Bookings / Media / Attribution sections of a client profile |
+| `client_profile:view` | CRM › Contacts (canonical people with enquiry/booking counts) and the profile Overview / Notes |
+| `client_profile:manage` | Edit a canonical profile, create a contact, add / edit internal notes (all through audited RPCs) |
+| `health_metrics:view` | The Progress section of a profile: weight, BMI, body-fat, muscle history |
+| `health_metrics:manage` | Record / correct body measurements (BMI is derived, never typed) |
 | `catalog:view` | Services — the whole commercial catalogue, listed or not, and its change log |
 | `catalog:manage` | Services — create / edit through the audited `catalog_save_service` RPC (title, descriptions, price, currency, duration, delivery, capacity, booking mode, active, listed, order, features) |
 | `finance:view` | Finance — Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
@@ -279,8 +287,8 @@ no `content:*` permission: the website is edited in Git.
   2. Attach access, idempotently (re-running replaces the permission set):
   ```sql
   -- SQL editor (runs as service role). Placeholders — real emails are never committed.
-  select public.set_app_access('<owner-email>',   'Name', 'studio', array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage','platform:admin']);
-  select public.set_app_access('<coach-email>',   'Name', 'gari',   array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage']);
+  select public.set_app_access('<owner-email>',   'Name', 'studio', array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage','client_profile:view','client_profile:manage','health_metrics:view','health_metrics:manage','platform:admin']);
+  select public.set_app_access('<coach-email>',   'Name', 'gari',   array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage','client_profile:view','client_profile:manage','health_metrics:view','health_metrics:manage']);
   ```
   From then on a `platform:admin` can do the same from the Access tab
   (`admin_set_user`, `admin_grant`, `admin_revoke`); a person can never
@@ -339,7 +347,50 @@ HTML, octet-stream and MKV are rejected by the RPC, the table constraint and
 the bucket. It also proves booking correctness does not depend on `pg_cron`.
 CI runs `scripts/db-tests.sh` when the `SUPABASE_DB_URL` repository secret
 (session-pooler URI) is set and fails the build otherwise-than-`fail=0`;
-without the secret the job is skipped with a notice.
+without the secret the job is skipped with a notice. The suite runner also
+runs `cg002_booking` (28), `cg003_payments` (24) and `cg009_crm` (43).
+
+## CRM, client profile & progress (CG-009)
+
+An enquiry is a submission, not a person. `public.crm_contacts` is the
+canonical person; many enquiries (`public.contacts`) and many bookings link
+to it through a back-filled `crm_contact_id`.
+
+- **Conservative matching, never a name merge.** A `before insert` trigger
+  on `contacts` and `bookings` calls `crm_link_contact`, which normalises the
+  email and matches it only when a *single* contact has it; else it
+  normalises the phone and matches that when unambiguous; else it creates a
+  new person. Two people that merely share a name are never merged; an
+  ambiguous match (an email already on two people) creates a fresh record
+  flagged `needs_review` for a manual merge later. A direct booking with no
+  prior enquiry still lands a CRM contact. Enquiry rows are never rewritten.
+- **Client profile popup.** Leads and Contacts rows open a large responsive
+  dialog over the list (the list keeps its tab, filters, search and scroll).
+  Sections are permission-gated: Overview / Notes (`client_profile:*`),
+  Progress (`health_metrics:*`), Enquiries / Bookings / Media / Attribution
+  (`coach:operations`), Payments (`finance:view`). Media reuses the private
+  enquiry bucket via 10-minute signed URLs — no second copy.
+- **Notes are a history**, not one overwriteable field: `public.crm_notes`
+  keeps author, timestamp, optional category and pin; edits are audited.
+- **Body measurements** (`public.body_measurements`) are longitudinal: each
+  row snapshots the height used, and **BMI is a generated column**
+  (`weight / (height/100)²`, rounded) — never typed or independently
+  editable, so historical BMI stays reproducible. Ranges are validated
+  (height 50–260 cm, weight 20–500 kg, percentages within limits); a partial
+  measurement (weight only) is accepted; absurd values are rejected, not
+  coerced. No medical interpretation is produced.
+- **Permissions stay independent.** `finance:*` and `analytics:*` never imply
+  the profile or the metrics; `analytics_summary` output is asserted free of
+  note bodies and measurements. Writes go only through permission-checked
+  RPCs (`crm_save_contact`, `crm_add_note`, `crm_edit_note`, `metrics_add`,
+  `metrics_edit`); the tables have no direct write grant, anon has nothing,
+  and changes are recorded in `public.admin_audit`.
+- **Tests** (`supabase/tests/cg009_crm.sql`, `CG009_TESTS ok=43 fail=0`):
+  matching (email / phone / ambiguous / same-name), enquiry immutability,
+  direct-booking linkage, note authz + audit, metric history + height
+  snapshot + BMI correctness + BMI-not-writable + partial + range rejection,
+  and that coach / finance / analytics personas cannot reach profiles, notes
+  or metrics.
 
 ## Service catalogue (CG-007) — the one admin-editable content
 
