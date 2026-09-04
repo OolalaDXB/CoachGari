@@ -247,6 +247,8 @@ directly.
 | `finance:view` | `/finance`: Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
 | `finance:manage` | `/finance`: create settlements, mark paid (bank reference), mark reconciled |
 | `analytics:view` | Aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month); output asserted free of names, emails, phones, references |
+| `catalog:view` | Services tab (`/admin`): the whole commercial catalogue, listed or not, and its change log |
+| `catalog:manage` | Services tab: create / edit services through the audited `catalog_save_service` RPC (title, descriptions, price, currency, duration, delivery, capacity, booking mode, active, listed, order, features) |
 | `platform:admin` | Access tab (`/admin`): list application users, activate / deactivate, grant / revoke permissions. **Nothing else**: no lead, booking, order or ledger row becomes visible through it (tested) |
 
 Permissions are additive. A person holding operations *and* finance
@@ -255,7 +257,7 @@ link in the header — only rendered when the other permission is held. There
 is no owner, superadmin or RLS-bypass role, and no `content:*` permission:
 the website is edited in Git.
 
-- **Mechanics** (`20260905_cg0025_backoffice.sql`, `20260907_cg006_access_and_upload_tokens.sql`):
+- **Mechanics** (`20260905_cg0025_backoffice.sql`, `20260907_cg006_access_and_upload_tokens.sql`, `20260908_cg007_catalogue.sql`):
   `app_users` + `app_permissions` keyed by email; `has_permission(text)` reads
   the JWT; grants to `authenticated` are on explicit column lists (never
   `manage_token`, `ip_hash`, `idempotency_key`, `upload_token_hash`, webhook
@@ -271,8 +273,8 @@ the website is edited in Git.
   2. Attach access, idempotently (re-running replaces the permission set):
   ```sql
   -- SQL editor (runs as service role). Placeholders — real emails are never committed.
-  select public.set_app_access('<owner-email>',   'Name', 'studio', array['coach:operations','finance:view','finance:manage','analytics:view','platform:admin']);
-  select public.set_app_access('<coach-email>',   'Name', 'gari',   array['coach:operations','finance:view','finance:manage','analytics:view']);
+  select public.set_app_access('<owner-email>',   'Name', 'studio', array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage','platform:admin']);
+  select public.set_app_access('<coach-email>',   'Name', 'gari',   array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage']);
   ```
   From then on a `platform:admin` can do the same from the Access tab
   (`admin_set_user`, `admin_grant`, `admin_revoke`); a person can never
@@ -296,7 +298,7 @@ psql "$DATABASE_URL" -f supabase/tests/cg0025_permissions.sql   # one suite
 DATABASE_URL=postgresql://… scripts/db-tests.sh                   # all three suites, exit 1 on any fail
 ```
 
-`CG0025_TESTS ok=206 fail=0`, always rolled back. It switches role and JWT
+`CG0025_TESTS ok=236 fail=0`, always rolled back. It switches role and JWT
 claims per persona and asserts the negatives: anon is refused on every private
 table and RPC (including the `admin_*`, `set_app_access`, `issue_upload_token`
 and `reserve_contact_media` functions); a stranger or inactive user gets zero
@@ -316,7 +318,14 @@ every business table and is refused every business RPC; cannot write the
 access tables directly, cannot call `set_app_access`, cannot revoke its own
 `platform:admin`, cannot create a user without an auth identity; a business
 permission it grants itself is the only thing that opens business data, and
-revoking it closes them again). The upload-token block proves the
+revoking it closes them again), and a **catalogue persona** (reads unlisted
+services and the audit log; cannot read leads, bookings, orders or call
+finance RPCs; cannot write `services` or `catalog_audit` directly; the RPC
+validates slug, title, price and booking mode, audits a price change with
+before / after, writes nothing on an identical save, creates a new service;
+the existing paid booking, order, ledger and finance view keep 4500 and the
+old title after the change while a new hold takes 9900 / 90 min / the new
+title; an enquiry-only product cannot be held). The upload-token block proves the
 `submission_id` and the contact id are refused as credentials, wrong, null and
 expired tokens are refused, re-issuing rotates the token, and PDF, SVG, EXE,
 HTML, octet-stream and MKV are rejected by the RPC, the table constraint and
@@ -324,6 +333,46 @@ the bucket. It also proves booking correctness does not depend on `pg_cron`.
 CI runs `scripts/db-tests.sh` when the `SUPABASE_DB_URL` repository secret
 (session-pooler URI) is set and fails the build otherwise-than-`fail=0`;
 without the secret the job is skipped with a notice.
+
+## Service catalogue (CG-007) — the one admin-editable content
+
+The commercial catalogue lives in `public.services` and is the **only**
+content edited from the back-office. Everything else on the website stays
+in Git. No CMS, no `site_content` table.
+
+- **Route C renders from it.** The four programme cards and the booking
+  picker are built by `assets/site.js` / `assets/booking.js` from the
+  public booking function (`?action=services`, active + listed rows). No
+  price, title, duration, description or feature list is hard-coded in
+  `index.html`. The Conversation shows `60 min · 100 USD · online` because
+  the row says so.
+- **Fields**: slug (identity, immutable), title, tagline, short description
+  (card), long description, features (max 8), price (minor units, empty =
+  on request), currency, price unit (`per session` / `per month` /
+  `one-off` / `per person`), duration, delivery mode, default capacity,
+  booking mode, featured, CTA label, active, listed, display order.
+- **Booking mode**: `slot` = offered in the picker at the listed price and
+  charged exactly that amount at Checkout; `enquiry` = a card whose button
+  opens the enquiry form with the matching interest preselected. An
+  enquiry-only product can never be held (`create_hold` refuses it). Prices
+  of enquiry-only products are shown only while `COMMERCE: true` in
+  `config.js`; a bookable service always shows its price.
+- **Writes** go only through `catalog_save_service(jsonb)` (requires
+  `catalog:manage`; `authenticated` has no insert / update / delete grant on
+  `services`; anon has nothing). Values are validated by the table
+  constraints. Services are never deleted — deactivate and hide instead.
+- **Audit**: every create / update writes a `catalog_audit` row (who, when,
+  changed fields, before / after JSON); identical saves write nothing. The
+  Services tab shows the change log; `catalog:view` can read it, nobody can
+  write it directly.
+- **Historical integrity**: `create_hold` snapshots slug, title, duration
+  and price on the booking (a `before insert` trigger fills them for any
+  other insert path); `create_order_for_booking` copies the title and the
+  amount to the order. `finance_orders()`, `booking_to_json`,
+  `order_to_json` and the Stripe line item read the snapshot. Changing a
+  service afterwards affects future bookings only — tested: after a price
+  and title change, the existing paid booking, its order, its ledger row and
+  its finance view keep the original values; a new hold takes the new ones.
 
 ## Supabase set-up (no secrets in this repo)
 

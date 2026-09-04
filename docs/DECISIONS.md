@@ -23,6 +23,57 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-007 — Admin-editable service catalogue
+
+**Status: built and deployed; suites 236 / 28 / 24 green. Attaching
+`catalog:view` + `catalog:manage` to the two launch users is part of the same
+owner provisioning step as CG-006 (Auth invitations first).**
+
+### Decisions
+
+- **Scope change, deliberately narrow.** The commercial service catalogue is
+  now editable from `/admin` (Services tab). This is *not* a CMS: no
+  `site_content`, no page or copy editor. Everything outside the catalogue
+  stays in Git under The Studio MT's control.
+- **The database is the only source of the catalogue.** `index.html` no
+  longer contains any price, title, duration, description or feature list
+  for the bookable catalogue; the four cards and the picker render from
+  `?action=services`. The Conversation renders `60 min · 100 USD · online`
+  from `services.price_amount = 10000`. The three non-bookable offers
+  (Programme, Online Coaching, Live Group) were moved into the catalogue as
+  `booking_mode = 'enquiry'` rows with the exact copy and figures the page
+  already carried; their prices stay hidden while `COMMERCE` is false, as
+  before.
+- **Two explicit permissions**, `catalog:view` and `catalog:manage`, added
+  to the same granular model (no widening of any existing permission).
+  Both launch users receive both. A pure coach, finance, analytics or
+  platform:admin persona cannot edit the catalogue (tested).
+- **Historical integrity is structural, not procedural.** Bookings snapshot
+  slug, title, duration and price at hold time (trigger-backed for any
+  insert path); orders snapshot the title and amount; the finance view, the
+  booking JSON, the order JSON and the Stripe line item read the snapshots.
+  A catalogue change can only affect future holds. Tested end to end:
+  price 4500 → 9900 and a rename leave the paid booking, the order, the
+  ledger (payable 3905) and `finance_orders()` unchanged; the next hold
+  takes 9900 / 90 min / the new title.
+- **Auditability.** One write path (`catalog_save_service`), permission
+  checked inside, values validated by table constraints, every change
+  recorded in `catalog_audit` (email, timestamp, changed fields, before /
+  after). No direct insert / update / delete on `services` for any browser
+  role; anon has no read either (the public reads through the booking
+  function). Services are never deleted: deactivate + hide keeps history
+  intact. The Services tab shows the change log.
+- **Not built**: rich text, images per service, per-service pages, variants
+  or bundles, scheduled price changes, approval workflow.
+
+### Owner actions
+
+Same as CG-006: invite the two users in Supabase Auth, then run the two
+`set_app_access(...)` lines from the README (they now include
+`catalog:view` and `catalog:manage`).
+
+---
+
 ## CG-006 — Launch access model, platform:admin, upload credential hardening
 
 **Status: built and deployed; suite 206/206. Attaching the two launch users is
@@ -124,7 +175,8 @@ order, `checkout` creates the Stripe session with the order's amount, and
 confirms). The card renders the API value as `60 min · 100 USD · online`.
 Commission stays 10 % of net. Verified in the suite: snapshot 10000, order
 10000, a 4500 completion ignored, ledger 10000 / fee 320 → net 9680,
-commission 968, payable 8712.
+commission 968, payable 8712. Since CG-007 the homepage card also renders
+this price from the database; the HTML constant is gone.
 
 ---
 
@@ -261,7 +313,8 @@ Supabase Auth are owner actions.**
 - **Analytics is a single aggregate function**; its output is asserted PII-free
   in the suite.
 - **Services stay read-only in the back-office**: prices and the catalogue are
-  a Git/migration change (public content rule).
+  a Git/migration change (public content rule). *Superseded by CG-007: the
+  catalogue is the one admin-editable content, with audit and snapshots.*
 
 ### Tests
 
