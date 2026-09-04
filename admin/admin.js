@@ -1,11 +1,17 @@
 /* =============================================================
-   Coach Gari — back-office (CG-002.5)
-   One script, two areas:
-     /admin   (data-area="ops")     coach:operations
-     /finance (data-area="finance") finance:view / finance:manage
-     analytics:view adds an Analytics tab; platform:admin adds Access;
-     catalog:view / catalog:manage add Services (the commercial catalogue).
-     A person holding both sets sees an understated link to the other area.
+   Coach Gari — back-office (CG-002.5 / CG-008)
+   One workspace at /admin. Every capability is a tab, shown only when
+   the signed-in person holds the matching permission:
+     coach:operations → Leads, Calendar, Bookings, Availability, Exceptions, Tour stops
+     catalog:view     → Services (the commercial catalogue)
+     finance:view     → Finance (orders, ledger, settlements)
+     analytics:view   → Analytics
+     platform:admin   → Access
+   Finance is a tab here, not a separate app — /finance is kept only as a
+   deep link that redirects to #finance. Merging the UI does NOT merge the
+   permissions: finance:view / finance:manage stay independent in the
+   database, and the Finance tab (and its RPCs, under RLS) disappear the
+   moment the permission is removed.
    Magic-link sign-in (Supabase Auth) with shouldCreateUser:false — an email
    that was not provisioned by the owner cannot even create an auth user.
    What a signed-in person can see and do is decided entirely by the
@@ -32,7 +38,6 @@ const WEEKDAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'S
 let me = null;            // {email, party, permissions:[]}
 let services = [];        // catalogue (read-only here)
 let tab = null;
-const AREA = document.body.dataset.area || 'ops';   // 'ops' (/admin) or 'finance' (/finance)
 
 /* ---------- time helpers (UTC in the database, wall-clock in a zone on screen) ---------- */
 function tzParts(date, tz) {
@@ -71,7 +76,7 @@ async function boot() {
     const email = new FormData(e.target).get('email').trim().toLowerCase();
     const m = $('#login-msg'); m.hidden = false; m.className = 'ad-msg';
     m.textContent = 'Sending…';
-    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/${AREA === 'finance' ? 'finance' : 'admin'}/`, shouldCreateUser: false } });
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/admin/`, shouldCreateUser: false } });
     if (error) { m.className = 'ad-msg err'; m.textContent = /signup|not allowed|not found/i.test(error.message) ? 'This email is not provisioned for the back-office. Ask the owner.' : error.message; return; }
     m.className = 'ad-msg ok'; m.textContent = 'Check your inbox and open the link on this device.';
   });
@@ -89,25 +94,19 @@ async function render(session) {
   try {
     const { data, error } = await sb.rpc('my_permissions'); if (error) throw error;
     me = data;
-    const opsOK = has('coach:operations'), finOK = has('finance:view'), catOK = has('catalog:view');
-    const areaOK = AREA === 'finance' ? finOK : (opsOK || catOK);
-    if (!areaOK) {
-      $('#noaccess').hidden = false;
-      const other = $('#other-area');
-      if (other && (AREA === 'finance' ? opsOK : finOK)) { other.hidden = false; other.innerHTML = AREA === 'finance' ? 'Your operations area is at <a href="/admin/">/admin</a>.' : 'Your finance area is at <a href="/finance/">/finance</a>.'; }
-      return;
-    }
-    const { data: svc, error: e2 } = await sb.from('services').select(SERVICE_COLS).order('sort_order'); if (e2) throw e2;
-    services = svc || [];
+    // One workspace: each tab appears only for the permission that unlocks it.
+    // Finance is a tab like any other — its independent finance:view permission
+    // gates it, and RLS/RPCs still enforce access under the hood.
     const tabs = [];
-    if (AREA === 'ops' && opsOK) tabs.push(['leads', 'Leads'], ['calendar', 'Calendar'], ['bookings', 'Bookings'], ['availability', 'Availability'], ['exceptions', 'Exceptions'], ['tours', 'Tour stops']);
-    if (AREA === 'ops' && catOK) tabs.push(['services', 'Services']);
-    if (AREA === 'finance') tabs.push(['finance', 'Finance']);
+    if (has('coach:operations')) tabs.push(['leads', 'Leads'], ['calendar', 'Calendar'], ['bookings', 'Bookings'], ['availability', 'Availability'], ['exceptions', 'Exceptions'], ['tours', 'Tour stops']);
+    if (has('catalog:view')) tabs.push(['services', 'Services']);
+    if (has('finance:view')) tabs.push(['finance', 'Finance']);
     if (has('analytics:view')) tabs.push(['analytics', 'Analytics']);
     if (has('platform:admin')) tabs.push(['access', 'Access']);
-    // cross-area link, only when the person actually holds the other permission
-    const other = AREA === 'finance' ? (opsOK ? '<a class="ad-area" href="/admin/">Operations ↗</a>' : '') : (finOK ? '<a class="ad-area" href="/finance/">Finance ↗</a>' : '');
-    $('#tabs').innerHTML = tabs.map(([k, l]) => `<a data-tab="${k}">${l}</a>`).join('') + other;
+    if (!tabs.length) { $('#noaccess').hidden = false; return; }
+    const { data: svc, error: e2 } = await sb.from('services').select(SERVICE_COLS).order('sort_order'); if (e2) throw e2;
+    services = svc || [];
+    $('#tabs').innerHTML = tabs.map(([k, l]) => `<a data-tab="${k}">${l}</a>`).join('');
     $('#tabs').hidden = false; $('#app').hidden = false;
     $('#tabs').onclick = (e) => { const a = e.target.closest('[data-tab]'); if (a) go(a.dataset.tab); };
     go(location.hash.slice(1) && tabs.some(([k]) => k === location.hash.slice(1)) ? location.hash.slice(1) : tabs[0][0]);

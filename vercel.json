@@ -8,7 +8,9 @@
     { "source": "/coach-gari-online(\\.html)?", "destination": "/", "permanent": true },
     { "source": "/coach-gari-simple(\\.html)?", "destination": "/routes/a", "permanent": true },
     { "source": "/coach-gari-vitrine(\\.html)?", "destination": "/routes/b", "permanent": true },
-    { "source": "/studio-mt-coach-gari(\\.html)?", "destination": "/p/studio-mt-4e7a", "permanent": true }
+    { "source": "/studio-mt-coach-gari(\\.html)?", "destination": "/p/studio-mt-4e7a", "permanent": true },
+    { "source": "/finance", "destination": "/admin#finance", "permanent": false },
+    { "source": "/finance/(.*)", "destination": "/admin#finance", "permanent": false }
   ],
   "headers": [
     {
@@ -34,7 +36,7 @@
       "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
     },
     {
-      "source": "/(admin|finance)(.*)",
+      "source": "/admin(.*)",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
         { "key": "Cache-Control", "value": "no-store" },
