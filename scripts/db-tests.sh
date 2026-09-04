@@ -8,7 +8,7 @@ set -u
 : "${DATABASE_URL:?set DATABASE_URL (Supabase → Connect → session pooler URI)}"
 cd "$(dirname "$0")/.."
 status=0
-for f in supabase/tests/cg002_booking.sql supabase/tests/cg003_payments.sql supabase/tests/cg0025_permissions.sql; do
+for f in supabase/tests/cg002_booking.sql supabase/tests/cg003_payments.sql supabase/tests/cg0025_permissions.sql supabase/tests/cg009_crm.sql; do
   out=$(psql "$DATABASE_URL" -v ON_ERROR_STOP=0 -q -f "$f" 2>&1)
   line=$(printf '%s\n' "$out" | grep -oE '[A-Z0-9_]+_TESTS ok=[0-9]+ fail=[0-9]+.*' | head -1)
   if [[ -n "$line" && "$line" == *" fail=0"* ]]; then
