@@ -183,10 +183,10 @@ function matchCountry(value){
 /* ---- form adapts to the category ---------------------------- */
 /* One enquiry form. The "What you're after" choice drives a short
    hint and the message placeholder; field labels never change.
-   `media` is a prepared switch for photo/video attachments per
-   category — off until the upload path (private bucket, signed
-   upload, size limits, coach-only access) exists. Nothing here
-   changes what is sent to the contact function.                */
+   Attachments (photos / videos) are available for every category;
+   `media` is kept as a per-category switch should one ever need to
+   hide the field. Nothing here changes what is sent to the contact
+   function.                                                     */
 var CATEGORIES = {
   'Online coaching':        { hint: '', detail: 'What you train with, how much time is realistic, what you\'ve tried before.', media: false },
   'The 12-week programme':  { hint: '', detail: 'Home or gym, and what equipment you have.', media: false },
@@ -259,11 +259,13 @@ var CATEGORIES = {
 })();
 
 /* ---- attachments (photos / videos) ------------------------- */
-/* Up to 3 files, 50 MB in total, images and videos only. Files go
-   AFTER the enquiry is stored: the browser asks the upload function
-   for a signed URL (proving ownership with its own submission_id),
-   PUTs the file to the private bucket, then confirms. The lead is
-   never lost because an upload failed.                            */
+/* Up to 3 files, 50 MB in total, photos and videos only (strict
+   allowlist, no SVG). Files go AFTER the enquiry is stored: the
+   contact function returns a one-off, 30-minute upload_token for
+   that enquiry; the browser asks the upload function for a signed
+   URL with it, PUTs the file to the private bucket, then confirms.
+   The submission_id is never a credential. The lead is never lost
+   because an upload failed.                                        */
 var MEDIA_MAX_FILES = 3, MEDIA_MAX_TOTAL = 50 * 1024 * 1024;
 var MEDIA_TYPES = ['image/jpeg','image/png','image/webp','image/heic','image/heif','image/gif','video/mp4','video/quicktime','video/webm','video/x-m4v','video/3gpp'];
 function fmtBytes(n){ return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; }
