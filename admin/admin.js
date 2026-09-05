@@ -223,16 +223,20 @@ async function leads() {
 async function crmContacts() {
   const search = (view.dataset.cSearch || '').trim();
   const status = view.dataset.cStatus || '';
-  const { data, error } = await sb.rpc('crm_list_contacts', { p_search: search || null }); if (error) throw error;
+  const reviewOnly = view.dataset.cReview === '1';
+  const { data, error } = await sb.rpc('crm_list_contacts', { p_search: search || null, p_review_only: reviewOnly }); if (error) throw error;
   const rows = (data || []).filter((c) => !status || c.status === status);
+  const reviewCount = (data || []).filter((c) => c.needs_review).length;
   const opts = ['lead', 'active', 'past', 'archived'];
   view.innerHTML = `
     <div class="ad-head"><div><h1>Contacts</h1><p class="ad-muted">Every person who has enquired or booked. Click to open the profile.</p></div>
       <div class="ad-filters">
         <input id="c-search" placeholder="Search name, email, phone, city…" value="${esc(search)}">
         <select id="c-status"><option value="">All statuses</option>${opts.map((o) => `<option ${o === status ? 'selected' : ''}>${o}</option>`).join('')}</select>
+        <button class="btn btn-sm ${reviewOnly ? 'btn-accent' : 'btn-line'}" id="c-review">${reviewOnly ? 'Showing needs-review' : 'Needs review'}${!reviewOnly && reviewCount ? ` (${reviewCount})` : ''}</button>
         ${has('client_profile:manage') ? '<button class="btn btn-accent btn-sm" id="c-new">New contact</button>' : ''}
       </div></div>
+    ${reviewOnly ? '<p class="ad-note">These people were auto-created from an ambiguous match (a shared email or phone) and were never merged automatically. Open a profile to review, correct, or merge it into the right person.</p>' : ''}
     <div class="ad-panel">${table(['Name', 'Where', 'Contact', 'Interest', 'Enquiries', 'Bookings', 'Last activity', 'Status'], rows.map((c) => `<tr class="clik" data-crm="${c.id}">
       <td><b>${esc(c.display_name || '—')}</b>${c.needs_review ? ' <span class="ad-badge-rev">review</span>' : ''}</td>
       <td>${esc([c.city, c.country].filter(Boolean).join(', ') || '—')}</td>
@@ -242,9 +246,10 @@ async function crmContacts() {
       <td class="num">${c.booking_count}</td>
       <td>${fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td>
       <td>${st(c.status)}</td>
-    </tr>`), 'No contacts match.')}</div>`;
+    </tr>`), reviewOnly ? 'Nothing needs review.' : 'No contacts match.')}</div>`;
   $('#c-status').onchange = (e) => { view.dataset.cStatus = e.target.value; crmContacts().catch(fail); };
   $('#c-search').onchange = (e) => { view.dataset.cSearch = e.target.value.trim(); crmContacts().catch(fail); };
+  $('#c-review').onclick = () => { view.dataset.cReview = reviewOnly ? '' : '1'; crmContacts().catch(fail); };
   const nb = $('#c-new'); if (nb) nb.onclick = () => openContactEditor(null);
   view.querySelectorAll('tr.clik').forEach((tr) => tr.onclick = () => openProfile(tr.dataset.crm, null, 'overview'));
 }
@@ -606,7 +611,7 @@ async function analytics() {
 /* =============================== ACCESS (platform:admin) =============================== */
 /* Access administration only. Granting a permission here never bypasses RLS:
    business data still requires the explicit business permissions. */
-const PERMS = ['coach:operations', 'finance:view', 'finance:manage', 'analytics:view', 'catalog:view', 'catalog:manage', 'platform:admin'];
+const PERMS = ['coach:operations', 'client_profile:view', 'client_profile:manage', 'health_metrics:view', 'health_metrics:manage', 'coaching_sensitive:view', 'coaching_sensitive:manage', 'finance:view', 'finance:manage', 'analytics:view', 'catalog:view', 'catalog:manage', 'platform:admin'];
 async function access() {
   const { data: users, error } = await sb.rpc('admin_list_access'); if (error) throw error;
   view.innerHTML = `
@@ -617,7 +622,8 @@ async function access() {
       <td><input type="checkbox" data-active="${esc(u.email)}" ${u.active ? 'checked' : ''} ${u.email === me.email ? 'disabled' : ''}></td>
       ${PERMS.map((p) => `<td><input type="checkbox" data-perm="${p}" data-email="${esc(u.email)}" ${u.permissions.includes(p) ? 'checked' : ''} ${u.email === me.email && p === 'platform:admin' ? 'disabled' : ''}></td>`).join('')}
     </tr>`), 'No application users yet.')}
-      <p class="ad-note">"Auth pending" means the email has no Supabase Auth identity yet — invite it under Authentication → Users, then it can sign in.</p></div>
+      <p class="ad-note">"Auth pending" means the email has no Supabase Auth identity yet — invite it under Authentication → Users, then it can sign in.</p>
+      <p class="ad-note"><b>Sensitive coaching data.</b> <code>health_metrics:*</code> (progress measurements) and <code>coaching_sensitive:*</code> (private coaching notes and consent management) are granted independently — no other permission, <b>platform:admin included</b>, implies them. Tick or untick them per person to give or remove that access on its own.</p></div>
     <div class="ad-panel"><h2>Add a person</h2>
       <form id="access-form" class="ad-form"><div class="row">
         <label>Email <input type="email" name="email" required></label>
@@ -734,36 +740,73 @@ async function pfOverview() {
     ['First seen', fmt(c.first_seen_at, 'Asia/Dubai', { dateStyle: 'medium' })],
     ['Last activity', fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })],
   ];
+  const canMerge = c.needs_review && has('client_profile:manage');
   $('#pf-body').innerHTML = `
-    ${c.needs_review ? '<p class="ad-note">This person was auto-created from an ambiguous match and is <b>flagged for review</b>. A manual merge can be added later.</p>' : ''}
+    ${c.needs_review ? `<div class="ad-note"><p style="margin:0 0 8px">This person was auto-created from an ambiguous match (a shared email or phone) and is <b>flagged for review</b>. If it is the same person as an existing contact, you can merge this record into that one.</p>
+      ${canMerge ? `<div id="pf-merge"><button class="btn btn-line btn-xs" id="pf-merge-open">Merge into another contact…</button></div>` : ''}</div>` : ''}
     <dl class="pf-kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v ? esc(v) : '—'}</dd>`).join('')}</dl>
     <details class="pf-tech"><summary>Technical</summary><dl class="pf-kv" style="margin-top:10px"><dt>CRM id</dt><dd>${esc(c.id)}</dd><dt>Created by</dt><dd>${esc(c.created_by || '—')}</dd><dt>Updated by</dt><dd>${esc(c.updated_by || '—')}</dd></dl></details>`;
+  if (canMerge) $('#pf-merge-open').onclick = () => pfMergePicker(c);
+}
+
+// Manual merge of a needs-review record INTO an existing contact. The DB does
+// the move transactionally and audits it (crm_merge_contacts); this only picks
+// a safe, explicit target and confirms. Enquiry history is never rewritten.
+async function pfMergePicker(source) {
+  const host = $('#pf-merge');
+  host.innerHTML = `<div style="margin-top:8px">
+    <input id="pf-merge-search" placeholder="Search the contact to merge into…" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit">
+    <div id="pf-merge-results" style="margin-top:8px"></div></div>`;
+  const box = $('#pf-merge-search'); box.focus();
+  const run = async () => {
+    const q = box.value.trim();
+    if (q.length < 2) { $('#pf-merge-results').innerHTML = '<p class="ad-muted" style="font-size:12px">Type at least 2 characters.</p>'; return; }
+    const { data, error } = await sb.rpc('crm_list_contacts', { p_search: q, p_review_only: false });
+    if (error) return fail(error);
+    const cands = (data || []).filter((x) => x.id !== source.id).slice(0, 8);
+    $('#pf-merge-results').innerHTML = cands.length ? cands.map((x) => `<button class="btn btn-line btn-xs" data-target="${x.id}" style="display:block;width:100%;text-align:left;margin-bottom:6px">
+      <b>${esc(x.display_name || '—')}</b> · ${esc(x.email || x.phone || 'no contact')} · ${x.enquiry_count} enq / ${x.booking_count} bk${x.needs_review ? ' · <span class="ad-badge-rev">review</span>' : ''}</button>`).join('')
+      : '<p class="ad-muted" style="font-size:12px">No matches.</p>';
+    $('#pf-merge-results').querySelectorAll('[data-target]').forEach((b) => b.onclick = async () => {
+      const target = cands.find((x) => x.id === b.dataset.target);
+      if (!await confirmAct(`Merge "${source.display_name || 'this record'}" INTO "${target.display_name || 'the selected contact'}"?\n\nAll enquiries, bookings, notes, measurements and consent history move to the kept contact, and this duplicate record is deleted. This cannot be undone.`)) return;
+      const { error } = await sb.rpc('crm_merge_contacts', { p_source: source.id, p_target: target.id });
+      if (error) return fail(error);
+      toast('Contacts merged'); pfClose(); crmContacts().catch(fail);
+    });
+  };
+  box.oninput = run; run();
 }
 
 async function pfNotes() {
   const { data, error } = await sb.from('crm_notes').select('*').eq('crm_contact_id', pf.crmId).order('pinned', { ascending: false }).order('created_at', { ascending: false });
   if (error) throw error;
   const canManage = has('client_profile:manage');
+  const canPrivate = has('coaching_sensitive:manage');
+  const seesPrivate = has('coaching_sensitive:view');
   const cats = ['general', 'session', 'goal', 'admin'];
   $('#pf-body').innerHTML = `
     ${canManage ? `<form id="pf-note-form" class="ad-form" style="margin:0 0 16px">
       <textarea name="body" required placeholder="Add a note — visible only to the back-office."></textarea>
       <div class="actions"><select name="category"><option value="">No category</option>${cats.map((c) => `<option>${c}</option>`).join('')}</select>
+      ${canPrivate ? `<label style="flex-direction:row;align-items:center;gap:6px;font-weight:600" title="Private coaching notes are only visible to people with coaching_sensitive access."><input type="checkbox" name="private"> Private coaching note</label>` : ''}
       <label style="flex-direction:row;align-items:center;gap:6px;font-weight:600"><input type="checkbox" name="pinned"> Pin</label>
       <button class="btn btn-accent btn-sm" type="submit">Add note</button></div></form>` : ''}
+    ${seesPrivate ? '' : '<p class="ad-muted" style="font-size:12px;margin:0 0 10px">Operational notes only. Private coaching notes need <code>coaching_sensitive:view</code>.</p>'}
     <div id="pf-note-list">${(data || []).map(noteHtml).join('') || '<p class="pf-sec-empty">No notes yet.</p>'}</div>`;
   const form = $('#pf-note-form');
   if (form) form.onsubmit = async (e) => {
     e.preventDefault(); const f = new FormData(form);
-    const { error } = await sb.rpc('crm_add_note', { p_contact_id: pf.crmId, p_body: f.get('body'), p_category: f.get('category') || null, p_pinned: !!f.get('pinned') });
+    const { error } = await sb.rpc('crm_add_note', { p_contact_id: pf.crmId, p_body: f.get('body'), p_category: f.get('category') || null, p_pinned: !!f.get('pinned'), p_scope: f.get('private') ? 'coach_private' : 'operational' });
     if (error) return fail(error); toast('Note added'); pfNotes().catch(fail);
   };
   bindNoteActions();
 }
 function noteHtml(n) {
+  const priv = n.scope === 'coach_private';
   return `<div class="pf-note ${n.pinned ? 'pinned' : ''}" data-note="${n.id}">
     <div class="body">${esc(n.body)}</div>
-    <div class="meta">${n.pinned ? '📌 ' : ''}${n.category ? esc(n.category) + ' · ' : ''}${esc(n.author)} · ${fmt(n.created_at, 'Asia/Dubai')}${n.updated_at && n.updated_at !== n.created_at ? ' · edited' : ''}
+    <div class="meta">${n.pinned ? '📌 ' : ''}${priv ? '<span class="ad-badge-priv">private</span> ' : ''}${n.category ? esc(n.category) + ' · ' : ''}${esc(n.author)} · ${fmt(n.created_at, 'Asia/Dubai')}${n.updated_at && n.updated_at !== n.created_at ? ' · edited' : ''}
       ${has('client_profile:manage') ? `<button class="btn btn-line btn-xs" data-note-edit="${n.id}">Edit</button><button class="btn btn-line btn-xs" data-note-pin="${n.id}" data-to="${!n.pinned}">${n.pinned ? 'Unpin' : 'Pin'}</button>` : ''}</div></div>`;
 }
 function bindNoteActions() {
@@ -786,11 +829,19 @@ function bindNoteActions() {
 }
 
 async function pfProgress() {
-  const { data, error } = await sb.from('body_measurements').select('*').eq('crm_contact_id', pf.crmId).order('measured_at', { ascending: false }).order('created_at', { ascending: false });
-  if (error) throw error;
+  const [{ data, error }, { data: cs, error: ce }] = await Promise.all([
+    sb.from('body_measurements').select('*').eq('crm_contact_id', pf.crmId).order('measured_at', { ascending: false }).order('created_at', { ascending: false }),
+    sb.rpc('consent_status', { p_contact_id: pf.crmId }),
+  ]);
+  if (error) throw error; if (ce) throw ce;
   const rows = data || [];
   const latest = rows[0], prev = rows[1];
+  const consent = cs || { active: false, is_minor: false, notice_version: null, history: [] };
   const canManage = has('health_metrics:manage');
+  const canView = has('health_metrics:view');
+  const isMinor = !!consent.is_minor;
+  const active = !!consent.active;
+  const canRecord = canManage && active && !isMinor;      // measurement form only when consent is active
   const delta = (a, b, unit, goodDown) => {
     if (a == null || b == null) return '';
     const d = +(a - b).toFixed(1); if (d === 0) return `<div class="delta flat">no change</div>`;
@@ -799,7 +850,28 @@ async function pfProgress() {
   };
   const metric = (lbl, val, unit, d) => val == null ? '' : `<div class="pf-metric"><div class="lbl">${lbl}</div><div class="val">${val}${unit}</div>${d}</div>`;
   const chron = rows.slice().reverse().filter((r) => r.weight_kg != null);
+
+  // ---- consent panel ----
+  const statusBadge = isMinor ? '<span class="ad-badge-rev">minor — not available</span>'
+    : active ? '<span class="ad-badge-ok">consent active</span>'
+    : '<span class="ad-badge-warn">no active consent</span>';
+  const hist = (consent.history || []).slice(0, 6).map((h) => `<tr><td>${esc(h.status)}</td><td>${esc(h.source || '—')}</td><td>${esc(h.notice_version || '—')}</td><td>${h.consented_at ? fmt(h.consented_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td><td>${h.withdrawn_at ? fmt(h.withdrawn_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td></tr>`).join('');
+  const consentPanel = `
+    <div class="pf-consent">
+      <div class="pf-consent-head"><b>Progress tracking consent</b> ${statusBadge}${consent.notice_version ? ` <span class="ad-muted" style="font-size:12px">notice ${esc(consent.notice_version)}</span>` : ''}</div>
+      ${isMinor ? '<p class="ad-note">This contact is marked as a minor. Progress tracking is not available for minors in this version — there is no measurement recording here.</p>'
+        : active ? '<p class="ad-muted" style="font-size:13px;margin:6px 0 0">The client has given consent. You can record and manage their progress below. Withdrawal stops future recording without deleting past records.</p>'
+        : '<p class="ad-note">No active consent. Measurements are blocked until the client consents. Send them the consent link, or record their consent as a documented fallback.</p>'}
+      ${canManage && !isMinor ? `<div class="actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        ${!active ? '<button class="btn btn-accent btn-xs" id="pf-consent-link">Send consent link</button>' : ''}
+        ${!active ? '<button class="btn btn-line btn-xs" id="pf-consent-record">Record consent (fallback)…</button>' : ''}
+        ${active ? '<button class="btn btn-line btn-xs" id="pf-consent-withdraw">Withdraw consent</button>' : ''}
+      </div><div id="pf-consent-out" style="margin-top:8px"></div>` : ''}
+      ${hist ? `<details class="pf-tech" style="margin-top:10px"><summary>Consent history</summary><div class="ad-table-wrap" style="margin-top:8px"><table class="ad-table"><thead><tr><th>Status</th><th>Source</th><th>Notice</th><th>Consented</th><th>Withdrawn</th></tr></thead><tbody>${hist}</tbody></table></div></details>` : ''}
+    </div>`;
+
   $('#pf-body').innerHTML = `
+    ${consentPanel}
     ${latest ? `<div class="pf-metrics">
       ${metric('Weight', latest.weight_kg, ' kg', delta(latest.weight_kg, prev?.weight_kg, ' kg', true))}
       ${metric('BMI', latest.bmi, '', delta(latest.bmi, prev?.bmi, '', true))}
@@ -807,7 +879,7 @@ async function pfProgress() {
       ${metric('Muscle', latest.muscle_pct, '%', delta(latest.muscle_pct, prev?.muscle_pct, ' pts', false))}
       <div class="pf-metric"><div class="lbl">Measured</div><div class="val" style="font-size:16px">${fmt(latest.measured_at, 'UTC', { dateStyle: 'medium' })}</div></div>
     </div>${sparkline(chron)}` : '<p class="pf-sec-empty">No measurements yet.</p>'}
-    ${canManage ? `<form id="pf-mform" class="ad-form" style="margin-top:16px">
+    ${canRecord ? `<form id="pf-mform" class="ad-form" style="margin-top:16px">
       <div class="row"><label>Date <input type="date" name="measured_at" value="${new Date().toISOString().slice(0, 10)}"></label>
       <label>Weight (kg) <input type="number" step="0.1" min="20" max="500" name="weight"></label>
       <label>Body fat (%) <input type="number" step="0.1" min="1" max="75" name="body_fat"></label>
@@ -817,7 +889,13 @@ async function pfProgress() {
       <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Add measurement</button><span class="ad-muted" style="font-size:12px">BMI is computed from weight and the height on record.</span></div></form>` : ''}
     ${rows.length ? `<div class="ad-panel" style="margin-top:16px;padding:0"><div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>Date</th><th class="num">Weight</th><th class="num">BMI</th><th class="num">Body fat</th><th class="num">Muscle</th><th>Note</th></tr></thead><tbody>
       ${rows.map((r) => `<tr><td>${fmt(r.measured_at, 'UTC', { dateStyle: 'medium' })}</td><td class="num">${r.weight_kg ?? '—'}</td><td class="num">${r.bmi ?? '—'}</td><td class="num">${r.body_fat_pct ?? '—'}</td><td class="num">${r.muscle_pct ?? '—'}</td><td class="msg">${esc(r.note || '')}</td></tr>`).join('')}
-      </tbody></table></div></div>` : ''}`;
+      </tbody></table></div></div>` : ''}
+    ${(canView && (rows.length || active)) ? `<div class="actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      <button class="btn btn-line btn-xs" id="pf-export">Export progress data</button>
+      ${canManage && rows.length ? '<button class="btn btn-line btn-xs" id="pf-delete-history" style="color:var(--danger,#a12a2a)">Delete progress history…</button>' : ''}
+    </div>` : ''}
+    <p class="ad-muted" style="font-size:12px;margin-top:14px;line-height:1.5">Progress tracking is for fitness coaching only. It is not medical advice, diagnosis or treatment, and no health judgement is made or shown — BMI is only the arithmetic of weight and recorded height. For medical concerns the client should see a qualified healthcare professional.</p>`;
+
   const form = $('#pf-mform');
   if (form) form.onsubmit = async (e) => {
     e.preventDefault(); const f = new FormData(form);
@@ -825,6 +903,45 @@ async function pfProgress() {
     if (num('weight') == null && num('body_fat') == null && num('muscle') == null) return toast('Enter at least a weight, body fat or muscle value', true);
     const { error } = await sb.rpc('metrics_add', { p_contact_id: pf.crmId, p_measured_at: f.get('measured_at') || null, p_weight: num('weight'), p_body_fat: num('body_fat'), p_muscle: num('muscle'), p_height: num('height'), p_note: f.get('note') || null });
     if (error) return fail(error); toast('Measurement recorded'); pfProgress().catch(fail);
+  };
+
+  const linkBtn = $('#pf-consent-link');
+  if (linkBtn) linkBtn.onclick = async () => {
+    const { data: r, error } = await sb.rpc('consent_issue_link', { p_contact_id: pf.crmId });
+    if (error) return fail(error);
+    const url = `${location.origin}/consent?t=${r.token}`;
+    $('#pf-consent-out').innerHTML = `<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Consent link (valid ${r.expires_in_days} days, one use) — send it to the client:</label>
+      <div style="display:flex;gap:8px"><input id="pf-consent-url" readonly value="${esc(url)}" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:12px"><button class="btn btn-line btn-xs" id="pf-consent-copy">Copy</button></div>
+      <p class="ad-muted" style="font-size:12px;margin-top:6px">The link opens the consent notice; the client's own accept/decline is what records consent. It gives no access to any account or CRM data.</p>`;
+    $('#pf-consent-url').onclick = (e) => e.target.select();
+    $('#pf-consent-copy').onclick = async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { $('#pf-consent-url').select(); } };
+  };
+  const recBtn = $('#pf-consent-record');
+  if (recBtn) recBtn.onclick = async () => {
+    if (!await confirmAct('Exceptional fallback: record that the client has given consent, on their behalf.\n\nUse this ONLY when the client has consented in person or in writing and cannot use the link. It is logged as an admin-recorded consent. Proceed?')) return;
+    const { error } = await sb.rpc('consent_record_admin', { p_contact_id: pf.crmId });
+    if (error) return fail(error); toast('Consent recorded (fallback)'); pfProgress().catch(fail);
+  };
+  const wdBtn = $('#pf-consent-withdraw');
+  if (wdBtn) wdBtn.onclick = async () => {
+    if (!await confirmAct('Withdraw consent? This stops any future recording. Past records are kept as evidence and are not deleted.')) return;
+    const { error } = await sb.rpc('consent_withdraw', { p_contact_id: pf.crmId });
+    if (error) return fail(error); toast('Consent withdrawn'); pfProgress().catch(fail);
+  };
+  const exBtn = $('#pf-export');
+  if (exBtn) exBtn.onclick = async () => {
+    const { data: rows2, error } = await sb.rpc('metrics_export', { p_contact_id: pf.crmId });
+    if (error) return fail(error);
+    const blob = new Blob([JSON.stringify(rows2, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = `progress-${pf.crmId}.json`; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000); toast('Progress data exported');
+  };
+  const delBtn = $('#pf-delete-history');
+  if (delBtn) delBtn.onclick = async () => {
+    if (!await confirmAct('Delete ALL progress measurements for this contact? This permanently removes the measurement history. Consent records are separate and are kept. This cannot be undone.')) return;
+    const { error } = await sb.rpc('metrics_delete_history', { p_contact_id: pf.crmId });
+    if (error) return fail(error); toast('Progress history deleted'); pfProgress().catch(fail);
   };
 }
 function sparkline(rows) {

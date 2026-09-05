@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Progress tracking consent — Coach Gari</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{ --ink:#15181d; --grey:#5c636e; --line:#e6e8ec; --bg:#f5f6f8; --card:#fff; --accent:#0f7d5b; --accent-ink:#0a5a41; --danger:#a12a2a; }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:640px;margin:0 auto;padding:32px 20px 64px;}
+  .brand{font-weight:800;letter-spacing:-.02em;font-size:19px;margin:0 0 22px;}
+  .brand i{color:var(--accent);font-style:normal;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px 26px;}
+  h1{font-size:23px;letter-spacing:-.02em;margin:0 0 4px;}
+  .ver{font-size:12px;color:var(--grey);font-weight:600;letter-spacing:.02em;margin:0 0 18px;}
+  h2{font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--grey);margin:22px 0 6px;}
+  p{margin:0 0 10px;}
+  ul{margin:6px 0 10px;padding-left:20px;}
+  li{margin:2px 0;}
+  .disclaimer{background:#fff8e8;border:1px solid #f0e2b8;border-radius:12px;padding:14px 16px;font-size:14.5px;color:#6b5a17;margin:20px 0 4px;}
+  .contact{font-size:14px;color:var(--grey);}
+  .confirm{margin-top:24px;border-top:1px solid var(--line);padding-top:22px;}
+  .check{display:flex;gap:12px;align-items:flex-start;font-size:15px;cursor:pointer;user-select:none;}
+  .check input{width:20px;height:20px;margin-top:2px;flex:0 0 auto;accent-color:var(--accent);}
+  .actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:22px;}
+  button{font-family:inherit;font-size:15.5px;font-weight:700;border-radius:12px;padding:14px 22px;border:1px solid transparent;cursor:pointer;transition:.15s;}
+  button:disabled{opacity:.45;cursor:not-allowed;}
+  .agree{background:var(--accent);color:#fff;}
+  .agree:not(:disabled):hover{background:var(--accent-ink);}
+  .decline{background:#fff;color:var(--danger);border-color:#e3c9c9;}
+  .decline:not(:disabled):hover{background:#fbf4f4;}
+  .note{font-size:13.5px;color:var(--grey);margin-top:14px;}
+  .state{text-align:center;padding:44px 20px;}
+  .state .big{font-size:20px;font-weight:800;letter-spacing:-.02em;margin:0 0 8px;}
+  .state.ok .big{color:var(--accent-ink);}
+  .state.err .big{color:var(--danger);}
+  .spin{display:inline-block;width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:s .8s linear infinite;}
+  @keyframes s{to{transform:rotate(360deg);}}
+  [hidden]{display:none!important;}
+  footer{margin-top:26px;text-align:center;font-size:12.5px;color:var(--grey);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="brand">Coach Gari<i>.</i></p>
+
+  <!-- loading -->
+  <div id="loading" class="card state"><span class="spin" aria-label="Loading"></span></div>
+
+  <!-- error -->
+  <div id="error" class="card state err" hidden>
+    <p class="big" id="err-title">This link is not valid</p>
+    <p id="err-msg" class="contact"></p>
+    <p class="contact">If you think this is a mistake, please contact your coach.</p>
+  </div>
+
+  <!-- notice -->
+  <div id="notice" class="card" hidden>
+    <h1 id="n-title">Progress tracking consent</h1>
+    <p class="ver" id="n-ver"></p>
+    <p id="n-greeting"></p>
+
+    <h2>Why we ask</h2>
+    <p id="n-purpose"></p>
+
+    <h2>What is recorded</h2>
+    <ul id="n-data"></ul>
+
+    <h2>Who can see it</h2>
+    <p id="n-access"></p>
+
+    <h2>Keeping it / removing it</h2>
+    <p id="n-retention"></p>
+    <p id="n-withdraw"></p>
+    <p id="n-rights"></p>
+
+    <div class="disclaimer" id="n-disclaimer"></div>
+    <p class="contact" id="n-contact"></p>
+
+    <div class="confirm">
+      <label class="check">
+        <input type="checkbox" id="agree-box">
+        <span id="agree-label">I have read this notice and I agree to Coach Gari recording my fitness progress data as described above.</span>
+      </label>
+      <div class="actions">
+        <button class="agree" id="btn-agree" disabled>I agree — start tracking</button>
+        <button class="decline" id="btn-decline">I do not agree</button>
+      </div>
+      <p class="note">You can withdraw your consent at any time by asking your coach. Withdrawal stops future recording; it does not require you to keep tracking.</p>
+    </div>
+  </div>
+
+  <!-- done -->
+  <div id="done" class="card state ok" hidden>
+    <p class="big" id="done-title"></p>
+    <p id="done-msg" class="contact"></p>
+  </div>
+
+  <footer>Coach Gari — fitness coaching. This page records a coaching-data preference only; it gives no access to any account.</footer>
+</div>
+
+<script type="module">
+import { CONFIG } from '/config.js';
+
+const $ = (id) => document.getElementById(id);
+const show = (id) => { for (const s of ['loading','error','notice','done']) $(s).hidden = (s !== id); };
+const token = new URLSearchParams(location.search).get('t') || new URLSearchParams(location.search).get('token') || '';
+const endpoint = CONFIG.CONSENT_ENDPOINT;
+
+function fail(title, msg) { $('err-title').textContent = title; $('err-msg').textContent = msg || ''; show('error'); }
+
+async function api(action, extra) {
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, token, ...extra }),
+  });
+  let data = {}; try { data = await res.json(); } catch {}
+  return { res, data };
+}
+
+function renderNotice(first, notice) {
+  $('n-title').textContent = notice.title || 'Progress tracking consent';
+  $('n-ver').textContent = 'Notice version ' + (notice.notice_version || '');
+  $('n-greeting').textContent = first ? ('Hello ' + first + ',') : 'Hello,';
+  $('n-purpose').textContent = notice.purpose || '';
+  const ul = $('n-data'); ul.textContent = '';
+  (notice.data || []).forEach((d) => { const li = document.createElement('li'); li.textContent = d; ul.appendChild(li); });
+  $('n-access').textContent = notice.access || '';
+  $('n-retention').textContent = notice.retention || '';
+  $('n-withdraw').textContent = notice.withdraw || '';
+  $('n-rights').textContent = notice.rights || '';
+  $('n-disclaimer').textContent = notice.disclaimer || '';
+  $('n-contact').textContent = notice.contact ? ('Questions or requests: ' + notice.contact) : '';
+  show('notice');
+}
+
+let busy = false;
+async function submit(decision) {
+  if (busy) return; busy = true;
+  $('btn-agree').disabled = true; $('btn-decline').disabled = true;
+  const { res, data } = await api('submit', { decision });
+  busy = false;
+  if (!res.ok || !data.ok) {
+    if (res.status === 410) return fail('This link has expired', 'This consent link has already been used or has expired. Please ask your coach for a new one.');
+    return fail('Something went wrong', 'Please try again, or ask your coach for a new link.');
+  }
+  if (decision === 'accept') {
+    $('done').className = 'card state ok';
+    $('done-title').textContent = 'Thank you — consent recorded';
+    $('done-msg').textContent = 'Your coach can now record your fitness progress. You can withdraw at any time by asking your coach.';
+  } else {
+    $('done').className = 'card state';
+    $('done-title').textContent = 'Noted — no progress tracking';
+    $('done-msg').textContent = 'We have recorded that you do not want progress tracking. Your coaching continues as normal.';
+  }
+  show('done');
+}
+
+async function init() {
+  if (!endpoint) return fail('Unavailable', 'Consent is not configured.');
+  if (!/^[0-9a-f]{64}$/.test(token)) return fail('This link is not valid', 'The link looks incomplete. Please open it exactly as your coach sent it.');
+  const { res, data } = await api('view', {});
+  if (!res.ok || !data.ok) {
+    if (res.status === 410) return fail('This link has expired', 'This consent link has already been used or has expired. Please ask your coach for a new one.');
+    if (res.status === 404) return fail('This link is not valid', 'Please ask your coach for a new link.');
+    return fail('Something went wrong', 'Please try again shortly.');
+  }
+  renderNotice(data.first_name, data.notice || {});
+  $('agree-box').addEventListener('change', (e) => { $('btn-agree').disabled = !e.target.checked; });
+  $('btn-agree').addEventListener('click', () => { if ($('agree-box').checked) submit('accept'); });
+  $('btn-decline').addEventListener('click', () => submit('decline'));
+}
+
+init().catch(() => fail('Something went wrong', 'Please try again shortly.'));
+</script>
+</body>
+</html>

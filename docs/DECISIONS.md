@@ -23,6 +23,136 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-010 — Consent gate for sensitive coaching data, CRM hardening
+
+**Status: DB layer built, applied and proven — `CG010_TESTS ok=48 fail=0`,
+plus a CG-009 regression re-run (consent gate integrated, still green).
+Advisors carry no new ERROR; new findings are the same accepted patterns as the
+rest of the cockpit (see below). Consent Edge Function `consent` deployed
+(`verify_jwt=false`, token-authorised). Client `/consent` page and admin UI
+wired. Forward migration `20260910_cg010_consent_sensitive.sql`; nothing in
+CG-009 was dropped or rewritten (`body_measurements` and derived BMI are
+untouched).**
+
+### Sensitive-data permission model
+
+- Two new granular permissions: **`coaching_sensitive:view`** and
+  **`coaching_sensitive:manage`**. They gate private coaching notes
+  (note `scope = 'coach_private'`) and the consent-management actions.
+- **Both launch users (Mickaël and Gari) receive `coaching_sensitive:view`
+  and `coaching_sensitive:manage`** — an explicit, documented launch decision,
+  not an implicit consequence of any other permission.
+- **Independence is enforced and tested.** No permission implies another.
+  `platform:admin`, `finance:*`, `analytics:view` and `coach:operations` grant
+  **nothing** in `health_metrics:*` or `coaching_sensitive:*`. The suite proves
+  a `platform:admin`-only persona can read no notes, no measurements, no
+  consents, and cannot record or export anything sensitive.
+- Every sensitive permission is **independently revocable** — each is its own
+  row in `app_permissions` and its own checkbox on the Access screen. Removing
+  one never removes another; removing `platform:admin` does not touch them.
+- We deliberately did **not** redesign the schema to tighten this further (no
+  super-admin/owner role, no ownership hierarchy). Granular permissions checked
+  inside `SECURITY DEFINER` RPCs remain the model.
+
+### Note scope
+
+- `crm_notes.scope ∈ {operational, coach_private}`, default `operational`.
+- RLS: an operational note needs `client_profile:view`; a `coach_private` note
+  additionally needs `coaching_sensitive:view`. Enforced in RLS and in the
+  add/edit RPCs — **not** hidden in the UI. Someone without the sensitive grant
+  cannot read the row at all.
+
+### Consent — auditable history, not a boolean
+
+- `client_consents` is an append-style **history** (status
+  `active | withdrawn | declined`, `source client_link | admin_recorded`,
+  `notice_version`, `consented_at`, `withdrawn_at`, `evidence` jsonb, audit
+  columns). A partial unique index keeps at most **one active** consent per
+  `(contact, type)`.
+- Consent type for this sprint: **`fitness_progress_tracking`**. The notice is
+  **versioned** (`fitness-progress-v1-2026-09`) and states: what is recorded
+  (height, weight, derived BMI, body-fat %, muscle %, progress history), the
+  purpose, who may access it, how to withdraw, retention, the client's
+  access/export/deletion rights, and a privacy contact.
+- **Fitness, not medical.** The notice and the admin UI both carry the
+  fitness-not-medical disclaimer. No health/medical judgement is made or shown;
+  BMI is never auto-labelled healthy/overweight/etc.
+- **Client link is the primary path.** `consent_issue_link` mints a scoped,
+  single-use, 7-day, 256-bit token (only its SHA-256 is stored). The client
+  opens `/consent?t=…`, reads the versioned notice and makes an **explicit
+  affirmative** accept/decline (tick + confirm) on the public site. The link
+  gives **no** CRM/admin access and exposes only a first name.
+- **Admin "record consent" is an exceptional, clearly-marked fallback**
+  (`source = admin_recorded`, evidence `method = admin_fallback`), for when a
+  client consented in person/writing and cannot use the link.
+- **Server-side enforcement (not UI-only).** `metrics_add` refuses with a
+  distinct error when there is no active consent (`P0004`) or the contact is a
+  minor (`P0005`). Reads via `platform:admin` / `finance:*` / `analytics:view`
+  are denied at the RLS/RPC layer regardless.
+
+### Withdrawal, export, deletion — three distinct actions
+
+- **Withdrawal** is a timestamped event that flips the active consent to
+  `withdrawn`; it **stops future collection** and **retains** all prior
+  measurements as evidence. It is not deletion.
+- **Export** (`metrics_export`, needs `health_metrics:view`) and **deletion**
+  (`metrics_delete_history`, needs `health_metrics:manage`) are separate,
+  each **scoped to one contact** and **audited**; one client's action cannot
+  affect another's data (proven). Sensitive data never appears in Analytics.
+
+### Minors
+
+- V1 does **not** enable Progress for known minors (`crm_contacts.is_minor`):
+  `consent_issue_link`, `consent_record_admin` and `metrics_add` all refuse a
+  minor (`P0005`). No guardian workflow is built.
+
+### Data-leakage posture
+
+- Sensitive values never enter Analytics/Plausible, finance, telemetry, or logs.
+  Audit rows and Edge-Function logs record only the **entity id, action and
+  status** — never a measurement value or note body. The consent function
+  captures a **salted hash of the client IP** plus a truncated user-agent as
+  evidence, never the raw IP.
+
+### Advisors (investigated)
+
+- `consent_tokens` shows `rls_enabled_no_policy` (INFO) — **intentional**: RLS
+  on with no policy = deny-all to `authenticated`/`anon`; only the service role
+  (Edge Function) reads it. Same accepted pattern as `email_events` /
+  `webhook_events`.
+- New `SECURITY DEFINER` functions appear under
+  `authenticated_security_definer_function_executable` (WARN) — the cockpit's
+  established design: every privileged RPC is `SECURITY DEFINER` with
+  `set search_path = ''` and an internal `has_permission()` check. Verified for
+  each CG-010 function; `consent_view` / `consent_submit` are **service-role
+  only** (not executable by `authenticated` or `anon`).
+- `auth_leaked_password_protection` (WARN) is pre-existing auth config, unrelated
+  to CG-010 — see owner actions.
+
+### Legal (flagged for the owner — no conclusion drawn in code)
+
+- The notice text, retention wording, the Controller/Processor characterisation
+  between Coach Gari / Oolala / The Studio MT, and any minors policy are **legal
+  items for the owner** to validate. This document deliberately makes **no**
+  definitive legal claim about Controller/Processor status.
+
+### Owner action
+
+Grant the new permissions with the same `set_app_access` pattern as CG-009
+(see the launch provisioning block). Both launch users get
+`coaching_sensitive:view` and `coaching_sensitive:manage`; Gari does **not** get
+`platform:admin`. The consent Edge Function needs the existing
+`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` env (already set for `upload`).
+
+### Not built (deliberately out of CG-010 scope)
+
+Guardian/minor consent workflow; wearable/device import; fuzzy identity
+matching; any medical assessment; new monetisation. Automated DB suites are
+**not** pointed at production — CI runs them only when a `SUPABASE_DB_URL`
+staging secret is present (none is created without approval).
+
+---
+
 ## CG-009 — Admin cockpit, CRM canonical model, client profile, progress
 
 **Status: built and deployed; DB suite `CG009_TESTS ok=43 fail=0` plus a

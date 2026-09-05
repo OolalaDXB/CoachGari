@@ -28,6 +28,11 @@ export const CONFIG = {
   // Empty = payment step disabled; holds are still created.
   CHECKOUT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/checkout',
 
+  // Client-facing progress-tracking consent link (CG-010). The /consent page
+  // reads a one-time token from the URL and POSTs here to view the notice and
+  // record accept/decline. Token-authorised only — no CRM access.
+  CONSENT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/consent',
+
   // Back-office (/admin): Supabase project URL + publishable key. The
   // publishable key is public by design; every row is protected by RLS and
   // a signed-in email only sees what app_permissions grants it.

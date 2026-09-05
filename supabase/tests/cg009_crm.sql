@@ -99,6 +99,7 @@ begin
   perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000001","email":"full@test.local"}', true);
   execute 'set local role authenticated';
   perform public.crm_save_contact(jsonb_build_object('id', c1::text, 'display_name', 'Jane Doe', 'height_cm', '183'));
+  perform public.consent_record_admin(c1);  -- CG-010: measurements now require active consent
   j := public.metrics_add(c1, current_date - 30, 92.0, 24.8, 38.2, null, 'scale', null);
   m1 := (j ->> 'id')::uuid;
   if (j ->> 'height_cm_snapshot')::numeric = 183 and (j ->> 'bmi')::numeric = 27.5 then ok := ok + 1; else fail := fail + 1; log := log || ' [bmi/snapshot ' || coalesce(j ->> 'bmi','null') || ']'; end if;
