@@ -287,8 +287,8 @@ no `content:*` permission: the website is edited in Git.
   2. Attach access, idempotently (re-running replaces the permission set):
   ```sql
   -- SQL editor (runs as service role). Placeholders — real emails are never committed.
-  select public.set_app_access('<owner-email>',   'Name', 'studio', array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage','client_profile:view','client_profile:manage','health_metrics:view','health_metrics:manage','platform:admin']);
-  select public.set_app_access('<coach-email>',   'Name', 'gari',   array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage','client_profile:view','client_profile:manage','health_metrics:view','health_metrics:manage']);
+  select public.set_app_access('<owner-email>',   'Name', 'studio', array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage','client_profile:view','client_profile:manage','health_metrics:view','health_metrics:manage','coaching_sensitive:view','coaching_sensitive:manage','platform:admin']);
+  select public.set_app_access('<coach-email>',   'Name', 'gari',   array['coach:operations','finance:view','finance:manage','analytics:view','catalog:view','catalog:manage','client_profile:view','client_profile:manage','health_metrics:view','health_metrics:manage','coaching_sensitive:view','coaching_sensitive:manage']);
   ```
   From then on a `platform:admin` can do the same from the Access tab
   (`admin_set_user`, `admin_grant`, `admin_revoke`); a person can never
