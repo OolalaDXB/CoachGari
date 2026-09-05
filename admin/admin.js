@@ -135,14 +135,14 @@ async function render(session) {
     $('#side-foot').textContent = session.user.email;
     $('#sidebar').hidden = false; $('#topbar').hidden = false; $('#app').hidden = false;
     renderAccount(session);
-    $('#burger').onclick = () => { $('#sidebar').classList.add('open'); $('#scrim').style.display = 'block'; };
+    $('#burger').onclick = () => { $('#sidebar').classList.add('open'); $('#scrim').hidden = false; };
     $('#scrim').onclick = closeDrawer;
     // initial route from the hash
     const [hSec, hSub] = location.hash.slice(1).split('/');
     go(NAV.some((s) => s.key === hSec) ? hSec : NAV[0].key, hSub);
   } catch (e) { fail(e); }
 }
-function closeDrawer() { $('#sidebar').classList.remove('open'); $('#scrim').style.display = 'none'; }
+function closeDrawer() { $('#sidebar').classList.remove('open'); $('#scrim').hidden = true; }
 
 function renderAccount(session) {
   const email = session.user.email;

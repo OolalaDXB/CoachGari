@@ -54,6 +54,9 @@ table.ad-table{width:100%;border-collapse:collapse;font-size:14px;}
 @media(max-width:760px){.ad-card{padding:22px;}.ad-panel{padding:16px;}}
 
 /* ============ CG-009 — cockpit shell: sidebar / drawer / topbar / modal ============ */
+/* Elements toggled via the `hidden` attribute carry an explicit display
+   (flex/grid), which would otherwise defeat `hidden`. Make hidden win. */
+[hidden]{display:none!important;}
 .ad-shell{display:flex;min-height:100vh;}
 .ad-side{flex:0 0 238px;width:238px;background:#fff;border-right:1px solid var(--line);position:sticky;top:0;height:100vh;display:flex;flex-direction:column;z-index:60;}
 .ad-brand{padding:20px 20px 12px;}
@@ -84,7 +87,7 @@ table.ad-table{width:100%;border-collapse:collapse;font-size:14px;}
 .ad-subnav a{padding:7px 13px;border-radius:999px;font-size:13.5px;font-weight:600;color:var(--grey-text);cursor:pointer;}
 .ad-subnav a:hover:not(.on){color:var(--black);}
 .ad-subnav a.on{background:#fff;color:var(--black);border:1px solid var(--line);}
-.ad-scrim{position:fixed;inset:0;background:rgba(10,10,14,.45);z-index:55;display:none;}
+.ad-scrim{position:fixed;inset:0;background:rgba(10,10,14,.45);z-index:55;}
 @media(max-width:900px){
   .ad-side{position:fixed;left:0;top:0;transform:translateX(-100%);transition:transform .2s ease;box-shadow:0 0 60px rgba(0,0,0,.2);}
   .ad-side.open{transform:none;}
