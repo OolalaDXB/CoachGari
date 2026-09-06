@@ -100,7 +100,8 @@ function navModel() {
               { key: 'contacts', label: 'Contacts', show: () => has('client_profile:view'), run: crmContacts } ] },
     { key: 'schedule', label: 'Schedule', icon: '◷', show: () => has('coach:operations'),
       subs: [ { key: 'calendar', label: 'Calendar', show: () => true, run: calendar },
-              { key: 'availability', label: 'Weekly availability', show: () => true, run: availability },
+              { key: 'sessions', label: 'Sessions', show: () => true, run: sessionsList },
+              { key: 'availability', label: 'Availability', show: () => true, run: availability },
               { key: 'exceptions', label: 'Exceptions', show: () => true, run: exceptions },
               { key: 'tours', label: 'Tour stops', show: () => true, run: tours } ] },
     { key: 'bookings', label: 'Bookings', icon: '▤', show: () => has('coach:operations'), run: bookings },
@@ -262,9 +263,28 @@ async function overview() {
   if (o) cards.push(['New leads · 7 days', o.new_leads_7d], ["Today's sessions", o.today_sessions], ['Upcoming bookings', o.upcoming_bookings]);
   if (f) cards.push(['Orders awaiting payment', f.pending_payment_orders], ['Unsettled Gari payable', money(f.unsettled_payable)]);
   if (c) cards.push(['CRM contacts', c.total_contacts], ['Flagged for review', c.needs_review]);
+  // next session (coach operations) — the most useful thing on a phone
+  let upcoming = [];
+  if (has('coach:operations')) { const { data: u } = await sb.rpc('sessions_upcoming', { p_limit: 6 }); upcoming = u || []; }
+  const nextCard = (s) => {
+    const t = lp(s.start_at); const ml = mapLinks(s); const online = s.delivery_mode === 'online';
+    const pack = s.pack ? `<span class="ov-pack">${s.pack.used}/${s.pack.total_sessions}</span>` : '';
+    return `<div class="ov-next" data-sess="${s.id}">
+      <div class="ov-next-top"><div class="ov-time">${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}</div>
+        <div class="ov-when">${prettyDay(t.date)}</div>${pack}</div>
+      <div class="ov-name">${esc(s.client_name || 'Client')}</div>
+      <div class="ov-type">${esc(s.title || 'Session')} · ${online ? 'Online' : (s.location_name ? esc(s.location_name) : 'In person')}</div>
+      <div class="cg-actions"><button class="btn btn-accent btn-sm" data-open>Open</button>
+        ${online && s.meeting_url ? `<a class="btn btn-line btn-sm" href="${esc(s.meeting_url)}" target="_blank" rel="noopener">Join</a>` : (!online && (s.location_name || s.location_address) ? `<a class="btn btn-line btn-sm" href="${ml.gmaps}" target="_blank" rel="noopener">Directions</a>` : '')}</div></div>`;
+  };
   view.innerHTML = `
     <div class="ad-head"><div><h1>Overview</h1><p class="ad-muted">A quick read on what needs attention. Only what you're allowed to see.</p></div></div>
+    ${upcoming.length ? `<div class="ov-nextwrap"><div class="ov-lbl">Next session${upcoming.length > 1 ? 's' : ''}</div>
+      <div class="ov-nextrow">${upcoming.map(nextCard).join('')}</div></div>` : ''}
     <div class="ad-kpis">${cards.map(([l, v]) => `<div class="ad-kpi"><b>${v}</b><span>${esc(l)}</span></div>`).join('') || '<p class="ad-empty">Nothing to show yet.</p>'}</div>`;
+  // clicking a next-session card opens it (seed calData so the popup summary resolves)
+  calData = { sessions: upcoming, blocks: [] };
+  view.querySelectorAll('.ov-next').forEach((el) => { const openBtn = el.querySelector('[data-open]'); const go2 = () => openSession(el.dataset.sess); el.onclick = go2; if (openBtn) openBtn.onclick = (e) => { e.stopPropagation(); go2(); }; el.querySelectorAll('a').forEach((a) => a.onclick = (e) => e.stopPropagation()); });
 }
 
 /* =============================== BOOKINGS / CALENDAR =============================== */
@@ -296,21 +316,433 @@ function bindBookingActions() {
     go(tab);
   });
 }
+/* ============================ CALENDAR ============================ */
+/* Gari's operating calendar: Day (default) / Week / Month, reading the
+   authoritative calendar_range RPC (sessions + blocks). Times are shown in
+   the coach's zone. Tapping a session opens a popup; tapping an empty slot
+   offers Add session / Block time, prefilled. iPhone-first. */
+const CAL_TZ = 'Asia/Dubai';
+const CAL_H0 = 7, CAL_H1 = 22;                 // visible hours 07:00–22:00
+function todayISO() { const o = tzParts(new Date(), CAL_TZ); return `${o.year}-${o.month}-${o.day}`; }  // today in the coach's zone
+const cal = { view: (() => { try { return localStorage.getItem('cg_cal_view') || 'day'; } catch { return 'day'; } })(), anchor: todayISO(), selDay: null };
+function anchorISO() { return cal.anchor; }  // 'YYYY-MM-DD' in CAL_TZ
+// local wall-clock parts of an ISO instant, in the calendar zone
+function lp(iso) { const o = tzParts(new Date(iso), CAL_TZ); return { date: `${o.year}-${o.month}-${o.day}`, h: +o.hour, m: +o.minute, mins: +o.hour * 60 + +o.minute }; }
+// zone-local 'YYYY-MM-DD' + hour → ISO UTC
+function localToISO(dateStr, h, m = 0) { return zonedToUtc(`${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, CAL_TZ); }
+function addDaysISO(dateStr, n) { const d = new Date(dateStr + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+function weekStartISO(dateStr) { const d = new Date(dateStr + 'T12:00:00'); const dow = (d.getDay() + 6) % 7; d.setDate(d.getDate() - dow); return d.toISOString().slice(0, 10); }  // Monday
+const DOW_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function prettyDay(dateStr) { const d = new Date(dateStr + 'T12:00:00'); return `${DOW_SHORT[(d.getDay() + 6) % 7]} ${d.getDate()} ${MONTHS[d.getMonth()]}`; }
+
+let calData = { sessions: [], blocks: [] };
+
 async function calendar() {
-  const tz = view.dataset.tz || 'Asia/Dubai';
-  const from = new Date(); from.setUTCHours(0, 0, 0, 0); from.setUTCDate(from.getUTCDate() - 1);
-  const to = new Date(from); to.setUTCDate(to.getUTCDate() + 45);
-  const { data, error } = await sb.from('bookings').select(BOOKING_COLS).gte('start_at', from.toISOString()).lt('start_at', to.toISOString())
-    .in('status', ['hold', 'pending_payment', 'confirmed', 'completed', 'no_show']).order('start_at'); if (error) throw error;
-  const groups = {}; for (const b of data) (groups[dayKey(b.start_at, tz)] ||= []).push(b);
   view.innerHTML = `
-    <div class="ad-head"><div><h1>Calendar</h1><p class="ad-muted">Next 45 days. Holds expire on their own; paid bookings confirm through payment.</p></div>
-      <div class="ad-filters"><label class="ad-muted" style="font-size:13px">Show times in</label>${tzSelect('tz', tz)}</div></div>
-    ${Object.keys(groups).length ? Object.entries(groups).map(([d, list]) => `<p class="ad-day">${fmt(list[0].start_at, tz, { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-      <div class="ad-panel">${table(['Time', 'Session', 'Client', 'Ref · status', 'Price', ''], list.map((b) => bookingRow(b, tz)))}</div>`).join('') : '<div class="ad-panel"><p class="ad-empty">No sessions in the next 45 days.</p></div>'}`;
-  $('select[name=tz]', view).onchange = (e) => { view.dataset.tz = e.target.value; calendar().catch(fail); };
-  bindBookingActions();
+    <div class="cal-head">
+      <div class="cal-head-l"><h1>Schedule</h1>
+        <div class="cal-nav"><button class="btn btn-line btn-sm" id="cal-today">Today</button>
+          <button class="cal-arrow" id="cal-prev" aria-label="Previous">‹</button>
+          <span class="cal-title" id="cal-title"></span>
+          <button class="cal-arrow" id="cal-next" aria-label="Next">›</button></div>
+      </div>
+      <div class="cal-head-r">
+        <div class="cal-views" role="tablist">
+          ${['day', 'week', 'month'].map((v) => `<button data-cv="${v}" class="${v === cal.view ? 'on' : ''}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}
+        </div>
+        <button class="btn btn-accent btn-sm" id="cal-add">+ Session</button>
+        <button class="btn btn-line btn-sm" id="cal-block">Block time</button>
+      </div>
+    </div>
+    <div id="cal-body" class="cal-body"><p class="ad-empty">Loading…</p></div>`;
+  $('#cal-today').onclick = () => { cal.anchor = todayISO(); calRender().catch(fail); };
+  $('#cal-prev').onclick = () => { calShift(-1); };
+  $('#cal-next').onclick = () => { calShift(1); };
+  $('#cal-add').onclick = () => sessionForm(null);
+  $('#cal-block').onclick = () => blockForm(null);
+  view.querySelector('.cal-views').onclick = (e) => { const b = e.target.closest('[data-cv]'); if (!b) return; cal.view = b.dataset.cv; try { localStorage.setItem('cg_cal_view', cal.view); } catch {} view.querySelectorAll('[data-cv]').forEach((x) => x.classList.toggle('on', x === b)); calRender().catch(fail); };
+  await calRender();
 }
+function calShift(dir) {
+  const a = anchorISO();
+  cal.anchor = cal.view === 'day' ? addDaysISO(a, dir) : cal.view === 'week' ? addDaysISO(a, 7 * dir) : (() => { const d = new Date(a + 'T12:00:00'); d.setMonth(d.getMonth() + dir); return d.toISOString().slice(0, 10); })();
+  calRender().catch(fail);
+}
+async function calRender() {
+  const a = anchorISO();
+  let fromISO, toISO, title;
+  if (cal.view === 'day') { fromISO = localToISO(a, 0); toISO = localToISO(addDaysISO(a, 1), 0); title = prettyDay(a); }
+  else if (cal.view === 'week') { const ws = weekStartISO(a); fromISO = localToISO(ws, 0); toISO = localToISO(addDaysISO(ws, 7), 0); const we = addDaysISO(ws, 6); title = `${prettyDay(ws)} – ${prettyDay(we)}`; }
+  else { const d = new Date(a + 'T12:00:00'); const ms = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`; const me = (() => { const x = new Date(ms + 'T12:00:00'); x.setMonth(x.getMonth() + 1); return x.toISOString().slice(0, 10); })(); fromISO = localToISO(ms, 0); toISO = localToISO(me, 0); title = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
+  $('#cal-title').textContent = title;
+  const { data, error } = await sb.rpc('calendar_range', { p_from: fromISO, p_to: toISO });
+  if (error) { fail(error); return; }
+  calData = { sessions: data.sessions || [], blocks: data.blocks || [] };
+  const body = $('#cal-body');
+  if (cal.view === 'day') body.innerHTML = renderTimeline(a);
+  else if (cal.view === 'week') body.innerHTML = (window.matchMedia('(max-width:760px)').matches ? renderWeekMobile(a) : renderWeekDesktop(a));
+  else body.innerHTML = renderMonth(a);
+  bindCalBody();
+}
+function eventsFor(dateStr) {
+  const s = calData.sessions.filter((x) => lp(x.start_at).date === dateStr);
+  const b = calData.blocks.filter((x) => lp(x.start_at).date === dateStr);
+  return { s, b };
+}
+function posStyle(iso, endIso) {
+  const a = lp(iso), b = lp(endIso);
+  const top = Math.max(0, (a.mins - CAL_H0 * 60)) / 60;
+  const dur = Math.max(0.5, (b.mins - a.mins) / 60);
+  return `top:${top * 3}rem;height:${dur * 3}rem`;
+}
+function sessionChip(x) {
+  const t = lp(x.start_at), e = lp(x.end_at);
+  const time = `${String(t.h).padStart(2, '0')}:${String(t.m).padStart(2, '0')}–${String(e.h).padStart(2, '0')}:${String(e.m).padStart(2, '0')}`;
+  const pack = x.pack ? `<span class="cal-pack">${x.pack.used}/${x.pack.total_sessions}</span>` : '';
+  const pay = x.pack && x.pack.payment_status ? `<span class="cal-pay ${x.pack.payment_status === 'paid' ? 'ok' : 'due'}">${x.pack.payment_status === 'paid' ? 'Paid' : 'Due'}</span>` : '';
+  const mode = x.delivery_mode === 'online' ? '🖥' : '📍';
+  return `<div class="cal-ev st-${esc(x.status)}" data-sess="${x.id}" style="${posStyle(x.start_at, x.end_at)}">
+    <div class="cal-ev-t">${time} ${mode}</div>
+    <div class="cal-ev-c">${esc(x.client_name || 'Client')}</div>
+    <div class="cal-ev-s">${esc(x.title || 'Session')}</div>
+    <div class="cal-ev-m">${pack}${pay}</div></div>`;
+}
+function blockChip(x) {
+  return `<div class="cal-block" data-block="${x.id}" style="${posStyle(x.start_at, x.end_at)}">
+    <div class="cal-ev-t">Blocked</div><div class="cal-ev-s">${esc(x.label || '')}</div></div>`;
+}
+function hourRows(dateStr) {
+  let h = '';
+  for (let i = CAL_H0; i < CAL_H1; i++) h += `<div class="cal-hr" data-date="${dateStr}" data-hour="${i}"><span class="cal-hrl">${String(i).padStart(2, '0')}:00</span></div>`;
+  return h;
+}
+function renderTimeline(dateStr) {
+  const { s, b } = eventsFor(dateStr);
+  return `<div class="cal-day"><div class="cal-grid">
+    ${hourRows(dateStr)}
+    <div class="cal-layer">${b.map(blockChip).join('')}${s.map(sessionChip).join('')}</div>
+  </div></div>`;
+}
+function renderWeekDesktop(dateStr) {
+  const ws = weekStartISO(dateStr); const today = anchorISO(); const realToday = tzParts(new Date(), CAL_TZ);
+  const todayStr = `${realToday.year}-${realToday.month}-${realToday.day}`;
+  let cols = '';
+  for (let i = 0; i < 7; i++) {
+    const ds = addDaysISO(ws, i); const { s, b } = eventsFor(ds); const d = new Date(ds + 'T12:00:00');
+    cols += `<div class="cal-wcol ${ds === todayStr ? 'is-today' : ''}">
+      <div class="cal-wch" data-goday="${ds}">${DOW_SHORT[i]} <b>${d.getDate()}</b></div>
+      <div class="cal-grid cal-grid-w">${hourRows(ds)}<div class="cal-layer">${b.map(blockChip).join('')}${s.map(sessionChip).join('')}</div></div></div>`;
+  }
+  return `<div class="cal-week"><div class="cal-wgutter"><div class="cal-wch">&nbsp;</div>${Array.from({ length: CAL_H1 - CAL_H0 }, (_, i) => `<div class="cal-gh">${String(CAL_H0 + i).padStart(2, '0')}:00</div>`).join('')}</div>${cols}</div>`;
+}
+function renderWeekMobile(dateStr) {
+  const ws = weekStartISO(dateStr); const we = addDaysISO(ws, 6);
+  const active = (cal.selDay && cal.selDay >= ws && cal.selDay <= we) ? cal.selDay : dateStr;
+  let chips = '';
+  for (let i = 0; i < 7; i++) { const ds = addDaysISO(ws, i); const d = new Date(ds + 'T12:00:00'); const n = eventsFor(ds).s.length;
+    chips += `<button class="cal-mchip ${ds === active ? 'on' : ''}" data-selday="${ds}"><span>${DOW_SHORT[i][0]}</span><b>${d.getDate()}</b>${n ? `<i class="cal-dot"></i>` : ''}</button>`; }
+  return `<div class="cal-mweek"><div class="cal-mchips">${chips}</div>${renderTimeline(active)}</div>`;
+}
+function renderMonth(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00'); const y = d.getFullYear(), m = d.getMonth();
+  const first = new Date(y, m, 1); const startDow = (first.getDay() + 6) % 7;
+  const realToday = tzParts(new Date(), CAL_TZ); const todayStr = `${realToday.year}-${realToday.month}-${realToday.day}`;
+  const counts = {}; for (const s of calData.sessions) { const k = lp(s.start_at).date; counts[k] = (counts[k] || 0) + 1; }
+  const blockDays = {}; for (const b of calData.blocks) { const k = lp(b.start_at).date; blockDays[k] = true; }
+  let cells = '';
+  for (let i = 0; i < startDow; i++) cells += `<div class="cal-mc empty"></div>`;
+  const dim = new Date(y, m + 1, 0).getDate();
+  for (let day = 1; day <= dim; day++) {
+    const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; const n = counts[ds] || 0;
+    cells += `<div class="cal-mc ${ds === todayStr ? 'is-today' : ''}" data-goday="${ds}">
+      <span class="cal-mcn">${day}</span>${n ? `<span class="cal-mcount">${n}</span>` : ''}${blockDays[ds] ? '<i class="cal-mblock"></i>' : ''}
+      ${n ? `<div class="cal-mdots">${Array.from({ length: Math.min(n, 4) }, () => '<i></i>').join('')}</div>` : ''}</div>`;
+  }
+  return `<div class="cal-month"><div class="cal-mhead">${DOW_SHORT.map((x) => `<span>${x}</span>`).join('')}</div><div class="cal-mgrid">${cells}</div></div>`;
+}
+function bindCalBody() {
+  const body = $('#cal-body');
+  body.querySelectorAll('[data-sess]').forEach((el) => el.onclick = (e) => { e.stopPropagation(); openSession(el.dataset.sess); });
+  body.querySelectorAll('[data-block]').forEach((el) => el.onclick = (e) => { e.stopPropagation(); openBlock(el.dataset.block); });
+  body.querySelectorAll('.cal-hr').forEach((el) => el.onclick = () => slotSheet(el.dataset.date, +el.dataset.hour));
+  body.querySelectorAll('[data-goday]').forEach((el) => el.onclick = () => { cal.anchor = el.dataset.goday; cal.view = 'day'; try { localStorage.setItem('cg_cal_view', 'day'); } catch {} calendar().catch(fail); });
+  body.querySelectorAll('[data-selday]').forEach((el) => el.onclick = () => { cal.selDay = el.dataset.selday; $('#cal-body').innerHTML = renderWeekMobile(anchorISO()); bindCalBody(); });
+}
+// tapping an empty slot: choose Add session or Block time, prefilled
+function slotSheet(dateStr, hour) {
+  const host = ensureSheet();
+  host.querySelector('.cg-sheet').innerHTML = `<div class="cg-sheet-h"><b>${prettyDay(dateStr)} · ${String(hour).padStart(2, '0')}:00</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b"><div class="cg-actions">
+      <button class="btn btn-accent" data-a="sess">Add session</button>
+      <button class="btn btn-line" data-a="block">Block time</button></div></div>`;
+  host.querySelector('[data-x]').onclick = closeSheet;
+  host.querySelector('[data-a="sess"]').onclick = () => { closeSheet(); sessionForm({ date: dateStr, hour }); };
+  host.querySelector('[data-a="block"]').onclick = () => { closeSheet(); blockForm({ date: dateStr, hour }); };
+}
+
+/* ---- bottom-sheet host (session popup, block popup, forms) ---- */
+function ensureSheet() {
+  let host = $('#cg-sheet-host');
+  if (!host) { host = document.createElement('div'); host.id = 'cg-sheet-host'; host.className = 'cg-sheet-host'; host.innerHTML = '<div class="cg-scrim"></div><div class="cg-sheet" role="dialog" aria-modal="true"></div>'; document.body.appendChild(host); host.querySelector('.cg-scrim').onclick = closeSheet; }
+  host.hidden = false; document.body.style.overflow = 'hidden'; return host;
+}
+function closeSheet() { const h = $('#cg-sheet-host'); if (h) { h.hidden = true; h.querySelector('.cg-sheet').innerHTML = ''; } if ($('#profile').hidden) document.body.style.overflow = ''; }
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const h = $('#cg-sheet-host'); if (h && !h.hidden) closeSheet(); } });
+
+function mapLinks(loc) {
+  const q = (loc.location_lat != null && loc.location_lng != null) ? `${loc.location_lat},${loc.location_lng}` : null;
+  const addr = loc.location_address || loc.location_name || '';
+  const gmaps = q ? `https://www.google.com/maps/search/?api=1&query=${q}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+  const waze = q ? `https://waze.com/ul?ll=${q}&navigate=yes` : `https://waze.com/ul?q=${encodeURIComponent(addr)}`;
+  return { gmaps, waze, addr };
+}
+
+async function openSession(id) {
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  sheet.innerHTML = '<div class="cg-sheet-b"><p class="ad-empty">Loading…</p></div>';
+  const { data: s, error } = await sb.from('coaching_sessions').select('*').eq('id', id).maybeSingle();
+  if (error || !s) { fail(error || { message: 'Not found' }); return; }
+  const summary = calData.sessions.find((x) => x.id === id) || {};
+  let contact = null;
+  if (has('client_profile:view')) { const { data } = await sb.from('crm_contacts').select('display_name,phone,email').eq('id', s.crm_contact_id).maybeSingle(); contact = data; }
+  let pack = summary.pack || null;
+  if (!pack && s.session_pack_id) { const { data } = await sb.rpc('packs_for_contact', { p_contact_id: s.crm_contact_id }); pack = (data || []).find((p) => p.id === s.session_pack_id) || null; }
+  const t = lp(s.start_at), e = lp(s.end_at); const dur = Math.round((new Date(s.end_at) - new Date(s.start_at)) / 60000);
+  const name = contact?.display_name || summary.client_name || 'Client';
+  const ph = contact?.phone;
+  const online = s.delivery_mode === 'online';
+  const ml = mapLinks(s);
+  const pay = pack && pack.payment_status ? `<span class="cal-pay ${pack.payment_status === 'paid' ? 'ok' : 'due'}">${esc(pack.payment_status)}</span>` : '';
+  sheet.innerHTML = `
+    <div class="cg-sheet-h"><b>${esc(name)}</b>${st(s.status)}<button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b">
+      <div class="cg-sec"><div class="cg-sec-t">Session</div>
+        <dl class="cg-kv"><dt>Date</dt><dd>${prettyDay(t.date)}</dd>
+          <dt>Time</dt><dd>${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')} – ${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')} (${dur} min)</dd>
+          <dt>Type</dt><dd>${esc(s.title || summary.title || 'Session')} · ${online ? 'Online' : 'In person'}</dd></dl></div>
+      ${pack ? `<div class="cg-sec"><div class="cg-sec-t">Package</div>
+        <div class="cg-pack"><div class="cg-pack-x">${pack.used} / ${pack.total_sessions}</div><div class="cg-pack-r">${pack.remaining} remaining</div></div>
+        <dl class="cg-kv">${'price_amount' in pack ? `<dt>Price</dt><dd>${money(pack.price_amount, pack.currency)} ${pay}</dd><dt>Paid</dt><dd>${pack.paid_at ? fmt(pack.paid_at, CAL_TZ, { dateStyle: 'medium' }) : '—'}</dd>` : ''}<dt>Pack</dt><dd>${esc(pack.title || '')}</dd></dl></div>` : ''}
+      ${(!online && (s.location_name || s.location_address)) ? `<div class="cg-sec"><div class="cg-sec-t">Location</div>
+        <div class="cg-loc"><b>${esc(s.location_name || '')}</b>${s.location_address ? `<div class="ad-muted">${esc(s.location_address)}</div>` : ''}</div>
+        <div class="cg-actions"><button class="btn btn-line btn-sm" data-copyaddr>Copy address</button>
+          <a class="btn btn-line btn-sm" href="${ml.gmaps}" target="_blank" rel="noopener">Google Maps</a>
+          <a class="btn btn-line btn-sm" href="${ml.waze}" target="_blank" rel="noopener">Waze</a></div></div>` : ''}
+      ${(online && s.meeting_url) ? `<div class="cg-sec"><div class="cg-sec-t">Online</div>
+        <div class="cg-actions"><button class="btn btn-line btn-sm" data-copylink>Copy link</button>
+          <a class="btn btn-line btn-sm" href="${esc(s.meeting_url)}" target="_blank" rel="noopener">Open meeting</a></div></div>` : ''}
+      ${s.note ? `<div class="cg-sec"><div class="cg-sec-t">Note</div><p style="margin:0;white-space:pre-wrap">${esc(s.note)}</p></div>` : ''}
+      <div class="cg-actions cg-actions-grid">
+        ${has('client_profile:view') ? '<button class="btn btn-line" data-open>Open client</button>' : ''}
+        ${ph ? `<a class="btn btn-line" href="${waHref(ph)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
+        ${s.status !== 'completed' ? '<button class="btn btn-accent" data-complete>Mark completed</button>' : ''}
+        ${s.status === 'scheduled' ? '<button class="btn btn-line" data-noshow>No-show</button>' : ''}
+        <button class="btn btn-line" data-pack>Link / change package</button>
+        <button class="btn btn-line" data-edit>Edit / reschedule</button>
+        ${s.status !== 'cancelled' ? '<button class="btn btn-line" data-cancel>Cancel</button>' : ''}
+        ${(!s.booking_id && s.status !== 'completed') ? '<button class="btn btn-line" data-del style="color:var(--danger,#a12a2a)">Delete</button>' : ''}
+      </div>
+      ${s.booking_id ? '<p class="ad-muted" style="font-size:12px;margin-top:10px">This session came from a website booking.</p>' : ''}
+    </div>`;
+  sheet.querySelector('[data-x]').onclick = closeSheet;
+  const on = (sel, fn) => { const el = sheet.querySelector(sel); if (el) el.onclick = fn; };
+  on('[data-copyaddr]', async () => { try { await navigator.clipboard.writeText(ml.addr); toast('Address copied'); } catch {} });
+  on('[data-copylink]', async () => { try { await navigator.clipboard.writeText(s.meeting_url); toast('Link copied'); } catch {} });
+  on('[data-open]', () => { closeSheet(); openProfile(s.crm_contact_id, null, 'overview'); });
+  on('[data-complete]', () => sessStatus(id, 'completed'));
+  on('[data-noshow]', () => noShowSheet(id));
+  on('[data-cancel]', async () => { if (await confirmAct('Cancel this session?')) sessStatus(id, 'cancelled'); });
+  on('[data-edit]', () => { closeSheet(); sessionForm(s); });
+  on('[data-pack]', () => packPicker(s));
+  on('[data-del]', async () => { if (await confirmAct('Delete this session? This cannot be undone.')) { const { error } = await sb.rpc('session_delete', { p_id: id }); if (error) return fail(error); toast('Session deleted'); closeSheet(); calRender().catch(fail); } });
+}
+async function sessStatus(id, status) {
+  const { error } = await sb.rpc('session_set_status', { p_id: id, p_status: status });
+  if (error) return fail(error); toast('Session ' + status); closeSheet(); calRender().catch(fail);
+}
+function noShowSheet(id) {
+  const host = ensureSheet(); host.querySelector('.cg-sheet').innerHTML = `<div class="cg-sheet-h"><b>Mark no-show</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b"><p>Did this no-show still consume a session from the package?</p>
+    <div class="cg-actions"><button class="btn btn-line" data-free>No — don't consume</button><button class="btn btn-accent" data-charge>Yes — consume a session</button></div></div>`;
+  const sheet = host.querySelector('.cg-sheet');
+  sheet.querySelector('[data-x]').onclick = closeSheet;
+  sheet.querySelector('[data-free]').onclick = async () => { const { error } = await sb.rpc('session_set_status', { p_id: id, p_status: 'no_show', p_chargeable: false }); if (error) return fail(error); toast('Marked no-show'); closeSheet(); calRender().catch(fail); };
+  sheet.querySelector('[data-charge]').onclick = async () => { const { error } = await sb.rpc('session_set_status', { p_id: id, p_status: 'no_show', p_chargeable: true }); if (error) return fail(error); toast('Marked no-show (charged)'); closeSheet(); calRender().catch(fail); };
+}
+async function packPicker(s) {
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  sheet.innerHTML = '<div class="cg-sheet-b"><p class="ad-empty">Loading…</p></div>';
+  const { data: packs, error } = await sb.rpc('packs_for_contact', { p_contact_id: s.crm_contact_id }); if (error) { fail(error); return; }
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>Link to package</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b"><div class="cg-actions" style="flex-direction:column;align-items:stretch">
+      ${(packs || []).map((p) => `<button class="btn ${p.id === s.session_pack_id ? 'btn-accent' : 'btn-line'}" data-pack="${p.id}" style="text-align:left">${esc(p.title)} · ${p.used}/${p.total_sessions}${p.status !== 'active' ? ' · ' + p.status : ''}</button>`).join('') || '<p class="ad-muted">No packages for this client yet.</p>'}
+      <button class="btn btn-line" data-pack="">Unlink (no package)</button>
+      <button class="btn btn-line" data-newpack>+ New package…</button>
+    </div></div>`;
+  sheet.querySelector('[data-x]').onclick = closeSheet;
+  sheet.querySelectorAll('[data-pack]').forEach((b) => b.onclick = async () => {
+    const { error } = await sb.rpc('session_write', { p: { id: s.id, session_pack_id: b.dataset.pack || null } });
+    if (error) return fail(error); toast('Package updated'); closeSheet(); calRender().catch(fail);
+  });
+  sheet.querySelector('[data-newpack]').onclick = () => packForm(s.crm_contact_id, (newId) => { sb.rpc('session_write', { p: { id: s.id, session_pack_id: newId } }).then(() => { toast('Linked to new package'); calRender().catch(fail); }); });
+}
+
+async function openBlock(id) {
+  const b = calData.blocks.find((x) => x.id === id); if (!b) return;
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  const t = lp(b.start_at), e = lp(b.end_at);
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>Blocked time</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b"><dl class="cg-kv"><dt>When</dt><dd>${prettyDay(t.date)} · ${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')} – ${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')}</dd>
+      <dt>Label</dt><dd>${esc(b.label || '—')}</dd>${b.private_note ? `<dt>Private note</dt><dd>${esc(b.private_note)}</dd>` : ''}</dl>
+      <p class="ad-muted" style="font-size:12px">Blocked periods are removed from public booking availability.</p>
+      <div class="cg-actions">${b.source === 'calendar_block' ? '<button class="btn btn-line" data-edit>Edit</button><button class="btn btn-line" data-unblock style="color:var(--danger,#a12a2a)">Unblock</button>' : '<span class="ad-muted" style="font-size:12px">Managed under Exceptions.</span>'}</div></div>`;
+  sheet.querySelector('[data-x]').onclick = closeSheet;
+  const eb = sheet.querySelector('[data-edit]'); if (eb) eb.onclick = () => { closeSheet(); blockForm(b); };
+  const ub = sheet.querySelector('[data-unblock]'); if (ub) ub.onclick = async () => { if (!await confirmAct('Remove this block? The time becomes bookable again.')) return; const { error } = await sb.rpc('block_remove', { p_id: id }); if (error) return fail(error); toast('Unblocked'); closeSheet(); calRender().catch(fail); };
+}
+
+/* ---- session create / edit ---- */
+async function sessionForm(prefill) {
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  const editing = prefill && prefill.id;
+  const st0 = editing ? lp(prefill.start_at) : null;
+  const dateVal = editing ? st0.date : (prefill?.date || anchorISO());
+  const timeVal = editing ? `${String(st0.h).padStart(2,'0')}:${String(st0.m).padStart(2,'0')}` : (prefill?.hour != null ? `${String(prefill.hour).padStart(2,'0')}:00` : '10:00');
+  const dur = editing ? Math.round((new Date(prefill.end_at) - new Date(prefill.start_at)) / 60000) : 60;
+  let cid = editing ? prefill.crm_contact_id : (prefill?.crm_contact_id || null);
+  let cname = prefill?.crm_name || '';
+  const lockClient = editing || !!(prefill && prefill.crm_contact_id);
+  if (cid && !cname && has('client_profile:view')) { const { data } = await sb.from('crm_contacts').select('display_name').eq('id', cid).maybeSingle(); cname = data?.display_name || ''; }
+  const svcOpts = services.map((s) => `<option value="${s.id}" data-dur="${s.duration_minutes}" data-mode="${s.delivery_mode}" ${editing && prefill.service_id === s.id ? 'selected' : ''}>${esc(s.title)}</option>`).join('');
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>${editing ? 'Edit session' : 'New session'}</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b"><form id="sess-form" class="cg-form">
+      <label>Client ${lockClient ? `<input value="${esc(cname)}" disabled>` : `<input id="cl-search" placeholder="Search client…" autocomplete="off" required><div id="cl-res" class="cg-cl-res"></div><input type="hidden" name="crm_contact_id">`}</label>
+      <div class="cg-row"><label>Date <input type="date" name="date" value="${dateVal}" required></label>
+        <label>Start <input type="time" name="time" value="${timeVal}" required></label>
+        <label>Duration (min) <input type="number" name="dur" min="15" max="480" step="5" value="${dur}" required></label></div>
+      <div class="cg-row"><label>Type <select name="service_id"><option value="">—</option>${svcOpts}</select></label>
+        <label>Mode <select name="delivery_mode"><option value="in_person" ${editing && prefill.delivery_mode==='in_person'?'selected':''}>In person</option><option value="online" ${editing && prefill.delivery_mode==='online'?'selected':''}>Online</option></select></label></div>
+      <label>Title / label <input name="title" value="${editing ? esc(prefill.title || '') : ''}" placeholder="e.g. Private coaching"></label>
+      <div id="loc-fields" ${editing && prefill.delivery_mode==='online' ? 'hidden' : ''}>
+        <label>Location name <input name="location_name" value="${editing ? esc(prefill.location_name || '') : ''}" placeholder="e.g. Dubai Padel Academy"></label>
+        <label>Address <input name="location_address" value="${editing ? esc(prefill.location_address || '') : ''}"></label>
+        <div class="cg-row"><label>Latitude <input name="location_lat" value="${editing ? (prefill.location_lat ?? '') : ''}" placeholder="optional"></label>
+          <label>Longitude <input name="location_lng" value="${editing ? (prefill.location_lng ?? '') : ''}" placeholder="optional"></label></div></div>
+      <div id="url-field" ${!(editing && prefill.delivery_mode==='online') ? 'hidden' : ''}><label>Meeting link <input name="meeting_url" value="${editing ? esc(prefill.meeting_url || '') : ''}" placeholder="https://…"></label></div>
+      <label>Note <input name="note" value="${editing ? esc(prefill.note || '') : ''}" placeholder="Optional"></label>
+      <div class="cg-actions"><button class="btn btn-accent" type="submit">${editing ? 'Save' : 'Create session'}</button><button class="btn btn-line" type="button" data-x2>Cancel</button></div>
+    </form></div>`;
+  const form = sheet.querySelector('#sess-form');
+  sheet.querySelector('[data-x]').onclick = closeSheet; sheet.querySelector('[data-x2]').onclick = closeSheet;
+  const modeSel = form.delivery_mode; const toggleLoc = () => { form.querySelector('#loc-fields').hidden = modeSel.value === 'online'; form.querySelector('#url-field').hidden = modeSel.value !== 'online'; };
+  modeSel.onchange = toggleLoc;
+  form.service_id.onchange = (e) => { const o = e.target.selectedOptions[0]; if (o?.dataset.dur) form.dur.value = o.dataset.dur; if (o?.dataset.mode) { modeSel.value = o.dataset.mode === 'online' ? 'online' : 'in_person'; toggleLoc(); } if (o && !form.title.value) form.title.value = o.textContent; };
+  if (!lockClient) {
+    const box = form.querySelector('#cl-search'), res = form.querySelector('#cl-res');
+    box.oninput = async () => { const q = box.value.trim(); if (q.length < 2) { res.innerHTML = ''; return; } const { data } = await sb.rpc('crm_list_contacts', { p_search: q, p_review_only: false }); res.innerHTML = (data || []).slice(0, 6).map((c) => `<button type="button" data-cid="${c.id}" data-name="${esc(c.display_name || '')}">${esc(c.display_name || '—')} · ${esc(c.email || c.phone || '')}</button>`).join(''); res.querySelectorAll('[data-cid]').forEach((b) => b.onclick = () => { cid = b.dataset.cid; form.crm_contact_id.value = cid; box.value = b.dataset.name; res.innerHTML = ''; }); };
+  }
+  form.onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(form);
+    const contactId = lockClient ? cid : f.get('crm_contact_id');
+    if (!contactId) return toast('Pick a client', true);
+    const startISO = zonedToUtc(`${f.get('date')}T${f.get('time')}`, CAL_TZ);
+    const endISO = new Date(new Date(startISO).getTime() + Number(f.get('dur')) * 60000).toISOString();
+    const p = { start_at: startISO, end_at: endISO, session_timezone: CAL_TZ, delivery_mode: f.get('delivery_mode'),
+      service_id: f.get('service_id') || null, title: f.get('title') || null, note: f.get('note') || null,
+      location_name: f.get('location_name') || null, location_address: f.get('location_address') || null,
+      location_lat: f.get('location_lat') || null, location_lng: f.get('location_lng') || null, meeting_url: f.get('meeting_url') || null };
+    if (editing) p.id = prefill.id; else p.crm_contact_id = contactId;
+    const { error } = await sb.rpc('session_write', { p }); if (error) return fail(error);
+    toast(editing ? 'Session saved' : 'Session created'); closeSheet(); calRender().catch(fail);
+  };
+}
+
+/* ---- block create / edit ---- */
+function blockForm(prefill) {
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  const editing = prefill && prefill.id;
+  const st0 = editing ? lp(prefill.start_at) : null, en0 = editing ? lp(prefill.end_at) : null;
+  const dateVal = editing ? st0.date : (prefill?.date || anchorISO());
+  const startVal = editing ? `${String(st0.h).padStart(2,'0')}:${String(st0.m).padStart(2,'0')}` : (prefill?.hour != null ? `${String(prefill.hour).padStart(2,'0')}:00` : '09:00');
+  const endVal = editing ? `${String(en0.h).padStart(2,'0')}:${String(en0.m).padStart(2,'0')}` : (prefill?.hour != null ? `${String(prefill.hour + 1).padStart(2,'0')}:00` : '10:00');
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>${editing ? 'Edit block' : 'Block time'}</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b"><form id="blk-form" class="cg-form">
+      <label>Date <input type="date" name="date" value="${dateVal}" required></label>
+      <div class="cg-row"><label>From <input type="time" name="start" value="${startVal}" required></label>
+        <label>To <input type="time" name="end" value="${endVal}" required></label></div>
+      <label>Label <input name="label" value="${editing ? esc(prefill.label || '') : ''}" placeholder="e.g. Personal, Travel, Lunch"></label>
+      <label>Private note <input name="private_note" value="${editing ? esc(prefill.private_note || '') : ''}" placeholder="Only you see this"></label>
+      <p class="ad-muted" style="font-size:12px">This makes the time unavailable for public booking.</p>
+      <div class="cg-actions"><button class="btn btn-accent" type="submit">${editing ? 'Save' : 'Block'}</button><button class="btn btn-line" type="button" data-x2>Cancel</button></div>
+    </form></div>`;
+  sheet.querySelector('[data-x]').onclick = closeSheet; sheet.querySelector('[data-x2]').onclick = closeSheet;
+  sheet.querySelector('#blk-form').onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const startISO = zonedToUtc(`${f.get('date')}T${f.get('start')}`, CAL_TZ);
+    const endISO = zonedToUtc(`${f.get('date')}T${f.get('end')}`, CAL_TZ);
+    if (new Date(endISO) <= new Date(startISO)) return toast('End must be after start', true);
+    const body = { start_at: startISO, end_at: endISO, timezone: CAL_TZ, label: f.get('label') || null, private_note: f.get('private_note') || null };
+    const { error } = editing ? await sb.rpc('block_update', { p_id: prefill.id, p: body }) : await sb.rpc('block_create', { p: body });
+    if (error) return fail(error); toast(editing ? 'Block updated' : 'Time blocked'); closeSheet(); calRender().catch(fail);
+  };
+}
+
+/* ---- pack create (standalone or from a picker) ---- */
+async function packForm(contactId, onCreated) {
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  const canFin = has('finance:manage');
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>New package</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b"><form id="pack-form" class="cg-form">
+      <label>Title <input name="title" value="10-session coaching pack" required></label>
+      <div class="cg-row"><label>Total sessions <input type="number" name="total_sessions" min="1" max="100" value="10" required></label>
+        <label>Agreement date <input type="date" name="agreement_date" value="${anchorISO()}"></label></div>
+      ${canFin ? `<div class="cg-sec"><div class="cg-sec-t">Payment (finance)</div>
+        <div class="cg-row"><label>Price <input type="number" name="price_major" min="0" step="0.01" placeholder="e.g. 850"></label>
+          <label>Currency <input name="currency" value="USD" maxlength="3"></label></div>
+        <div class="cg-row"><label>Status <select name="payment_status"><option value="unpaid">unpaid</option><option value="partial">partial</option><option value="paid">paid</option></select></label>
+          <label>Method <select name="payment_source"><option value="">—</option><option value="stripe">stripe</option><option value="bank_transfer">bank transfer</option><option value="cash">cash</option><option value="manual">manual</option><option value="external">external</option></select></label></div>
+        <label>Paid on <input type="date" name="paid_date"></label></div>` : '<p class="ad-muted" style="font-size:12px">Payment details need a finance permission and can be added later.</p>'}
+      <div class="cg-actions"><button class="btn btn-accent" type="submit">Create package</button><button class="btn btn-line" type="button" data-x2>Cancel</button></div>
+    </form></div>`;
+  sheet.querySelector('[data-x]').onclick = closeSheet; sheet.querySelector('[data-x2]').onclick = closeSheet;
+  sheet.querySelector('#pack-form').onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const p = { crm_contact_id: contactId, title: f.get('title'), total_sessions: Number(f.get('total_sessions')), agreement_date: f.get('agreement_date') || null };
+    if (canFin) { if (f.get('price_major')) { p.price_amount = Math.round(Number(f.get('price_major')) * 100); p.currency = (f.get('currency') || 'USD').toUpperCase(); }
+      if (f.get('payment_status')) p.payment_status = f.get('payment_status');
+      if (f.get('payment_source')) p.payment_source = f.get('payment_source');
+      if (f.get('paid_date')) p.paid_at = zonedToUtc(`${f.get('paid_date')}T12:00`, CAL_TZ); }
+    const { data, error } = await sb.rpc('pack_create', { p }); if (error) return fail(error);
+    toast('Package created'); closeSheet(); if (onCreated) onCreated(data.id);
+  };
+}
+
+/* ---- Sessions list sub-tab ---- */
+async function sessionsList() {
+  const q = view.dataset.slQ || ''; const status = view.dataset.slStatus || ''; const mode = view.dataset.slMode || '';
+  const { data, error } = await sb.rpc('sessions_list', { p: { q: q || null, status: status || null, delivery_mode: mode || null } }); if (error) throw error;
+  const rows = data || [];
+  const opts = ['scheduled', 'completed', 'cancelled', 'no_show'];
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Sessions</h1><p class="ad-muted">Search and history across all coaching sessions.</p></div>
+      <div class="ad-filters"><input id="sl-q" placeholder="Client or title…" value="${esc(q)}">
+        <select id="sl-status"><option value="">All statuses</option>${opts.map((o) => `<option value="${o}" ${o === status ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}</select>
+        <select id="sl-mode"><option value="">All modes</option><option value="in_person" ${mode==='in_person'?'selected':''}>In person</option><option value="online" ${mode==='online'?'selected':''}>Online</option></select></div></div>
+    <div class="ad-panel">${table(['Date', 'Time', 'Client', 'Type', 'Package', 'Status'], rows.map((s) => {
+      const t = lp(s.start_at), e = lp(s.end_at);
+      return `<tr class="clik" data-sess="${s.id}"><td>${prettyDay(t.date)}</td><td>${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}–${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')}</td>
+        <td><b>${esc(s.client_name || '—')}</b></td><td>${esc(s.title || '—')} · ${s.delivery_mode === 'online' ? 'online' : 'in person'}</td>
+        <td>${s.pack ? `${s.pack.used}/${s.pack.total_sessions}` : '—'}</td><td>${st(s.status)}</td></tr>`;
+    }), 'No sessions match.')}</div>`;
+  $('#sl-q').onchange = (e) => { view.dataset.slQ = e.target.value.trim(); sessionsList().catch(fail); };
+  $('#sl-status').onchange = (e) => { view.dataset.slStatus = e.target.value; sessionsList().catch(fail); };
+  $('#sl-mode').onchange = (e) => { view.dataset.slMode = e.target.value; sessionsList().catch(fail); };
+  view.querySelectorAll('tr.clik').forEach((tr) => tr.onclick = async () => { await calPreloadFor(tr.dataset.sess); openSession(tr.dataset.sess); });
+}
+// the Sessions list isn't a calendar range, so seed calData so openSession's summary lookups work
+async function calPreloadFor(id) { if (!calData.sessions.find((x) => x.id === id)) calData.sessions = []; }
+
 async function bookings() {
   const tz = view.dataset.tz || 'Asia/Dubai'; const status = view.dataset.bkStatus || ''; const search = view.dataset.bkSearch || '';
   let q = sb.from('bookings').select(BOOKING_COLS).order('start_at', { ascending: false }).limit(200);
@@ -685,10 +1117,37 @@ function pfSections() {
   const s = [];
   if (has('client_profile:view') && pf.contact) s.push(['overview', 'Overview', pfOverview], ['notes', 'Notes', pfNotes]);
   if (has('health_metrics:view') && pf.contact) s.push(['progress', 'Progress', pfProgress]);
+  if (has('coach:operations') && pf.crmId) s.push(['sessions', 'Sessions', pfSessions]);
   if (has('coach:operations')) s.push(['enquiries', 'Enquiries', pfEnquiries], ['bookings', 'Bookings', pfBookings]);
   if (has('finance:view') && has('coach:operations')) s.push(['payments', 'Payments', pfPayments]);
   if (has('coach:operations')) s.push(['media', 'Media', pfMedia], ['attribution', 'Attribution', pfAttribution]);
   return s;
+}
+
+// Client profile → Sessions & packages (operational; the shareable recap/report is CG-012)
+async function pfSessions() {
+  const [{ data: packs, error: pe }, { data: sess, error: se }] = await Promise.all([
+    sb.rpc('packs_for_contact', { p_contact_id: pf.crmId }),
+    sb.rpc('sessions_list', { p: { crm_contact_id: pf.crmId } }),
+  ]);
+  if (pe) throw pe; if (se) throw se;
+  const pk = packs || [], ss = sess || [];
+  const cname = pf.contact?.display_name || 'this client';
+  const packCard = (p) => `<div class="cg-packcard"><div class="cg-packcard-h"><b>${esc(p.title)}</b>${p.status !== 'active' ? st(p.status) : ''}</div>
+    <div class="cg-pack"><div class="cg-pack-x">${p.used} / ${p.total_sessions}</div><div class="cg-pack-r">${p.remaining} remaining</div></div>
+    ${'price_amount' in p ? `<div class="ad-muted" style="font-size:12.5px">${money(p.price_amount, p.currency)} · ${esc(p.payment_status)}${p.paid_at ? ' · paid ' + fmt(p.paid_at, CAL_TZ, { dateStyle: 'medium' }) : ''}</div>` : ''}</div>`;
+  $('#pf-body').innerHTML = `
+    <div class="ad-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      <button class="btn btn-accent btn-sm" id="pf-new-sess">+ Session</button>
+      <button class="btn btn-line btn-sm" id="pf-new-pack">+ Package</button></div>
+    ${pk.length ? `<div class="cg-packgrid">${pk.map(packCard).join('')}</div>` : '<p class="pf-sec-empty">No packages yet.</p>'}
+    <h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--grey-text);margin:18px 0 8px">Sessions</h2>
+    ${ss.length ? `<div class="ad-panel" style="padding:0"><div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>Date</th><th>Time</th><th>Type</th><th>Package</th><th>Status</th></tr></thead><tbody>
+      ${ss.map((s) => { const t = lp(s.start_at), e = lp(s.end_at); return `<tr class="clik" data-sess="${s.id}"><td>${prettyDay(t.date)}</td><td>${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}–${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')}</td><td>${esc(s.title || '—')}</td><td>${s.pack ? `${s.pack.used}/${s.pack.total_sessions}` : '—'}</td><td>${st(s.status)}</td></tr>`; }).join('')}
+      </tbody></table></div></div>` : '<p class="pf-sec-empty">No sessions yet.</p>'}`;
+  $('#pf-new-sess').onclick = () => sessionForm({ crm_contact_id: pf.crmId, crm_name: cname });
+  $('#pf-new-pack').onclick = () => packForm(pf.crmId, () => pfSessions().catch(fail));
+  $('#pf-body').querySelectorAll('tr.clik').forEach((tr) => tr.onclick = () => { calData = { sessions: ss, blocks: [] }; openSession(tr.dataset.sess); });
 }
 
 function renderProfile(section) {

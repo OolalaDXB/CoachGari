@@ -495,3 +495,15 @@ begin
 end $$;
 revoke execute on function public.block_remove(uuid) from public, anon;
 grant  execute on function public.block_remove(uuid) to authenticated, service_role;
+
+-- ---------- 12. backfill existing confirmed/completed bookings ----------
+-- Idempotent (unique booking_id): materialise a coaching_session for bookings
+-- that predate the sync trigger, so the calendar reflects existing bookings.
+insert into public.coaching_sessions
+  (crm_contact_id, service_id, booking_id, title, start_at, end_at, session_timezone, delivery_mode, status, created_by)
+select b.crm_contact_id, b.service_id, b.id, s.title, b.start_at, b.end_at, b.session_timezone,
+       case when b.delivery_mode = 'online' then 'online' else 'in_person' end,
+       case when b.status = 'completed' then 'completed' else 'scheduled' end, 'system:booking'
+from public.bookings b left join public.services s on s.id = b.service_id
+where b.status in ('confirmed','completed') and b.crm_contact_id is not null
+on conflict (booking_id) do nothing;
