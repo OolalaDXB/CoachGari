@@ -23,6 +23,87 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-011 — Schedule as Gari's operating calendar; sessions + packages
+
+**Status: DB built, applied and proven — `CG011_TESTS ok=31 fail=0`; advisors
+carry no new ERROR (new functions are the same accepted SECURITY DEFINER
+pattern, each `search_path=''` + `has_permission()`). Frontend calendar shipped.
+Forward migration `20260911_cg011_calendar_sessions.sql`; nothing from
+CG-002/003/009/010 dropped or rewritten. Reports / Stripe payment-requests /
+renewals UI are deliberately CG-012 — only the schema hooks they need are here.**
+
+### Canonical model
+
+- **`coaching_sessions`** is the actual session occurrence — created from a
+  website booking or entered manually. Structured location
+  (name/address/lat/lng/meeting_url), `delivery_mode` online/in_person,
+  `status` scheduled/completed/cancelled/no_show, a `chargeable` flag, an
+  optional link to a `session_pack`, and a unique `booking_id` link.
+- **`session_packs`** is the purchased/agreed entitlement: `total_sessions`
+  (10 is a common configuration, **not** a schema constant), and a financial
+  **snapshot** (`price_amount`, `currency`, `payment_status`, `payment_source`,
+  `order_id`, `paid_at`) kept independent of session dates and of the
+  `agreement_date`. **Renewal is a NEW pack** (`renewed_from_pack_id`); the old
+  pack is never overwritten, so historical cycles ("sessions since last
+  payment") stay correct.
+
+### Consumption is authoritative, never date arithmetic
+
+`X / total` is counted from sessions **explicitly linked** to the pack:
+completed consumes one unit, scheduled and cancelled consume nothing, and a
+no-show consumes only when explicitly marked chargeable. A trigger forbids a
+session linking to a pack that belongs to a **different** client, so a
+wrong-client session can never consume another client's package.
+
+### One authoritative source of unavailability
+
+"Block time" is stored as an existing **`availability_exceptions`** row
+(`kind='closed'`, `source='calendar_block'`) — not a second concept. The public
+`available_slots` engine already suppresses rule slots overlapping an active
+closed exception, so a block immediately removes the period from public booking.
+Private block notes live in a new `private_note` column that **no public API
+returns** (proven).
+
+### Website bookings integrate without duplicates
+
+A confirmed/completed booking materialises exactly one `coaching_session`
+(dedup by the unique `booking_id`); cancel/expire cancels it. Existing bookings
+were backfilled idempotently. Manual/direct clients and sessions work with no
+website booking and no Stripe transaction.
+
+### Permissions
+
+Session and block mutations need **`coach:operations`**; pack **financial**
+fields need **`finance:manage`**, and price/paid are shown only with
+`finance:view` (the pack read RPC shapes the payload; financial columns are not
+column-granted). `platform:admin` alone grants **neither** — proven. All write
+paths are `SECURITY DEFINER` RPCs (`session_write`, `session_set_status`,
+`session_delete`, `pack_create`, `pack_set_payment`, `packs_for_contact`,
+`calendar_range`, `sessions_upcoming`, `sessions_list`, `block_create/update/
+remove`), `search_path=''`, permission-checked and audited.
+
+### Frontend
+
+Schedule → **Calendar** is a real Day (default) / Week / Month calendar
+(remembered per browser, first-run Day). Day/Week are hour-grid timelines;
+Month is an indicator grid; iPhone gets a day-selector + timeline for Week.
+Tapping empty offers Add session / Block time (prefilled). A session popup
+(bottom sheet) carries session/client/package/location with Maps + Waze (from
+coordinates or the encoded address) or the meeting link, and quick actions. A
+Sessions sub-tab lists/searches history; the client profile gains a Sessions &
+packages tab; Overview shows a prominent Next-session card. **iPhone/iPad
+responsive behaviour is verified manually** (see the E2E checklist) — the
+authenticated calendar can't be exercised by the sandbox's tooling.
+
+### Deferred to CG-012 (not built)
+
+Session recap / shareable client report, secure `/r/<token>` report page,
+Stripe payment-request flow (order → Checkout → webhook → pack paid), renewal
+UI. The schema already carries the fields these need, so CG-012 adds no churn.
+Stripe stays **test mode** (CHECK-LICENCE-001).
+
+---
+
 ## CG-010 — Consent gate for sensitive coaching data, CRM hardening
 
 **Status: DB layer built, applied and proven — `CG010_TESTS ok=48 fail=0`,
