@@ -101,6 +101,7 @@
           <div class="aani-line"><div><div class="k">Reference</div><div class="val" id="bank-ref"></div></div><button class="copy" data-copy="#bank-ref">Copy</button></div>
           <p class="note" id="bank-note"></p>
         </div>
+        <p class="muted" id="pay-none" hidden>No online payment option is available for this package right now. Please contact Coach Gari to arrange payment.</p>
       </div>
     </div>
   </div>
@@ -149,33 +150,42 @@ function render(d) {
   if (r.payment_status !== 'paid' && due && due > 0) {
     $('pay-card').hidden = false;
     $('r-due-amt').textContent = money(due, r.currency);
-    if (d.card_enabled) $('btn-card').hidden = false;
-    const aani = d.aani || {};
-    if (aani.enabled) {
+    // The payment options are exactly the AUTHORITATIVE list BEAU PH computed
+    // server-side (merchant config × country × currency × provider readiness).
+    // This page never decides eligibility itself.
+    const methods = Array.isArray(d.methods) ? d.methods : [];
+    const method = (k) => methods.find((m) => m && m.provider === k);
+    if (method('stripe')) $('btn-card').hidden = false;
+    const aani = method('aani');
+    if (aani) {
+      const ins = aani.instructions || {};
       $('aani-panel').hidden = false;
-      $('aani-num').textContent = aani.display_value || '';
+      $('aani-num').textContent = ins.display_value || '';
       $('aani-ref').textContent = aani.reference || d.pay_ref || '';
-      // amount is only shown for Aani when the pack is priced in Aani's currency (no conversion)
-      if ((aani.currency || 'AED') === r.currency) {
+      // the amount is quoted only in the request's own currency — never converted
+      const settle = aani.settlement_currency || 'AED';
+      if (settle === r.currency) {
         $('aani-amt').textContent = money(due, r.currency);
-        $('aani-note').textContent = aani.instructions || '';
+        $('aani-note').textContent = ins.instructions || '';
       } else {
         $('aani-amt-line').hidden = true;
-        $('aani-note').textContent = `Aani is settled in ${aani.currency || 'AED'}. Please confirm the exact ${aani.currency || 'AED'} amount with Coach Gari before paying. ` + (aani.instructions || '');
+        $('aani-note').textContent = `Aani is settled in ${settle}. Please confirm the exact ${settle} amount with Coach Gari before paying. ` + (ins.instructions || '');
       }
-      if (aani.qr_url) { $('aani-qr').src = aani.qr_url; $('aani-qr').hidden = false; }
+      if (ins.qr_url) { $('aani-qr').src = ins.qr_url; $('aani-qr').hidden = false; }
     }
-    const bank = d.bank || {};
-    if (bank.enabled) {
+    const bank = method('bank_transfer');
+    if (bank) {
+      const ins = bank.instructions || {};
       $('bank-panel').hidden = false;
-      $('bank-holder').textContent = bank.account_holder || '';
-      $('bank-iban').textContent = bank.iban || '';
-      $('bank-bic').textContent = bank.bic || '';
-      if (bank.bank_name) $('bank-name').textContent = bank.bank_name; else $('bank-name-line').hidden = true;
+      $('bank-holder').textContent = ins.account_holder || '';
+      $('bank-iban').textContent = ins.iban || '';
+      $('bank-bic').textContent = ins.bic || '';
+      if (ins.bank_name) $('bank-name').textContent = ins.bank_name; else $('bank-name-line').hidden = true;
       $('bank-amt').textContent = money(due, r.currency);   // the invoiced amount, in the pack's currency
       $('bank-ref').textContent = bank.reference || d.pay_ref || '';
-      $('bank-note').textContent = bank.instructions || '';
+      $('bank-note').textContent = ins.instructions || '';
     }
+    if (!methods.length) $('pay-none').hidden = false;
   }
   if (qs.get('paid') === '1') $('paid-banner').hidden = false;
   show('content');
@@ -186,7 +196,7 @@ $('btn-card').addEventListener('click', async () => {
   const { res, data } = await api('pay_card', {});
   if (res.ok && data.ok && data.url) { location.href = data.url; return; }
   $('btn-card').disabled = false; $('btn-card').textContent = 'Pay securely by card';
-  alert(data.error === 'live_mode_blocked' || data.error === 'payments_not_configured' ? 'Card payment is not available right now — please use Aani or contact Coach Gari.' : 'Could not start the card payment. Please try again or use Aani.');
+  alert(data.error === 'live_mode_blocked' || data.error === 'payments_not_configured' ? 'Card payment is not available right now — please use another option on this page or contact Coach Gari.' : (data.message ? `Could not start the card payment: ${data.message}` : 'Could not start the card payment. Please try again or use another option on this page.'));
 });
 document.querySelectorAll('.copy').forEach((b) => b.addEventListener('click', async () => {
   const el = document.querySelector(b.dataset.copy); const v = el ? el.textContent.trim() : '';

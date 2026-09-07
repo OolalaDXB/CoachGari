@@ -1,9 +1,15 @@
 /* =============================================================
-   CG-003 — stripe-webhook
-   Verifies the Stripe signature, enriches checkout.session.completed
-   with the Stripe fee (balance transaction), hands the event to
-   process_stripe_event (idempotent, transactional), then sends any
-   queued transactional emails if Resend is configured.
+   CG-003 — stripe-webhook  (on BEAU PH since the productisation step)
+   1. The Stripe ADAPTER verifies the signature (Stripe's own scheme, raw
+      body, 300 s tolerance) and refuses live-mode events for a test merchant.
+   2. The adapter enriches checkout.session.completed with fee / charge /
+      balance-transaction evidence.
+   3. The Coach Gari HOST ADAPTER (process_stripe_event) hands the verified
+      event to BEAU PH — evidence kept verbatim, request normalized — and
+      reconciles a normalized "paid" event into the authoritative ledger
+      exactly once (idempotent on the Stripe event id and on the BEAU PH
+      payment event).
+   4. Queued transactional emails are sent if Resend is configured.
 
    Secrets (Supabase secrets): STRIPE_WEBHOOK_SECRET (whsec_…),
    STRIPE_SECRET_KEY (test, for fee enrichment), RESEND_API_KEY
@@ -12,28 +18,21 @@
    charge.dispute.created, charge.dispute.updated, charge.dispute.closed.
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
-// Stripe's signing scheme (t + "." + raw body, HMAC-SHA256, v1, 300 s tolerance) — shared with the Node unit test.
-import { verifyStripeSignature } from "./signature.js";
+import { providers } from "../../../beau-ph/core/registry.ts";
+import { processStripeEvent } from "../../../beau-ph/host-adapters/coach-gari/adapter.ts";
 
 const LEAD_TO = Deno.env.get("LEAD_TO_EMAIL") ?? "letsgo@coachgari.com";
 const MAIL_FROM = Deno.env.get("MAIL_FROM") ?? "Coach Gari <yoursession@coachgari.com>";
+const env = (name: string) => Deno.env.get(name);
 const log = (event: string, data: Record<string, unknown> = {}) => console.log(JSON.stringify({ fn: "stripe-webhook", event, ...data }));
-
-async function enrichFee(key: string, paymentIntent: string) {
-  try {
-    const r = await fetch(`https://api.stripe.com/v1/payment_intents/${paymentIntent}?expand[]=latest_charge.balance_transaction`, { headers: { Authorization: `Bearer ${key}` } });
-    const pi = await r.json();
-    const ch = pi?.latest_charge; const bt = ch?.balance_transaction;
-    if (!ch?.id) return null;
-    return { charge_id: ch.id, balance_transaction_id: bt?.id ?? null, fee_amount: typeof bt?.fee === "number" ? bt.fee : null };
-  } catch { return null; }
-}
+const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 function esc(s: string) { return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!)); }
 function fmt(iso: string, tz: string) {
   try { return new Intl.DateTimeFormat("en-GB", { dateStyle: "full", timeStyle: "short", timeZone: tz }).format(new Date(iso)) + ` (${tz})`; } catch { return iso; }
 }
 
+// Host concern (Coach Gari emails) — untouched by the BEAU PH boundary.
 // deno-lint-ignore no-explicit-any
 async function sendQueuedEmails(supabase: any, orderId: string) {
   const key = Deno.env.get("RESEND_API_KEY");
@@ -70,41 +69,30 @@ async function sendQueuedEmails(supabase: any, orderId: string) {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method !== "POST") return new Response(JSON.stringify({ ok: false }), { status: 405, headers: { "Content-Type": "application/json" } });
-  const secret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
-  if (!secret) { log("not_configured"); return new Response(JSON.stringify({ ok: false, error: "webhook_not_configured" }), { status: 503, headers: { "Content-Type": "application/json" } }); }
-
+  if (req.method !== "POST") return reply(405, { ok: false });
   const raw = await req.text();                      // exact raw bytes — never re-serialised before verification
-  const sig = await verifyStripeSignature(req.headers.get("stripe-signature"), raw, secret);
-  if (!sig.ok) {
-    log("bad_signature", { reason: sig.reason }); return new Response(JSON.stringify({ ok: false, error: "bad_signature", reason: sig.reason }), { status: 400, headers: { "Content-Type": "application/json" } });
-  }
-  let event: Record<string, unknown>;
-  try { event = JSON.parse(raw); } catch { return new Response(JSON.stringify({ ok: false, error: "invalid_json" }), { status: 400, headers: { "Content-Type": "application/json" } }); }
-  if (event.livemode === true) { log("livemode_event_refused"); return new Response(JSON.stringify({ ok: false, error: "live_mode_blocked" }), { status: 400, headers: { "Content-Type": "application/json" } }); }
 
+  // 1. provider adapter: verification (only a verified event may reach BEAU PH)
+  const verified = await providers.stripe.verifyWebhook!({ headers: req.headers, rawBody: raw }, env);
+  if (!verified.ok) {
+    const notConfigured = verified.reason === "webhook_not_configured";
+    log(notConfigured ? "not_configured" : verified.reason.startsWith("bad_signature") ? "bad_signature" : verified.reason, { reason: verified.reason });
+    return reply(notConfigured ? 503 : 400, { ok: false, error: notConfigured ? "webhook_not_configured" : verified.reason.split(":")[0] });
+  }
+
+  // 2. provider adapter: evidence enrichment (fees) — never changes state
+  const event = await providers.stripe.enrich!(verified.payload, env);
+
+  // 3. host adapter → BEAU PH → authoritative ledger (idempotent; Stripe retries on 500)
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const { data, error } = await processStripeEvent(supabase, event);
+  if (error) { log("process_failed", { type: event.type, code: error.code }); return reply(500, { ok: false, error: "processing_failed" }); }
+  log("processed", { type: event.type, status: data?.status, duplicate: !!data?.duplicate, beau_ph: data?.beau_ph?.outcome ?? data?.beau_ph ?? null });
 
-  if (event.type === "checkout.session.completed") {
-    const key = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
-    // deno-lint-ignore no-explicit-any
-    const pi = (event as any).data?.object?.payment_intent;
-    if (key.startsWith("sk_test_") && typeof pi === "string") {
-      const enrich = await enrichFee(key, pi);
-      if (enrich) (event as Record<string, unknown>)._enrich = enrich;
-    }
-  }
-
-  const { data, error } = await supabase.rpc("process_stripe_event", { p_event: event });
-  if (error) {
-    log("process_failed", { type: event.type, code: error.code });
-    return new Response(JSON.stringify({ ok: false, error: "processing_failed" }), { status: 500, headers: { "Content-Type": "application/json" } }); // Stripe retries; processing is idempotent
-  }
-  log("processed", { type: event.type, status: data?.status, duplicate: !!data?.duplicate });
-
-  if (event.type === "checkout.session.completed" && data?.status === "processed") {
+  // 4. host concern: queued emails
+  if (event.type === "checkout.session.completed" && data?.status === "processed" && data?.order) {
     const { data: o } = await supabase.from("orders").select("id").eq("reference", data.order).single();
     if (o?.id) await sendQueuedEmails(supabase, o.id);
   }
-  return new Response(JSON.stringify({ ok: true, ...data }), { status: 200, headers: { "Content-Type": "application/json" } });
+  return reply(200, { ok: true, ...data });
 });

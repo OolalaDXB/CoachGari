@@ -23,6 +23,78 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## BEAU PH — BEAU Payment Hub: productisation decision (V0, embedded)
+
+**Status: built, applied and proven — `BEAU_PH_TESTS ok=43 fail=0`; the existing
+financial suites stay green on the new path (`CG003_TESTS ok=24 fail=0`,
+`CG012_TESTS ok=26 fail=0`); Node signature suite `ok=24 fail=0`. Advisors:
+0 ERROR. Edge Functions `report`, `checkout`, `stripe-webhook` redeployed on the
+adapter layer. Product docs live in `beau-ph/` (PRODUCT.md + docs/). No
+standalone dashboard/API/service — by decision.**
+
+### The decision
+Payment orchestration is no longer Coach-Gari-specific code. **BEAU PH** (BEAU
+Payment Hub) is the reusable multi-rail orchestration + reconciliation layer;
+Coach Gari is its first host and proof environment. Naming: *BEAU* = the wallet
+/ product ecosystem; *BEAU PH* = this hub; *BEAU Wallet adapter* = one future
+crypto rail inside the hub. The BEAU Wallet project itself is not renamed.
+
+### The boundary (enforced by construction)
+- **Core = Postgres schema `beau_ph`** (merchants, providers, merchant_methods,
+  payment_requests, payment_attempts, provider_events, payment_events,
+  reconciliations; method_matrix / eligible_methods, create_request,
+  attach_attempt, ingest_provider_event + normalize_stripe_event,
+  confirm_manual, cancel/expire, mark_reconciled). Not API-exposed; deny-all
+  RLS; owner/service_role only. **No reference to packs, bookings, CRM or
+  health data** — the host is known only as `external_reference`,
+  `public_reference`, `metadata`.
+- **Provider adapters** = `beau-ph/providers/*` (TS: I/O, verification,
+  readiness by secret *presence*) + SQL normalizers (evidence → state).
+- **Host adapter (Coach Gari)** = `public.cg_ph_*`, patched `attach_checkout`,
+  `process_stripe_event`, `payment_record_manual`, `report_view`, method
+  configuration RPCs — the only code naming both sides. Traceability from the
+  ledger to the hub is by plain uuid columns (`payments.ph_request_id`,
+  `ph_event_id`), no cross-schema FK, so extraction stays possible.
+- `public.payment_methods` moved into `beau_ph.merchant_methods` (data
+  preserved, nothing seeded); the Finance screen reads it via
+  `payment_methods_list` and shows the rails matrix via `payment_rails`.
+
+### Money truth unchanged
+Coach Gari's orders / payments / refunds / earnings / settlements / pack
+entitlement remain authoritative. BEAU PH emits normalized events; the host
+reconciles a `paid` event **exactly once** (`beau_ph.reconciliations` is the
+receipt). Stripe stays Oolala-collected (commission); Aani/bank stay direct
+to Gari (no earning row).
+
+### Rules that are now tested, not just written
+Server-side eligibility by merchant × country × currency × readiness (the
+`/r` page renders the list verbatim — no country logic in JS); disabled and
+not-configured rails omitted and unable to act; the amount is the host's and
+cannot be overridden (evidence of the refused claim kept); one live request
+per order + rail, one paid request per order, and a paid request cancels its
+sibling rails; manual rails never self-confirm — an authenticated
+`finance:manage` operator confirms with identity, amount, currency,
+reference recorded; a differing manual receipt explicitly supersedes a
+pending card intent (never converted); no secret-like key/value can be
+stored in the hub or reach a payer; BEAU Wallet and the four African rails
+cannot fake a payment while unconfigured; duplicates never duplicate the
+host payment.
+
+### Africa as a first-class requirement
+Paynow (ZW), M-PESA (KE), Ozow / PayShap (ZA) exist as adapter boundaries
+with their country/currency/secret declarations; activating one is a forward
+migration flipping `readiness` plus a real integration + tests — the client
+page needs no change. No per-country commerce model.
+
+### Not built, by decision
+Standalone dashboard / API / SDK / MCP / service (V2–V3 in
+`beau-ph/docs/ROADMAP.md`); BEAU Wallet implementation (future contract
+documented; separate approval). Known V0 gaps are listed honestly in the
+roadmap (provider-side cancel on supersede, legacy `no_request` path,
+`cash/manual/external` host-only sources).
+
+---
+
 ## CG-012 — Client session recap + payment requests (Stripe + Aani), renewal
 
 **Status: DB built, applied and proven — `CG012_TESTS ok=26 fail=0` (22 from

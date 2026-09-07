@@ -988,9 +988,19 @@ async function finance() {
     sb.from('partner_settlements').select('*').order('created_at', { ascending: false }),
     sb.rpc('finance_webhook_log').limit(30),
   ]); if (error) throw error;
-  const { data: pms } = await sb.from('payment_methods').select('*');
+  // Payment methods + rails live in BEAU PH (BEAU Payment Hub); the Finance screen reads them through host RPCs.
+  const [{ data: pms }, { data: rails }] = await Promise.all([sb.rpc('payment_methods_list'), sb.rpc('payment_rails')]);
   const aani = (pms || []).find((m) => m.method === 'aani');
   const bank = (pms || []).find((m) => m.method === 'bank_transfer');
+  const READY = { available: 'Available', not_configured: 'Not onboarded', placeholder: 'Coming soon' };
+  const railsPanel = `<div class="ad-panel"><h2>Payment rails — BEAU Payment Hub</h2>
+      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Every rail BEAU PH knows, whether it is onboarded, and whether it is enabled for Coach Gari. What a given client is actually offered is decided server-side per country, currency and provider readiness — never in a page. Card payments stay in Stripe <b>test mode</b> (CHECK-LICENCE-001).</p>
+      ${table(['Rail', 'Type', 'Confirmed by', 'Readiness', 'Countries', 'Currencies', 'For Coach Gari'], (rails || []).map((r) => `<tr>
+        <td><b>${esc(r.display_name)}</b><br><span class="ad-muted" style="font-size:12px">${esc(r.notes || '')}</span></td>
+        <td>${esc(r.kind)}</td><td>${esc(String(r.confirmation || '').replace('_', ' '))}</td>
+        <td>${st(r.readiness)}<div class="msg">${esc(READY[r.readiness] || r.readiness)}</div></td>
+        <td>${esc((r.countries || ['any']).join(', '))}</td><td>${esc((r.currencies || ['any']).join(', '))}</td>
+        <td>${r.readiness === 'available' ? st(r.enabled ? 'enabled' : 'disabled') : '—'}</td></tr>`), 'No rails registered.')}</div>`;
   const open = orders.filter((o) => o.earning_status === 'open');
   const sum = (arr, k) => arr.reduce((a, o) => a + (o[k] || 0), 0);
   const today = new Date(); const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
@@ -1002,6 +1012,7 @@ async function finance() {
       <div class="ad-kpi"><b>${money(sum(orders, 'oolala_commission'))}</b><span>Oolala commission (${CONFIG.COMMISSION_RATE})</span></div>
       <div class="ad-kpi"><b>${money(sum(open, 'gari_payable'))}</b><span>Payable to Gari — not yet settled</span></div>
     </div>
+    ${railsPanel}
     <div class="ad-panel"><h2>Payment methods — Aani</h2>
       <p class="ad-muted" style="font-size:13px;margin:0 0 12px">The UAE instant-payment (Aani) details shown on client recap/payment pages. Aani is settled manually: a client paying by Aani never marks anything paid — an operator records the received payment under a package. ${manage ? '' : 'View only — editing needs finance:manage.'}</p>
       <form id="aani-form" class="ad-form" ${manage ? '' : 'style="pointer-events:none;opacity:.7"'}>

@@ -1,8 +1,8 @@
 /* CG-003 — Stripe webhook signature verification, offline unit test (CI).
    Exercises the exact module the Edge Function imports
-   (supabase/functions/stripe-webhook/signature.js) with a dummy secret.
+   (beau-ph/providers/stripe/signature.js) with a dummy secret.
    Exit code 1 on any failure. No network, no secrets. */
-import { verifyStripeSignature, signForTest, hmacHex, parseHeader } from '../supabase/functions/stripe-webhook/signature.js';
+import { verifyStripeSignature, signForTest, hmacHex, parseHeader } from '../beau-ph/providers/stripe/signature.js';
 
 const SECRET = 'whsec_unit_test_secret_do_not_use';
 const OTHER = 'whsec_another_secret';
