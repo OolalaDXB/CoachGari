@@ -125,6 +125,28 @@ table.ad-table{width:100%;border-collapse:collapse;font-size:14px;}
 .pf-kv{display:grid;grid-template-columns:150px 1fr;gap:6px 14px;font-size:14px;}
 .pf-kv dt{color:var(--grey-text);font-weight:600;}
 .pf-kv dd{margin:0;word-break:break-word;}
+/* profile overview — tappable contact + grouped fields */
+.pf-contact{display:grid;gap:10px;margin-bottom:16px;}
+.pf-crow{border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;}
+.pf-crow-main{min-width:0;}
+.pf-crow-k{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--grey-text);}
+.pf-crow-v{display:block;margin-top:2px;font-size:16px;font-weight:700;letter-spacing:-.01em;color:var(--black);text-decoration:none;word-break:break-word;}
+.pf-crow-v:hover{color:var(--accent);}
+.pf-cacts{display:flex;gap:6px;flex-wrap:wrap;}
+.pf-cbtn{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;font-weight:700;border:1px solid var(--line);border-radius:999px;padding:7px 12px;color:var(--black);text-decoration:none;cursor:pointer;background:#fff;}
+.pf-cbtn:hover{background:var(--grey-bg);}
+.pf-cbtn svg{flex:0 0 auto;}
+.pf-cbtn.call{color:var(--accent-dark);border-color:var(--accent-tint);background:var(--accent-pale);}
+.pf-cbtn.wa{color:#0a7d3c;border-color:#c3e8d1;background:#eefaf1;}
+.pf-groups{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.pf-group{border:1px solid var(--line);border-radius:14px;padding:12px 15px;}
+.pf-group-t{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:6px;}
+.pf-gitem{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px solid var(--line);}
+.pf-gitem:first-child{border-top:0;}
+.pf-gitem .k{font-size:13px;color:var(--grey-text);flex:0 0 auto;}
+.pf-gitem .v{font-size:13.5px;font-weight:600;color:var(--black);text-align:right;word-break:break-word;}
+.pf-gitem .v.muted{color:#aeb2ba;font-weight:500;}
+@media(max-width:760px){.pf-groups{grid-template-columns:1fr;}.pf-crow{align-items:flex-start;}.pf-cacts{width:100%;}.pf-cbtn{flex:1;justify-content:center;}}
 details.pf-tech{margin-top:14px;border-top:1px solid var(--line);padding-top:10px;}
 details.pf-tech summary{cursor:pointer;font-size:12.5px;font-weight:700;color:var(--grey-text);}
 .ad-table tbody tr.clik{cursor:pointer;}

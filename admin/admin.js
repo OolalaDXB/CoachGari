@@ -1204,23 +1204,38 @@ function renderProfileBody(key) {
 }
 
 /* ---- profile sections ---- */
+const ICO = {
+  call: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5 9 4l1 3.5-1.8 1.4a12 12 0 0 0 5.4 5.4L15 12.5 18.5 14l.5 2.5c0 1-.9 1.9-2 1.8A15 15 0 0 1 4.7 5C4.6 3.9 5.5 3 6.5 3.5Z"/></svg>',
+  wa: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm5.5 14.2c-.2.6-1.2 1.2-1.7 1.2-.5.1-1 .2-3.2-.7-2.7-1.1-4.4-3.9-4.5-4-.1-.2-1.1-1.4-1.1-2.7 0-1.3.7-1.9.9-2.2.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.5l.8 2c.1.2.1.4 0 .5l-.4.6c-.2.2-.3.4-.1.7.2.3.9 1.4 1.9 2 .9.6 1.3.7 1.5.6.2-.1.5-.6.7-.9.2-.2.3-.2.6-.1l1.9.9c.2.1.4.2.5.3.1.3.1.7-.1 1.1Z"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M15 5.5A2.5 2.5 0 0 0 12.5 3h-6A2.5 2.5 0 0 0 4 5.5v8"/></svg>',
+};
 async function pfOverview() {
   const c = pf.contact;
-  const kv = [
-    ['Status', c.status], ['City', c.city], ['Country', c.country],
-    ['Email', c.email], ['Phone / WhatsApp', c.phone],
-    ['Preferred timezone', c.preferred_timezone], ['Preferred language', c.preferred_language],
-    ['Height', c.height_cm != null ? c.height_cm + ' cm' : null],
-    ['Goals', c.goals],
-    ['First seen', fmt(c.first_seen_at, 'Asia/Dubai', { dateStyle: 'medium' })],
-    ['Last activity', fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })],
+  const tel = c.phone ? 'tel:' + c.phone.replace(/[^\d+]/g, '') : null;
+  const groups = [
+    ['Location', [['City', c.city], ['Country', c.country]]],
+    ['Preferences', [['Timezone', c.preferred_timezone], ['Language', c.preferred_language]]],
+    ['Coaching', [['Height', c.height_cm != null ? c.height_cm + ' cm' : null], ['Goals', c.goals]]],
+    ['Activity', [['Status', c.status], ['First seen', fmt(c.first_seen_at, 'Asia/Dubai', { dateStyle: 'medium' })], ['Last activity', fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })]]],
   ];
+  const gitem = (k, v) => `<div class="pf-gitem"><span class="k">${esc(k)}</span><span class="v ${v ? '' : 'muted'}">${v ? esc(v) : '—'}</span></div>`;
   const canMerge = c.needs_review && has('client_profile:manage');
   $('#pf-body').innerHTML = `
     ${c.needs_review ? `<div class="ad-note"><p style="margin:0 0 8px">This person was auto-created from an ambiguous match (a shared email or phone) and is <b>flagged for review</b>. If it is the same person as an existing contact, you can merge this record into that one.</p>
       ${canMerge ? `<div id="pf-merge"><button class="btn btn-line btn-xs" id="pf-merge-open">Merge into another contact…</button></div>` : ''}</div>` : ''}
-    <dl class="pf-kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v ? esc(v) : '—'}</dd>`).join('')}</dl>
+    <div class="pf-contact">
+      ${c.phone ? `<div class="pf-crow"><div class="pf-crow-main"><div class="pf-crow-k">Phone / WhatsApp</div><a class="pf-crow-v" href="${tel}">${esc(c.phone)}</a></div>
+        <div class="pf-cacts"><a class="pf-cbtn call" href="${tel}">${ICO.call} Call</a><a class="pf-cbtn wa" href="${waHref(c.phone)}" target="_blank" rel="noopener">${ICO.wa} WhatsApp</a><button class="pf-cbtn" data-copy="${esc(c.phone)}">${ICO.copy} Copy</button></div></div>` : ''}
+      ${c.email ? `<div class="pf-crow"><div class="pf-crow-main"><div class="pf-crow-k">Email</div><a class="pf-crow-v" href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>
+        <div class="pf-cacts"><a class="pf-cbtn call" href="mailto:${esc(c.email)}">${ICO.mail} Email</a><button class="pf-cbtn" data-copy="${esc(c.email)}">${ICO.copy} Copy</button></div></div>` : ''}
+      ${(!c.phone && !c.email) ? '<p class="pf-sec-empty">No phone or email on file.</p>' : ''}
+    </div>
+    <div class="pf-groups">
+      ${groups.map(([t, items]) => `<div class="pf-group"><div class="pf-group-t">${esc(t)}</div><div class="pf-glist">${items.map(([k, v]) => gitem(k, v)).join('')}</div></div>`).join('')}
+    </div>
     <details class="pf-tech"><summary>Technical</summary><dl class="pf-kv" style="margin-top:10px"><dt>CRM id</dt><dd>${esc(c.id)}</dd><dt>Created by</dt><dd>${esc(c.created_by || '—')}</dd><dt>Updated by</dt><dd>${esc(c.updated_by || '—')}</dd></dl></details>`;
+  $('#pf-body').querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied'); } catch {} });
   if (canMerge) $('#pf-merge-open').onclick = () => pfMergePicker(c);
 }
 
