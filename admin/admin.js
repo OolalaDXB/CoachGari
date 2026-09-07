@@ -1178,13 +1178,13 @@ function renderProfile(section) {
   const host = $('#profile');
   host.innerHTML = `<div class="sheet">
     <div class="pf-head">
+      <button class="pf-close" id="pf-x" aria-label="Close">×</button>
       <div class="pf-avatar">${esc(initials(pfName()))}</div>
       <div class="pf-id"><h2>${esc(pfName())}</h2><div class="pf-meta">${meta.map((m) => `<span>${typeof m === 'string' && m.startsWith('<span') ? m : esc(m)}</span>`).join('')}</div></div>
       <div class="pf-actions">
         ${ph ? `<a class="btn btn-line btn-xs" href="${waHref(ph)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
         ${em ? `<a class="btn btn-line btn-xs" href="mailto:${esc(em)}">Email</a>` : ''}
         ${(c && has('client_profile:manage')) ? '<button class="btn btn-line btn-xs" id="pf-edit">Edit</button>' : ''}
-        <button class="pf-close" id="pf-x" aria-label="Close">×</button>
       </div>
     </div>
     ${secs.length ? `<div class="pf-tabs">${secs.map(([k, l]) => `<a data-pf="${k}" class="${k === pf.section ? 'on' : ''}">${l}</a>`).join('')}</div>` : ''}
