@@ -34,10 +34,13 @@
   .paybtn:disabled{opacity:.5;cursor:not-allowed;}
   .aani{border:1px solid var(--line);border-radius:14px;padding:16px;}
   .aani-h{font-weight:800;font-size:15px;margin-bottom:2px;}
-  .aani-line{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line);}
+  .aani-line{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line);}
   .aani-line:first-of-type{border-top:0;}
+  .aani-line > div{min-width:0;flex:1;}
   .aani-line .k{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--grey);}
-  .aani-line .val{font-size:16px;font-weight:700;}
+  .aani-line .val{font-size:16px;font-weight:700;word-break:break-word;overflow-wrap:anywhere;}
+  .aani-line .copy{flex:0 0 auto;}
+  @media(max-width:460px){ .aani-line{flex-wrap:wrap;} .aani-line .copy{width:100%;} }
   .copy{font:inherit;font-size:12.5px;font-weight:700;border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:#fff;cursor:pointer;color:var(--ink);}
   .copy:hover{background:var(--bg);}
   .note{font-size:13px;color:var(--grey);margin-top:10px;line-height:1.5;}
@@ -81,11 +84,22 @@
         <div class="aani" id="aani-panel" hidden>
           <div class="aani-h">Pay instantly with Aani</div>
           <p class="muted" style="font-size:13px;margin:2px 0 8px">Open your UAE bank app, choose Aani, and pay the number below.</p>
-          <div class="aani-line"><div><div class="k">Aani number</div><div class="val" id="aani-num"></div></div><button class="copy" data-c="num">Copy</button></div>
-          <div class="aani-line" id="aani-amt-line"><div><div class="k">Amount</div><div class="val" id="aani-amt"></div></div><button class="copy" data-c="amt">Copy</button></div>
-          <div class="aani-line"><div><div class="k">Reference</div><div class="val" id="aani-ref"></div></div><button class="copy" data-c="ref">Copy</button></div>
+          <div class="aani-line"><div><div class="k">Aani number</div><div class="val" id="aani-num"></div></div><button class="copy" data-copy="#aani-num">Copy</button></div>
+          <div class="aani-line" id="aani-amt-line"><div><div class="k">Amount</div><div class="val" id="aani-amt"></div></div><button class="copy" data-copy="#aani-amt">Copy</button></div>
+          <div class="aani-line"><div><div class="k">Reference</div><div class="val" id="aani-ref"></div></div><button class="copy" data-copy="#aani-ref">Copy</button></div>
           <img class="qr" id="aani-qr" hidden alt="Aani QR">
           <p class="note" id="aani-note"></p>
+        </div>
+        <div class="aani" id="bank-panel" hidden>
+          <div class="aani-h">Pay by bank transfer</div>
+          <p class="muted" style="font-size:13px;margin:2px 0 8px">Transfer to the account below and include the reference so we can match your payment.</p>
+          <div class="aani-line"><div><div class="k">Account holder</div><div class="val" id="bank-holder"></div></div><button class="copy" data-copy="#bank-holder">Copy</button></div>
+          <div class="aani-line"><div><div class="k">IBAN</div><div class="val" id="bank-iban"></div></div><button class="copy" data-copy="#bank-iban">Copy</button></div>
+          <div class="aani-line"><div><div class="k">BIC / SWIFT</div><div class="val" id="bank-bic"></div></div><button class="copy" data-copy="#bank-bic">Copy</button></div>
+          <div class="aani-line" id="bank-name-line"><div><div class="k">Bank</div><div class="val" id="bank-name"></div></div><button class="copy" data-copy="#bank-name">Copy</button></div>
+          <div class="aani-line"><div><div class="k">Amount</div><div class="val" id="bank-amt"></div></div><button class="copy" data-copy="#bank-amt">Copy</button></div>
+          <div class="aani-line"><div><div class="k">Reference</div><div class="val" id="bank-ref"></div></div><button class="copy" data-copy="#bank-ref">Copy</button></div>
+          <p class="note" id="bank-note"></p>
         </div>
       </div>
     </div>
@@ -111,8 +125,6 @@ async function api(action, extra) {
   let data = {}; try { data = await res.json(); } catch {}
   return { res, data };
 }
-
-let AANI = { num: '', amt: '', ref: '' };
 
 function render(d) {
   const r = d.recap;
@@ -141,20 +153,28 @@ function render(d) {
     const aani = d.aani || {};
     if (aani.enabled) {
       $('aani-panel').hidden = false;
-      AANI.num = aani.display_value || '';
-      AANI.ref = aani.reference || d.pay_ref || '';
-      $('aani-num').textContent = AANI.num;
-      $('aani-ref').textContent = AANI.ref;
+      $('aani-num').textContent = aani.display_value || '';
+      $('aani-ref').textContent = aani.reference || d.pay_ref || '';
       // amount is only shown for Aani when the pack is priced in Aani's currency (no conversion)
       if ((aani.currency || 'AED') === r.currency) {
-        AANI.amt = money(due, r.currency);
-        $('aani-amt').textContent = AANI.amt;
+        $('aani-amt').textContent = money(due, r.currency);
         $('aani-note').textContent = aani.instructions || '';
       } else {
         $('aani-amt-line').hidden = true;
         $('aani-note').textContent = `Aani is settled in ${aani.currency || 'AED'}. Please confirm the exact ${aani.currency || 'AED'} amount with Coach Gari before paying. ` + (aani.instructions || '');
       }
       if (aani.qr_url) { $('aani-qr').src = aani.qr_url; $('aani-qr').hidden = false; }
+    }
+    const bank = d.bank || {};
+    if (bank.enabled) {
+      $('bank-panel').hidden = false;
+      $('bank-holder').textContent = bank.account_holder || '';
+      $('bank-iban').textContent = bank.iban || '';
+      $('bank-bic').textContent = bank.bic || '';
+      if (bank.bank_name) $('bank-name').textContent = bank.bank_name; else $('bank-name-line').hidden = true;
+      $('bank-amt').textContent = money(due, r.currency);   // the invoiced amount, in the pack's currency
+      $('bank-ref').textContent = bank.reference || d.pay_ref || '';
+      $('bank-note').textContent = bank.instructions || '';
     }
   }
   if (qs.get('paid') === '1') $('paid-banner').hidden = false;
@@ -169,7 +189,8 @@ $('btn-card').addEventListener('click', async () => {
   alert(data.error === 'live_mode_blocked' || data.error === 'payments_not_configured' ? 'Card payment is not available right now — please use Aani or contact Coach Gari.' : 'Could not start the card payment. Please try again or use Aani.');
 });
 document.querySelectorAll('.copy').forEach((b) => b.addEventListener('click', async () => {
-  const v = AANI[b.dataset.c]; if (!v) return;
+  const el = document.querySelector(b.dataset.copy); const v = el ? el.textContent.trim() : '';
+  if (!v) return;
   try { await navigator.clipboard.writeText(v); b.textContent = 'Copied'; setTimeout(() => (b.textContent = 'Copy'), 1500); } catch {}
 }));
 

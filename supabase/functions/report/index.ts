@@ -56,7 +56,7 @@ Deno.serve(async (req: Request) => {
     log("viewed", { status: "ok" });
     // whether card payment can be offered at all (Stripe configured in test mode)
     const cardEnabled = (Deno.env.get("STRIPE_SECRET_KEY") ?? "").startsWith("sk_test_");
-    return json(200, { ok: true, recap: data.recap, aani: data.aani, pay_ref: data.pay_ref, card_enabled: cardEnabled }, origin, allowed);
+    return json(200, { ok: true, recap: data.recap, aani: data.aani, bank: data.bank, pay_ref: data.pay_ref, card_enabled: cardEnabled }, origin, allowed);
   }
 
   if (body.action === "pay_card") {

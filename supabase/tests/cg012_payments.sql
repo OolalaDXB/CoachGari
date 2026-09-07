@@ -11,7 +11,7 @@
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
-  cA uuid; p1 uuid; p2 uuid; s1 uuid; oref text; tok text; j jsonb; jh jsonb; n int; ordid uuid;
+  cA uuid; p1 uuid; p2 uuid; p3 uuid; s1 uuid; oref text; tok text; j jsonb; jh jsonb; n int; ordid uuid; pref text;
 begin
   insert into public.app_users (email, display_name, party) values
     ('fin@test.local','Fin','gari'),('coachonly@test.local','Coach','gari'),('padmin@test.local','PA','studio');
@@ -112,6 +112,27 @@ begin
      and (select payment_status from public.session_packs where id=p1) = 'paid'
      and (select total_sessions from public.session_packs where id=p1) = 10 then ok:=ok+1; else fail:=fail+1; log:=log||' [renew]'; end if;
   if jsonb_array_length(jh) >= 1 and (jh->0->>'source') = 'stripe' then ok:=ok+1; else fail:=fail+1; log:=log||' [history]'; end if;
+
+  /* ---- 5b. bank transfer option + human public reference (CG-####) ---- */
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '10-session pack #bank', 10, 312000, 'AED', 'unpaid', 'seed') returning id into p3;
+  select public_ref into pref from public.session_packs where id = p3;
+  if pref ~ '^CG-[0-9]{4,}$' then ok:=ok+1; else fail:=fail+1; log:=log||' [public_ref '||coalesce(pref,'null')||']'; end if;
+  perform set_config('request.jwt.claims','{"role":"authenticated","email":"fin@test.local"}',true);
+  execute 'set local role authenticated';
+  perform public.payment_method_set(jsonb_build_object('method','bank_transfer','enabled',true,'account_holder','Coach Gari FZ-LLC','iban','AE070331234567890123456','bic','EBILAEAD','bank_name','Emirates NBD','currency','AED'));
+  j := public.report_issue_link(p3); tok := j->>'token';
+  execute 'reset role';
+  j := public.report_view(tok);
+  if (j->'bank'->>'enabled')::boolean and (j->'bank'->>'iban')='AE070331234567890123456' and (j->'bank'->>'reference')=pref and (j->>'pay_ref')=pref then ok:=ok+1; else fail:=fail+1; log:=log||' [report_view bank]'; end if;
+  perform set_config('request.jwt.claims','{"role":"authenticated","email":"fin@test.local"}',true);
+  execute 'set local role authenticated';
+  perform public.payment_record_manual(p3, 312000, 'AED', 'bank_transfer', pref);
+  execute 'reset role';
+  if (select payment_status from public.session_packs where id=p3)='paid'
+     and (select payment_source from public.session_packs where id=p3)='bank_transfer' then ok:=ok+1; else fail:=fail+1; log:=log||' [bank pack paid]'; end if;
+  select id into ordid from public.orders where session_pack_id=p3 order by created_at desc limit 1;
+  if not exists (select 1 from public.partner_earnings where order_id=ordid) then ok:=ok+1; else fail:=fail+1; log:=log||' [bank earning]'; end if;
 
   /* ---- 6. permissions ---- */
   perform set_config('request.jwt.claims','{"role":"authenticated","email":"coachonly@test.local"}',true);

@@ -988,7 +988,9 @@ async function finance() {
     sb.from('partner_settlements').select('*').order('created_at', { ascending: false }),
     sb.rpc('finance_webhook_log').limit(30),
   ]); if (error) throw error;
-  const { data: aani } = await sb.from('payment_methods').select('*').eq('method', 'aani').maybeSingle();
+  const { data: pms } = await sb.from('payment_methods').select('*');
+  const aani = (pms || []).find((m) => m.method === 'aani');
+  const bank = (pms || []).find((m) => m.method === 'bank_transfer');
   const open = orders.filter((o) => o.earning_status === 'open');
   const sum = (arr, k) => arr.reduce((a, o) => a + (o[k] || 0), 0);
   const today = new Date(); const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
@@ -1012,6 +1014,20 @@ async function finance() {
           <label>Display value <input name="display_value" value="${esc(aani?.display_value || '')}" placeholder="+971 5X XXX XXXX"></label></div>
         <label>Instructions <input name="instructions" value="${esc(aani?.instructions || '')}" placeholder="Shown to the client on the payment page"></label>
         ${manage ? '<div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save Aani settings</button></div>' : ''}
+      </form>
+      <h2 style="margin-top:20px">Payment methods — Bank transfer</h2>
+      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Account details shown on client recap/payment pages for a bank transfer. Never shown on the public marketing site. Settled manually: record the received payment under the package. ${manage ? '' : 'View only — editing needs finance:manage.'}</p>
+      <form id="bank-form" class="ad-form" ${manage ? '' : 'style="pointer-events:none;opacity:.7"'}>
+        <div class="row">
+          <label style="flex-direction:row;align-items:center;gap:8px;font-weight:700"><input type="checkbox" name="enabled" ${bank?.enabled ? 'checked' : ''}> Enabled</label>
+          <label>Currency <input name="currency" value="${esc(bank?.currency || 'AED')}" maxlength="3"></label></div>
+        <label>Account holder <input name="account_holder" value="${esc(bank?.account_holder || '')}" placeholder="e.g. Coach Gari FZ-LLC"></label>
+        <div class="row">
+          <label>IBAN <input name="iban" value="${esc(bank?.iban || '')}" placeholder="AE.. / .."></label>
+          <label>BIC / SWIFT <input name="bic" value="${esc(bank?.bic || '')}" placeholder="e.g. EBILAEAD"></label></div>
+        <label>Bank name <input name="bank_name" value="${esc(bank?.bank_name || '')}" placeholder="e.g. Emirates NBD"></label>
+        <label>Instructions <input name="instructions" value="${esc(bank?.instructions || '')}" placeholder="Shown to the client on the payment page"></label>
+        ${manage ? '<div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save bank transfer settings</button></div>' : ''}
       </form></div>
     <div class="ad-panel"><h2>Settlements</h2>
       ${table(['Ref', 'Period', 'Items', 'Gross', 'Fees', 'Refunds/CB', 'Net', 'Commission', 'Payable', 'Status', ''], settlements.map((s) => `<tr>
@@ -1050,6 +1066,13 @@ async function finance() {
       proxy_type: f.get('proxy_type'), proxy_value: f.get('proxy_value'), display_value: f.get('display_value'),
       currency: (f.get('currency') || 'AED').toUpperCase(), instructions: f.get('instructions') } });
     if (error) return fail(error); toast('Aani settings saved'); finance().catch(fail);
+  });
+  $('#bank-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const { error } = await sb.rpc('payment_method_set', { p: { method: 'bank_transfer', enabled: !!f.get('enabled'),
+      account_holder: f.get('account_holder'), iban: f.get('iban'), bic: f.get('bic'), bank_name: f.get('bank_name'),
+      currency: (f.get('currency') || 'AED').toUpperCase(), instructions: f.get('instructions') } });
+    if (error) return fail(error); toast('Bank transfer settings saved'); finance().catch(fail);
   });
 }
 
@@ -1193,7 +1216,7 @@ async function pfSessions() {
 function pfPackActions(p) {
   const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
   const money2 = (mi, cur) => mi == null ? '—' : money(mi, cur);
-  sheet.innerHTML = `<div class="cg-sheet-h"><b>${esc(p.title)}</b><button class="pf-close" data-x>×</button></div>
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>${esc(p.title)}</b>${p.public_ref ? `<span class="ad-muted" style="font-size:12px;font-weight:600">${esc(p.public_ref)}</span>` : ''}<button class="pf-close" data-x>×</button></div>
     <div class="cg-sheet-b">
       <div class="cg-pack"><div class="cg-pack-x">${p.used} / ${p.total_sessions}</div><div class="cg-pack-r">${p.remaining} remaining</div></div>
       ${'price_amount' in p ? `<p class="ad-muted" style="font-size:13px;margin:0 0 8px">${money2(p.price_amount, p.currency)} · ${esc(p.payment_status)}</p>` : ''}
@@ -1226,7 +1249,8 @@ async function pfShareRecap(p) {
   const url = `${location.origin}/r/${data.token}`;
   const first = (pf.contact?.display_name || '').split(' ')[0] || '';
   const due = ('price_amount' in p && p.payment_status !== 'paid' && p.price_amount) ? `\nAmount due: ${money(p.price_amount, p.currency)}` : '';
-  const msg = `Hi ${first},\n\nHere is your Coach Gari session recap:\n${url}\n\n${p.title}\n${p.used}/${p.total_sessions} completed${due}\n\nYou can pay by card or instantly with Aani on the link above.\n\nThanks,\nGari`;
+  const refLine = p.public_ref ? `\nPayment reference: ${p.public_ref}` : '';
+  const msg = `Hi ${first},\n\nHere is your Coach Gari session recap:\n${url}\n\n${p.title}\n${p.used}/${p.total_sessions} completed${due}${refLine}\n\nYou can pay by card, Aani or bank transfer on the link above.\n\nThanks,\nGari`;
   const ph = pf.contact?.phone; const em = pf.contact?.email;
   out.innerHTML = `
     <label style="font-size:12px;font-weight:700;color:var(--grey-text);display:block;margin-bottom:4px">Message (edit before sending)</label>
