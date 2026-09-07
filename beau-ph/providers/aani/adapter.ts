@@ -16,6 +16,7 @@ export const aani: ProviderAdapter = {
   capabilities(): ProviderCapabilities {
     return {
       key: "aani", displayName: "Aani (UAE instant payment)", kind: "manual", confirmation: "operator", readiness: "available",
+      capabilities: [{ capability: "manual_instructions", readiness: "available", confirmation: "operator", platforms: null, initiatedBy: "any", handoff: false, notes: "Static Aani instructions; operator confirms receipt." }],
       supports: { checkout: false, instructions: true, webhook: false, statusPoll: false, cancel: true, refundEvents: false },
       countries: ["AE"], currencies: ["AED"], secrets: [],
     };

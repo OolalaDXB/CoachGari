@@ -11,6 +11,12 @@
 - Consume BEAU PH from a second host (a Studio/Oolala product) through its own host adapter, proving the boundary. Candidates: Maisons, SILLON commercial flows. Not integrated now.
 - Close the V0 gaps listed below.
 
+## In-person acceptance track (parallel to the rail roadmap — see SOFTPOS.md)
+- **V0 (done):** capability model (`softpos · card_present · tap_to_pay` reserved), UAE PSP boundaries, provider-app handoff with operator-attested receipt from Coach Gari's "Collect in person" (session or package).
+- **V0.1 (owner):** onboard one PSP for real (Magnati / SwipeX or Network International / N-Genius One), enable it in Finance, run a first tap on a test package.
+- **V1:** PSP API integration where available (N-Genius / Magnati / Adyen APIs): `verifyWebhook` + `normalize_<psp>_event`, so a handoff receipt can be provider-verified after the fact and `card_present` (terminal) reconciles automatically.
+- **Native (separate approval):** a BEAU PH Merchant iOS app integrating Tap to Pay on iPhone through a supported PSP SDK — organisation Apple Developer account + `proximity-reader.payment.acceptance` entitlement, PSP-certified configuration, provider webhook/API verification, BEAU PH normalized reconciliation. Flips `tap_to_pay` from placeholder to available by forward migration; never from the PWA.
+
 ## V2 — extract as a standalone reusable service/package
 - Move schema `beau_ph` + adapters into their own deployable (own Postgres schema/database + a small service exposing the host contract), publish the TypeScript contracts as a package, replace the in-process definer calls with an authenticated API; hosts keep their adapters.
 
@@ -26,4 +32,5 @@
 4. **Deployment readiness is reported by the Edge**, not stored — correct (secrets never touch the DB) but means the Finance rails matrix cannot show "configured"; it shows product readiness + merchant enablement.
 5. **Customer country for bookings** is unknown (the booking flow captures no country) → merchant country applies. Packs use the CRM contact's country through a small text→ISO mapping (`public.cg_country_code`), which is host knowledge.
 6. **BEAU Wallet** remains a placeholder by decision; its future request contract is documented in the adapter file.
-7. **Edge bundles** are deployed from the repo sources through the Management API; code is identical to git, header comments were condensed in the upload. A CLI deploy (`supabase functions deploy`) from the repo produces the same graph.
+7. **Edge bundles** are deployed from the repo sources through the Management API; a CLI deploy (`supabase functions deploy`) from the repo produces the same graph.
+8. **SoftPOS V0 is operator-attested, not provider-verified.** The PSP receipt reference is mandatory and auditable against the PSP statement, but BEAU PH cannot confirm it with the PSP until an API integration exists (V1). A fake reference would be caught at settlement reconciliation, not at confirmation time.

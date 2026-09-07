@@ -13,6 +13,16 @@ Readiness is a **product** property (is the adapter implemented and onboardable?
 | PayShap (South Africa) | `payshap` | online | provider event | **not_configured** | ZA | ZAR | `PAYSHAP_SPONSOR_CLIENT_ID`, `PAYSHAP_SPONSOR_CLIENT_SECRET` | adapter boundary only — refuses to act | choose a sponsoring bank/PSP exposing PayShap request-to-pay; then V1 integration |
 | BEAU Wallet | `beau_wallet` | crypto | unavailable | **placeholder** | any | any | none | visible as "coming soon"; cannot create or confirm; no static address; no client tx hash | separate approval before any implementation (see the future contract in `providers/beau-wallet/adapter.ts`) |
 
+## In-person / SoftPOS — UAE Tap to Pay on iPhone PSPs (see `SOFTPOS.md`)
+
+| Rail | Key | `softpos` (handoff, operator-attested) | `tap_to_pay` (native, ios_app) | `card_present` / `online_checkout` | Coach Gari today | Owner action |
+|---|---|---|---|---|---|---|
+| Network International (N-Genius) | `network_international` | **available** via the N-Genius One app | placeholder | not onboarded | not enabled | open a Network International merchant account, enable in Finance → In-person acceptance |
+| Magnati (SwipeX) | `magnati` | **available** via the SwipeX app | placeholder | not onboarded | not enabled | SwipeX digital onboarding, enable in Finance → In-person acceptance (recommended V0) |
+| Adyen | `adyen` | not available (SDK-only, no standalone app) | placeholder | not onboarded | — | only relevant for the native path |
+
+Capabilities are declared per provider (`beau_ph.provider_capabilities`); the Finance rails matrix shows them as chips. Eligibility for a capability adds **device/platform** and **initiator** to merchant × country × currency × readiness — `tap_to_pay` is offered on `ios_app` only, never from a browser/PWA; in-person capabilities are never offered on a customer page.
+
 What "refuses to act" means, proven by `supabase/tests/beau_ph_contract.sql`: `eligible_methods` omits the rail with an explicit reason; `create_request` raises; a fabricated provider event is stored as evidence with `outcome = rejected:provider_not_configured` / `rejected:provider_cannot_confirm` and never changes a request's state.
 
 ## Manual rails — the confirmation record

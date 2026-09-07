@@ -16,7 +16,9 @@ One generic contract for every rail. Not every provider implements every capabil
 | `enrich()` (= reconcile) | add provider evidence before normalization, never mutates state | ✔ (fee, charge, balance transaction) | – | – | – | – |
 | `instructionFields()` | public fields the merchant configures and the payer sees | – | ✔ | ✔ | – | – |
 
-Rules every adapter follows: amounts/currencies come from the BEAU PH request (i.e. the host), never from the payer; `runtime()` never returns a secret value; an adapter never marks anything paid — it produces verified events for the core.
+`capabilities()` also lists the provider's **capability specs** — `{capability, readiness, confirmation, platforms, initiatedBy, handoff}` — mirrored in `beau_ph.provider_capabilities`. The UAE Tap to Pay PSPs (`network_international`, `magnati`, `adyen`, built by `providers/_softpos.ts`) declare `softpos` (handoff, operator-attested; available for the two with a standalone app), `tap_to_pay` (placeholder, `ios_app` only, provider-event), `card_present` and `online_checkout` (not onboarded). `createPaymentRequest({capability:'softpos'})` returns handoff instructions; everything else is `unavailable`; `verifyWebhook` is refused until an API integration exists.
+
+Rules every adapter follows: amounts/currencies come from the BEAU PH request (i.e. the host), never from the payer; `runtime()` never returns a secret value; an adapter never marks anything paid — it produces verified events for the core; an adapter never touches card/PIN data or NFC — in-person acceptance is the PSP's certified app or SDK.
 
 ## B. SQL normalizer contract (per provider, in schema `beau_ph`)
 
@@ -50,7 +52,8 @@ Manual rails add: the host **authenticates and authorises the operator** and pas
 | `cg_ph_request_for_pack(pack, rail, runtime)` · `cg_ph_request_for_booking(ref, token, rail, runtime)` | pack/booking → order → request | Edge `report`, `checkout` (service role) |
 | `attach_checkout(order_ref, session, url, expires)` | CG-003 contract + BEAU PH attempt | Edge after Stripe |
 | `process_stripe_event(event)` | Stripe evidence → normalization → ledger once (legacy path only for orders that predate BEAU PH) | Edge `stripe-webhook` |
-| `payment_record_manual(pack, amount, currency, source, ref, paid_at)` | operator receipt → request → `confirm_manual` → ledger once; supersedes a differing pending intent | admin (finance:manage) |
+| `payment_record_manual(pack, amount, currency, source, ref, paid_at, capability, platform)` | operator receipt → request → `confirm_manual` → ledger once; supersedes a differing pending intent. Source may be a SoftPOS PSP (`magnati` / `network_international`) with capability `softpos` — the PSP receipt reference is mandatory | admin (finance:manage) |
+| `cg_ph_collect_options(pack, platform)` | what can be collected **in person** for this pack on this device (`eligible_capabilities(..., 'merchant')` filtered to in-person), plus amount due + public reference | admin (finance:manage) |
 | `report_view(token, runtime)` | recap + **authoritative eligible-method list** (public instructions only) | Edge `report` |
 | `payment_method_set` · `payment_methods_list` · `payment_rails` | merchant configuration and readiness matrix for the Finance screen | admin |
 

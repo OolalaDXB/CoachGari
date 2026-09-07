@@ -22,6 +22,10 @@ export const stripe: ProviderAdapter = {
   capabilities(): ProviderCapabilities {
     return {
       key: "stripe", displayName: "Card (Stripe)", kind: "online", confirmation: "provider_event", readiness: "available",
+      capabilities: [
+        { capability: "online_checkout", readiness: "available", confirmation: "provider_event", platforms: null, initiatedBy: "customer", handoff: false, notes: "Hosted Checkout, webhook-confirmed. TEST mode." },
+        { capability: "payment_link", readiness: "not_configured", confirmation: "provider_event", platforms: null, initiatedBy: "merchant", handoff: false, notes: "Stripe Payment Links — not implemented." },
+      ],
       supports: { checkout: true, instructions: false, webhook: true, statusPoll: true, cancel: true, refundEvents: true },
       countries: null, currencies: null,
       secrets: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],

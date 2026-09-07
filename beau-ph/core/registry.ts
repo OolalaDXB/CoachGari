@@ -16,9 +16,13 @@ import { mpesa } from "../providers/mpesa/adapter.ts";
 import { ozow } from "../providers/ozow/adapter.ts";
 import { payshap } from "../providers/payshap/adapter.ts";
 import { beauWallet } from "../providers/beau-wallet/adapter.ts";
+import { networkInternational } from "../providers/network-international/adapter.ts";
+import { magnati } from "../providers/magnati/adapter.ts";
+import { adyen } from "../providers/adyen/adapter.ts";
 
 export const providers: Record<ProviderKey, ProviderAdapter> = {
   stripe, aani, bank_transfer: bankTransfer, paynow, mpesa, ozow, payshap, beau_wallet: beauWallet,
+  network_international: networkInternational, magnati, adyen,
 };
 
 export const providerKeys = Object.keys(providers) as ProviderKey[];
@@ -55,6 +59,6 @@ export function readinessMatrix(env: EnvReader) {
   return providerKeys.map((key) => {
     const c = providers[key].capabilities(); const r = providers[key].runtime(env);
     return { provider: key, display_name: c.displayName, kind: c.kind, confirmation: c.confirmation, readiness: c.readiness,
-             countries: c.countries, currencies: c.currencies, secrets: c.secrets, runtime: r };
+             capabilities: c.capabilities, countries: c.countries, currencies: c.currencies, secrets: c.secrets, runtime: r };
   });
 }

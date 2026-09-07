@@ -6,6 +6,6 @@ import { notConfigured } from "../_boundary.ts";
 
 export const paynow = notConfigured({
   key: "paynow", displayName: "Paynow (Zimbabwe)", countries: ["ZW"], currencies: ["USD", "ZWG"],
-  secrets: ["PAYNOW_INTEGRATION_ID", "PAYNOW_INTEGRATION_KEY"],
+  secrets: ["PAYNOW_INTEGRATION_ID", "PAYNOW_INTEGRATION_KEY"], capabilities: ["online_checkout", "mobile_money"],
   note: "needs Paynow merchant onboarding (integration id + key) and the hash-verified result handler",
 });

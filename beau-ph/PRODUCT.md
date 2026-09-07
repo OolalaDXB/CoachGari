@@ -40,6 +40,11 @@ Coach Gari remains the first consuming application and the proof environment. It
 | Ozow (South Africa) | `ozow` | adapter boundary — not onboarded, cannot act |
 | PayShap (South Africa) | `payshap` | adapter boundary — not onboarded, cannot act |
 | BEAU Wallet | `beau_wallet` | placeholder — "coming soon", cannot act |
+| Network International (N-Genius) | `network_international` | in-person **SoftPOS handoff** available (N-Genius One app, operator-attested receipt); API / native Tap to Pay reserved |
+| Magnati (SwipeX) | `magnati` | in-person **SoftPOS handoff** available (SwipeX app, operator-attested receipt); API / native Tap to Pay reserved |
+| Adyen | `adyen` | SDK-only: no handoff; native Tap to Pay + Checkout reserved, not onboarded |
+
+**Capabilities, not just rails.** Every provider declares capabilities — `online_checkout · payment_link · manual_instructions · wallet · bank_transfer · mobile_money · softpos · card_present · tap_to_pay · qr · crypto` — each with its own readiness, confirmation mode, platform restriction and initiator. In-person acceptance (`softpos` / `card_present` / `tap_to_pay`) is a first-class future capability: V0 = handoff to the PSP's certified Tap to Pay on iPhone app; the native path (a BEAU PH Merchant iOS app + PSP SDK + Apple entitlement) is reserved. BEAU PH never handles card or PIN data and never reads NFC itself — see `docs/SOFTPOS.md`.
 
 Africa is a first-class requirement: the goal is that Gari's audience in Zimbabwe, Kenya and South Africa can pay on the rail they actually use, without a separate commerce model per country. Eligibility by country and currency is a **server-side** concern of BEAU PH; no host page carries `if country == ZW`.
 
@@ -54,6 +59,7 @@ beau-ph/
   docs/SECURITY.md                ← secrets, exposure, verification, operator confirmations
   docs/TESTING.md                 ← suites, harness, what is proven
   docs/ROADMAP.md                 ← V0 → V1 → V2 → V3 and known gaps
+  docs/SOFTPOS.md                 ← in-person / Tap to Pay: UAE investigation, V0 handoff, reserved native path
   contracts/provider.ts, host.ts  ← TypeScript contracts
   core/registry.ts                ← provider registry, runtime readiness map, public-output guard
   providers/{stripe,aani,bank-transfer,paynow,mpesa,ozow,payshap,beau-wallet}/adapter.ts
@@ -62,7 +68,9 @@ supabase/migrations/20260915_beau_ph_core.sql            ← core schema + funct
 supabase/migrations/20260916_beau_ph_core_addendum.sql   ← cancel/expire + attach_attempt fix
 supabase/migrations/20260917_beau_ph_coach_gari_adapter.sql
 supabase/migrations/20260918_beau_ph_core_settle_siblings.sql
-supabase/tests/beau_ph_contract.sql                      ← generic contract suite (+ host reconciliation)
+supabase/migrations/20260919_beau_ph_capabilities.sql    ← capability model, platform/initiator eligibility, UAE PSP boundaries
+supabase/migrations/20260920_beau_ph_coach_gari_collect.sql ← host "Collect in person" (softpos handoff)
+supabase/tests/beau_ph_contract.sql                      ← generic contract suite (+ host reconciliation, + in-person)
 ```
 
 ## Principles (enforced, not aspirational)
@@ -74,3 +82,4 @@ supabase/tests/beau_ph_contract.sql                      ← generic contract su
 5. **Not-configured and placeholder rails cannot act.** Even if a merchant "enables" them, even if someone sets the env vars.
 6. **No secret in the hub.** JSON columns are CHECK-guarded against secret-like keys/values; adapters report presence, never values.
 7. **Public references, never UUIDs**, on anything a payer sees (`CG-1048`).
+8. **No card data, ever.** In-person acceptance goes through a certified PSP app or SDK; BEAU PH sees a receipt reference or a verified provider event, never a PAN, PIN or NFC frame.

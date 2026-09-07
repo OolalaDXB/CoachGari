@@ -7,6 +7,6 @@ import { notConfigured } from "../_boundary.ts";
 
 export const payshap = notConfigured({
   key: "payshap", displayName: "PayShap (South Africa)", countries: ["ZA"], currencies: ["ZAR"],
-  secrets: ["PAYSHAP_SPONSOR_CLIENT_ID", "PAYSHAP_SPONSOR_CLIENT_SECRET"],
+  secrets: ["PAYSHAP_SPONSOR_CLIENT_ID", "PAYSHAP_SPONSOR_CLIENT_SECRET"], capabilities: ["qr", "bank_transfer"],
   note: "needs a sponsoring bank/PSP that exposes PayShap request-to-pay",
 });

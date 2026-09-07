@@ -219,5 +219,88 @@ begin
   if (e1 ->> 'status') = 'ignored' and (e1 ->> 'note') like 'rejected:illegal_transition%'
      and not exists (select 1 from public.payments p join public.orders o on o.id = p.order_id where o.reference = oref) then ok := ok + 1; else fail := fail + 1; log := log || ' [late webhook ' || e1::text || ']'; end if;
 
+  /* ---- 16. in-person / SoftPOS: capability model, platform + initiator eligibility, handoff attestation ---- */
+  -- the capability vocabulary and the reserved in-person keys exist on the UAE PSP boundaries
+  if (select count(*) from beau_ph.provider_capabilities where capability in ('softpos','card_present','tap_to_pay') and provider_key in ('network_international','magnati','adyen')) = 9
+     and beau_ph.is_capability('softpos') and beau_ph.is_capability('tap_to_pay') and beau_ph.is_capability('card_present') and not beau_ph.is_capability('nfc_raw')
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [capability vocabulary]'; end if;
+  -- an AED merchant enables the Magnati handoff (app name only — never a credential)
+  insert into beau_ph.merchants (key, name, country, default_currency, mode) values ('ph_uae', 'UAE Test', 'AE', 'AED', 'test');
+  perform beau_ph.merchant_method_set('ph_uae', 'stripe', true, null, '{}'::jsonb, '{}'::jsonb, null, 't');
+  perform beau_ph.merchant_method_set('ph_uae', 'magnati', true, 'AED', '{}'::jsonb, '{"handoff_app":"SwipeX","handoff_url":"swipex://"}'::jsonb, null, 't');
+  -- a customer-facing page never sees an in-person capability (initiator), even though the merchant enabled it
+  j := beau_ph.eligible_methods('ph_uae', 'AE', 'AED', rt);
+  if j::text not like '%magnati%' then ok := ok + 1; else fail := fail + 1; log := log || ' [customer sees softpos]'; end if;
+  -- merchant-initiated: the handoff is offered (any platform — the tap happens in the PSP app), native tap_to_pay is not (placeholder)
+  j := beau_ph.eligible_capabilities('ph_uae', null, 'AED', rt, 'ios_pwa', 'merchant');
+  if (select count(*) from jsonb_array_elements(j) e where e ->> 'provider' = 'magnati' and e ->> 'capability' = 'softpos' and (e ->> 'handoff')::boolean and e -> 'settings' ->> 'handoff_app' = 'SwipeX') = 1
+     and j::text not like '%tap_to_pay%' and j::text not like '%network_international%' then ok := ok + 1; else fail := fail + 1; log := log || ' [merchant capabilities ' || j::text || ']'; end if;
+  j := beau_ph.method_matrix('ph_uae', null, 'AED', rt, 'ios_pwa', 'merchant');
+  if (select c ->> 'reason' from jsonb_array_elements(j) e, jsonb_array_elements(e -> 'capabilities') c where e ->> 'provider' = 'magnati' and c ->> 'capability' = 'tap_to_pay') = 'coming_soon'
+     and (select c ->> 'reason' from jsonb_array_elements(j) e, jsonb_array_elements(e -> 'capabilities') c where e ->> 'provider' = 'network_international' and c ->> 'capability' = 'softpos') = 'disabled'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [capability reasons]'; end if;
+  begin perform beau_ph.create_request('ph_uae', 'magnati', 'ORD-T1', 'REF-3000', 85000, 'AED', 'AE', null, '{}'::jsonb, rt, 'tap_to_pay', 'ios_app', 'merchant');
+        fail := fail + 1; log := log || ' [tap_to_pay request created]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  -- the PLATFORM gate is real: make tap_to_pay hypothetically live (rolled back) — it is offered on ios_app only, never from a browser/PWA
+  update beau_ph.provider_capabilities set readiness = 'available' where provider_key = 'magnati' and capability = 'tap_to_pay';
+  update beau_ph.providers set readiness = 'available' where key = 'magnati';
+  if beau_ph.eligible_capabilities('ph_uae', null, 'AED', '{"magnati":{"configured":true,"mode":"test"}}'::jsonb, 'web', 'merchant')::text not like '%tap_to_pay%'
+     and beau_ph.eligible_capabilities('ph_uae', null, 'AED', '{"magnati":{"configured":true,"mode":"test"}}'::jsonb, 'ios_pwa', 'merchant')::text not like '%tap_to_pay%'
+     and beau_ph.eligible_capabilities('ph_uae', null, 'AED', '{"magnati":{"configured":true,"mode":"test"}}'::jsonb, 'ios_app', 'merchant')::text like '%tap_to_pay%'
+     and beau_ph.eligible_capabilities('ph_uae', null, 'AED', '{}'::jsonb, 'ios_app', 'merchant')::text not like '%tap_to_pay%'   -- and still needs deployed PSP credentials
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [platform gate]'; end if;
+  update beau_ph.provider_capabilities set readiness = 'placeholder' where provider_key = 'magnati' and capability = 'tap_to_pay';
+  update beau_ph.providers set readiness = 'not_configured' where key = 'magnati';
+  -- handoff request: in-person, merchant-initiated, instructions carry the app + reference + amount
+  j := beau_ph.create_request('ph_uae', 'magnati', 'ORD-T1', 'REF-3000', 85000, 'AED', 'AE', null, '{}'::jsonb, rt, 'softpos', 'ios_pwa', 'merchant'); r3 := (j ->> 'id')::uuid;
+  if (j ->> 'status') = 'pending' and (j ->> 'channel') = 'in_person' and (j ->> 'initiated_by') = 'merchant' and (j ->> 'capability') = 'softpos' and (j ->> 'platform') = 'ios_pwa'
+     and (j -> 'instructions' ->> 'handoff_app') = 'SwipeX' and (j -> 'instructions' ->> 'reference') = 'REF-3000' and (j -> 'instructions' ->> 'amount') = '85000'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [handoff request ' || j::text || ']'; end if;
+  -- no verified API path exists: a "provider event" for the PSP is refused as evidence, the request stays pending
+  e1 := beau_ph.ingest_provider_event('magnati', 'swipex-1', 'swipex.approved', '{"claimed":"approved"}'::jsonb, jsonb_build_object('request_id', r3, 'status', 'paid', 'amount', 85000, 'currency', 'AED'));
+  if (e1 ->> 'outcome') = 'rejected:provider_not_configured' and (select status from beau_ph.payment_requests where id = r3) = 'pending' then ok := ok + 1; else fail := fail + 1; log := log || ' [psp event ' || e1::text || ']'; end if;
+  -- the operator must attest the app's receipt reference; then the evidence says so
+  begin perform beau_ph.confirm_manual(r3, 'op@test', 85000, 'AED', null); fail := fail + 1; log := log || ' [handoff confirmed without receipt]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  e1 := beau_ph.confirm_manual(r3, 'op@test', 85000, 'AED', 'RRN-123456');
+  if (e1 ->> 'to') = 'paid' and (e1 ->> 'capability') = 'softpos'
+     and exists (select 1 from beau_ph.payment_events where id = (e1 ->> 'payment_event_id')::uuid and actor = 'operator' and provider_reference = 'RRN-123456'
+                   and evidence ->> 'verification' = 'operator_attested_provider_receipt' and evidence ->> 'capability' = 'softpos')
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [handoff attested ' || e1::text || ']'; end if;
+
+  /* ---- 17. HOST: Session → Collect payment → Tap to Pay (PSP app) → paid → pack/ledger updated ---- */
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '1-session pack', 1, 85000, 'AED', 'unpaid', 'seed') returning id into p3;
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.cg_ph_collect_options(p3, 'ios_pwa');
+  if jsonb_array_length(j -> 'options') = 0 and (j ->> 'amount')::int = 85000 then ok := ok + 1; else fail := fail + 1; log := log || ' [collect before setup ' || j::text || ']'; end if;
+  perform public.payment_method_set(jsonb_build_object('method', 'magnati', 'enabled', true, 'handoff_app', 'SwipeX', 'handoff_url', 'swipex://', 'currency', 'AED'));
+  begin perform public.payment_method_set(jsonb_build_object('method', 'magnati', 'enabled', true, 'handoff_app', 'SwipeX', 'handoff_url', 'javascript alert'));
+        fail := fail + 1; log := log || ' [bad handoff url accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  j := public.cg_ph_collect_options(p3, 'ios_pwa');
+  if (select count(*) from jsonb_array_elements(j -> 'options') o where o ->> 'provider' = 'magnati' and o ->> 'capability' = 'softpos' and o -> 'settings' ->> 'handoff_app' = 'SwipeX') = 1
+     and (j ->> 'reference') ~ '^CG-[0-9]{4,}$' and j::text not like '%tap_to_pay%' then ok := ok + 1; else fail := fail + 1; log := log || ' [collect options ' || j::text || ']'; end if;
+  -- the receipt reference is mandatory
+  begin perform public.payment_record_manual(p3, 85000, 'AED', 'magnati', null, null, 'softpos', 'ios_pwa'); fail := fail + 1; log := log || ' [psp without receipt]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  j := public.payment_record_manual(p3, 85000, 'AED', 'magnati', 'RRN-777', null, 'softpos', 'ios_pwa');
+  execute 'reset role';
+  select id into ordid from public.orders where reference = j ->> 'order';
+  if (j ->> 'ok')::boolean and (j ->> 'capability') = 'softpos'
+     and (select payment_status from public.session_packs where id = p3) = 'paid'
+     and (select payment_source from public.session_packs where id = p3) = 'card_present'
+     and (select capability from public.payments where order_id = ordid) = 'softpos'
+     and (select provider from public.payments where order_id = ordid) = 'magnati'
+     and beau_ph.is_reconciled((select ph_event_id from public.payments where order_id = ordid))
+     and (select count(*) from public.partner_earnings where order_id = ordid) = 0
+     and (select channel from beau_ph.payment_requests where id = (j ->> 'request_id')::uuid) = 'in_person'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [host collect ' || j::text || ']'; end if;
+  -- the client's report page still never lists an in-person capability
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  tok := public.report_issue_link(p1) ->> 'token';
+  execute 'reset role';
+  j := public.report_view(tok, rt);
+  if j::text not like '%softpos%' and j::text not like '%magnati%' then ok := ok + 1; else fail := fail + 1; log := log || ' [report lists in-person]'; end if;
+
   raise exception 'BEAU_PH_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

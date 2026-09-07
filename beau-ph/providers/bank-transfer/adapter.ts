@@ -15,6 +15,10 @@ export const bankTransfer: ProviderAdapter = {
   capabilities(): ProviderCapabilities {
     return {
       key: "bank_transfer", displayName: "Bank transfer", kind: "manual", confirmation: "operator", readiness: "available",
+      capabilities: [
+        { capability: "bank_transfer", readiness: "available", confirmation: "operator", platforms: null, initiatedBy: "any", handoff: false, notes: "Account details; operator confirms receipt." },
+        { capability: "manual_instructions", readiness: "available", confirmation: "operator", platforms: null, initiatedBy: "any", handoff: false },
+      ],
       supports: { checkout: false, instructions: true, webhook: false, statusPoll: false, cancel: true, refundEvents: false },
       countries: null, currencies: null, secrets: [],
     };

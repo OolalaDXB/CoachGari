@@ -6,6 +6,6 @@ import { notConfigured } from "../_boundary.ts";
 
 export const ozow = notConfigured({
   key: "ozow", displayName: "Ozow (South Africa)", countries: ["ZA"], currencies: ["ZAR"],
-  secrets: ["OZOW_SITE_CODE", "OZOW_PRIVATE_KEY", "OZOW_API_KEY"],
+  secrets: ["OZOW_SITE_CODE", "OZOW_PRIVATE_KEY", "OZOW_API_KEY"], capabilities: ["online_checkout"],
   note: "needs Ozow merchant onboarding and the hash-verified notification handler",
 });

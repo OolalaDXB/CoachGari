@@ -1,25 +1,42 @@
 /* =============================================================
    BEAU PH — BEAU Payment Hub
-   Provider adapter contract (V0)
+   Provider adapter contract (V0 + capability model)
 
-   One generic contract for every rail. Not every provider implements every
-   capability: a manual rail (Aani, bank transfer) only issues instructions
-   and is confirmed by an authorised OPERATOR; an online rail (Stripe, later
-   Paynow / M-PESA / Ozow / PayShap) creates a redirect and is confirmed by a
-   signature-VERIFIED provider event; a placeholder rail (BEAU Wallet) can
-   do nothing yet and must say so.
+   A provider carries CAPABILITIES (online_checkout, manual_instructions,
+   softpos, tap_to_pay, …), each with its own readiness, confirmation mode,
+   platform restriction, initiator and an explicit "handoff" flag. Not every
+   provider implements every capability, and a capability may be reserved
+   (placeholder) long before it can act.
 
-   The DATABASE core (schema beau_ph) is the authority for state, eligibility,
+   The DATABASE core (schema beau_ph) is the authority for state, eligibility
+   (merchant × country × currency × platform × initiator × readiness),
    evidence, idempotency and reconciliation. An adapter is provider I/O only:
    it talks to the provider, verifies what comes back, and reports
    deployment readiness — never a secret value.
+
+   In-person acceptance: BEAU PH never handles raw card / PIN data and never
+   reads NFC itself. V0 = handoff to the PSP's certified app (operator
+   attests the receipt); future = Apple Tap to Pay on iPhone through a
+   supported PSP SDK inside a BEAU PH Merchant iOS app (ios_app only).
    ============================================================= */
 
-export type ProviderKey = "stripe" | "aani" | "bank_transfer" | "paynow" | "mpesa" | "ozow" | "payshap" | "beau_wallet";
+export type ProviderKey =
+  | "stripe" | "aani" | "bank_transfer" | "paynow" | "mpesa" | "ozow" | "payshap" | "beau_wallet"
+  | "network_international" | "magnati" | "adyen";
 export type ProviderKind = "online" | "manual" | "crypto";
 export type Confirmation = "provider_event" | "operator" | "unavailable";
 export type Readiness = "available" | "not_configured" | "placeholder";
 export type Mode = "test" | "live";
+
+/** Generic capability vocabulary (mirrors beau_ph.is_capability). */
+export type Capability =
+  | "online_checkout" | "payment_link" | "manual_instructions" | "wallet" | "bank_transfer" | "mobile_money"
+  | "softpos" | "card_present" | "tap_to_pay" | "qr" | "crypto";
+export const IN_PERSON_CAPABILITIES: ReadonlySet<Capability> = new Set(["softpos", "card_present", "tap_to_pay"]);
+
+/** Device / platform the request is initiated from (mirrors beau_ph.is_platform). `ios_app` = a future BEAU PH Merchant iOS app. */
+export type Platform = "web" | "ios_pwa" | "android_pwa" | "ios_app" | "android_app";
+export type Initiator = "customer" | "merchant";
 
 /** Provider-independent request states (mirrors beau_ph.payment_requests.status). */
 export type PaymentStatus = "created" | "pending" | "requires_action" | "paid" | "failed" | "expired" | "cancelled" | "refunded";
@@ -27,13 +44,27 @@ export type PaymentStatus = "created" | "pending" | "requires_action" | "paid" |
 /** Reads a deployment secret by name. Adapters never log, return or store the value. */
 export type EnvReader = (name: string) => string | undefined;
 
+export interface CapabilitySpec {
+  capability: Capability;
+  readiness: Readiness;
+  confirmation: Confirmation;
+  /** null = any platform. */
+  platforms: Platform[] | null;
+  initiatedBy: Initiator | "any";
+  /** The acceptance happens in the provider's own certified app; an authorised operator attests the provider receipt. */
+  handoff: boolean;
+  notes?: string;
+}
+
 export interface ProviderCapabilities {
   key: ProviderKey;
   displayName: string;
   kind: ProviderKind;
+  /** Provider-level confirmation for its API/event path. */
   confirmation: Confirmation;
-  /** Product-level readiness (is the adapter implemented and onboardable?). Deployment readiness is `runtime()`. */
+  /** Provider-level (API / online integration) readiness. Capabilities carry their own. */
   readiness: Readiness;
+  capabilities: CapabilitySpec[];
   supports: { checkout: boolean; instructions: boolean; webhook: boolean; statusPoll: boolean; cancel: boolean; refundEvents: boolean };
   /** null = any */
   countries: string[] | null;
@@ -50,7 +81,7 @@ export interface RuntimeReadiness {
 }
 export type RuntimeMap = Partial<Record<ProviderKey, RuntimeReadiness>>;
 
-export interface EligibilityInput { country: string | null; currency: string; mode: Mode }
+export interface EligibilityInput { country: string | null; currency: string; mode: Mode; platform?: Platform | null; initiatedBy?: Initiator; capability?: Capability }
 export interface EligibilityResult { eligible: boolean; reason?: string }
 
 export interface CreateRequestInput {
@@ -69,6 +100,10 @@ export interface CreateRequestInput {
   /** 1-based attempt number (idempotency keys). */
   attempt: number;
   expiresInSeconds?: number;
+  /** Which capability of the provider this request uses (default: the provider's primary online/manual one). */
+  capability?: Capability;
+  platform?: Platform | null;
+  initiatedBy?: Initiator;
 }
 
 export type CreateRequestResult =
@@ -82,8 +117,8 @@ export type VerifiedEvent =
   | { ok: true; providerEventId: string; eventType: string; payload: Record<string, unknown> }
   | { ok: false; reason: string };
 
-/** A public instruction field (manual rails): how the payer-facing page should show and copy it. */
-export interface InstructionField { key: string; label: string; copyable: boolean }
+/** A public instruction field (manual / handoff rails): how the operator- or payer-facing page shows, copies or collects it. */
+export interface InstructionField { key: string; label: string; copyable: boolean; input?: boolean }
 
 export interface ProviderAdapter {
   readonly key: ProviderKey;
@@ -92,7 +127,7 @@ export interface ProviderAdapter {
   runtime(env: EnvReader): RuntimeReadiness;
   /** Adapter-side extra rules (rare). The DB matrix remains the authority. */
   eligibility?(input: EligibilityInput, runtime: RuntimeReadiness): EligibilityResult;
-  /** Online rails: create the provider-side payment (redirect). Manual rails: describe instructions. */
+  /** Online rails: create the provider-side payment (redirect). Manual / handoff rails: describe instructions. */
   createPaymentRequest?(input: CreateRequestInput, env: EnvReader): Promise<CreateRequestResult>;
   getStatus?(providerReference: string, env: EnvReader): Promise<StatusResult>;
   cancel?(providerReference: string, env: EnvReader): Promise<{ ok: boolean; reason?: string }>;
@@ -100,6 +135,6 @@ export interface ProviderAdapter {
   verifyWebhook?(req: { headers: Headers; rawBody: string }, env: EnvReader): Promise<VerifiedEvent>;
   /** reconcile(): add provider evidence (fees, balance transactions) BEFORE the DB normalizer runs. Never mutates state. */
   enrich?(event: Record<string, unknown>, env: EnvReader): Promise<Record<string, unknown>>;
-  /** Manual rails: the public fields the merchant configures and the payer sees. */
-  instructionFields?(): InstructionField[];
+  /** Manual / handoff rails: the public fields the merchant configures and the payer/operator sees. */
+  instructionFields?(capability?: Capability): InstructionField[];
 }

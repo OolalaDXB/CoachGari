@@ -40,6 +40,11 @@ export const beauWallet: ProviderAdapter = {
   capabilities(): ProviderCapabilities {
     return {
       key: "beau_wallet", displayName: "BEAU Wallet", kind: "crypto", confirmation: "unavailable", readiness: "placeholder",
+      capabilities: [
+        { capability: "crypto", readiness: "placeholder", confirmation: "unavailable", platforms: null, initiatedBy: "customer", handoff: false },
+        { capability: "wallet", readiness: "placeholder", confirmation: "unavailable", platforms: null, initiatedBy: "customer", handoff: false },
+        { capability: "qr", readiness: "placeholder", confirmation: "unavailable", platforms: null, initiatedBy: "customer", handoff: false },
+      ],
       supports: { checkout: false, instructions: false, webhook: false, statusPoll: false, cancel: false, refundEvents: false },
       countries: null, currencies: null, secrets: [],
     };

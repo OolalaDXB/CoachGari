@@ -63,7 +63,11 @@ beau_ph normalized "paid" event      ──▶  public.payments (+ orders, earni
 | Normalized payment event | `payment_events` | `from_status → to_status`, `amount`, `currency`, `provider_status` (native, kept), `provider_reference`, `actor` (provider/operator/system), `actor_id`, `evidence` |
 | Reconciliation | `reconciliations` | `payment_event_id` (unique — once), `host_reference` (the host's ledger id) |
 
-Invariants (indexes/CHECKs): one **live** request per (merchant, order, provider); one **paid** request per (merchant, order); `public_reference` is not a UUID; no secret-like key/value in any JSON column; `amount > 0`; ISO currency/country.
+| Provider capability | `provider_capabilities` | `(provider, capability)`, `readiness`, `confirmation` (provider_event / operator / unavailable), `platforms[]` (null = any), `initiated_by` (customer / merchant / any), `handoff` |
+
+A request also records `capability`, `channel` (online / in_person), `initiated_by` and `platform`.
+
+Invariants (indexes/CHECKs): one **live** request per (merchant, order, provider); one **paid** request per (merchant, order); `public_reference` is not a UUID; no secret-like key/value in any JSON column; `amount > 0`; ISO currency/country; capability ∈ the vocabulary `online_checkout · payment_link · manual_instructions · wallet · bank_transfer · mobile_money · softpos · card_present · tap_to_pay · qr · crypto`; platform ∈ `web · ios_pwa · android_pwa · ios_app · android_app`.
 
 ## 3. Event model — states and transitions
 
@@ -83,19 +87,23 @@ Every change goes through one internal path (`beau_ph.record_event`), which writ
 
 ## 4. Eligibility model (server-side, the only authority)
 
-`beau_ph.method_matrix(merchant, country, currency, runtime)` evaluates every provider and returns `eligible` + `reason`:
+`beau_ph.method_matrix(merchant, country, currency, runtime, platform, initiated_by)` evaluates every **(provider, capability)** pair and returns `eligible` + `reason` per capability (and per provider = any capability eligible):
 
 | Check (in order) | Reason when it fails |
 |---|---|
-| provider readiness = placeholder | `coming_soon` |
-| provider readiness = not_configured | `not_configured` |
+| capability readiness = placeholder | `coming_soon` |
+| capability readiness = not_configured | `not_configured` |
 | merchant method missing or disabled | `disabled` |
 | country ∉ (merchant override ∪ provider countries) | `country` |
 | currency ∉ provider currencies | `currency` |
-| online rail and adapter not configured in this deployment | `runtime_not_configured` |
-| online rail whose runtime mode ≠ merchant mode | `mode_mismatch` |
+| merchant narrowed its capabilities and this one is excluded | `disabled` |
+| capability initiator ≠ who is asking (customer page vs merchant "Collect") | `initiator` |
+| capability restricted to platforms and the device is unknown or not among them | `platform` |
+| provider-event capability (non-handoff) whose provider API readiness ≠ available | `provider_not_configured` / `provider_placeholder` |
+| provider-event capability and adapter not configured in this deployment | `runtime_not_configured` |
+| provider-event capability whose runtime mode ≠ merchant mode | `mode_mismatch` |
 
-Inputs: merchant configuration, customer country (host-derived; unknown → merchant country), request currency, provider readiness, and `runtime` — the deployment readiness map the Edge adapters compute from **secret presence and mode** (`{"stripe":{"configured":true,"mode":"test"}}`), never values. `eligible_methods` is the filtered list the client page renders verbatim (with public instructions only). `create_request` re-checks eligibility, so a client cannot force a rail.
+Inputs: merchant configuration, customer country (host-derived; unknown → merchant country; in person = merchant country), request currency, **device/platform** (`web · ios_pwa · android_pwa · ios_app · android_app`), **who initiates** (customer vs merchant), provider onboarding/readiness (per capability for the product, per provider for the API path), and `runtime` — the deployment readiness map the Edge adapters compute from **secret presence and mode**, never values. Three projections: `eligible_methods` (providers, customer-initiated by default — what a payer page renders verbatim), `eligible_capabilities` (flat provider × capability pairs — what a merchant "Collect payment" screen renders), `method_matrix` (everything, with reasons — the Finance rails view). `create_request` re-checks the (provider, capability) eligibility, so neither a client nor a page can force a rail or a capability.
 
 ## 5. Flows
 
@@ -104,6 +112,9 @@ Inputs: merchant configuration, customer country (host-derived; unknown → merc
 
 **Manual (Aani / bank transfer, operator-confirmed)**
 `instructions shown from eligible_methods (read-only) → payer pays outside → operator (authenticated, finance:manage) records receipt → host creates/reuses order → create_request(rail) [pending, instructions snapshot] → confirm_manual(operator, amount, currency, reference) → operator.confirmed evidence + payment_event [paid] → host ledger once → mark_reconciled`. A receipt whose amount differs from a pending card intent **supersedes** that intent explicitly (order cancelled, request cancelled); nothing is converted or guessed.
+
+**In person — SoftPOS handoff (V0, merchant-initiated)**
+`host order → Collect in person → eligible_capabilities(merchant, currency, platform, 'merchant') → operator opens the PSP's certified Tap to Pay app (N-Genius One / SwipeX) → customer taps → PSP receipt → operator records the receipt reference → create_request(capability softpos, channel in_person) [pending, instructions incl. handoff_app] → confirm_manual (receipt reference mandatory; evidence.verification = operator_attested_provider_receipt) → host ledger once → mark_reconciled`. The native path (`tap_to_pay`: PSP SDK inside a BEAU PH Merchant iOS app, provider-event-confirmed, `ios_app` only) is reserved as a placeholder; see `SOFTPOS.md`.
 
 ## 6. Extraction seams (what makes V2 possible)
 

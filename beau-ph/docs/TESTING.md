@@ -7,7 +7,7 @@ Every database suite is a single `DO $$ … $$` block that ends with `RAISE EXCE
 
 | Suite | Scope | Latest run |
 |---|---|---|
-| `supabase/tests/beau_ph_contract.sql` | **BEAU PH contract** — generic core with a throw-away merchant, then the Coach Gari host adapter | `BEAU_PH_TESTS ok=43 fail=0` |
+| `supabase/tests/beau_ph_contract.sql` | **BEAU PH contract** — generic core with a throw-away merchant, the Coach Gari host adapter, and in-person / SoftPOS | `BEAU_PH_TESTS ok=59 fail=0` |
 | `supabase/tests/cg003_payments.sql` | Coach Gari booking checkout + Stripe webhook + ledger + settlements, now routed through BEAU PH | `CG003_TESTS ok=24 fail=0` |
 | `supabase/tests/cg012_payments.sql` | Coach Gari recap page, pack payments (card / Aani / bank), renewal, permissions | `CG012_TESTS ok=26 fail=0` |
 | `scripts/test-webhook-signature.mjs` (Node) | Stripe signature scheme in `beau-ph/providers/stripe/signature.js` | `WEBHOOK_SIGNATURE_TESTS ok=24 fail=0` |
@@ -28,6 +28,8 @@ The contract suite covers every item required for productisation:
 - host adapter reconciles once, idempotently (same Stripe event, re-delivery under a new id, direct `mark_reconciled` again)
 - duplicate provider event does not duplicate the host payment (one `payments` row, one earning, one reconciliation)
 - host manual receipt: operator identity, no Stripe earning, sibling card intent cancelled; a differing amount supersedes the pending intent; a late card webhook on the superseded intent is refused
+- in-person / SoftPOS: the capability vocabulary and the reserved keys exist on the UAE PSPs; a customer page never sees an in-person capability (initiator); merchant-initiated handoff is offered when enabled, native `tap_to_pay` is not (placeholder); the **platform gate** is real (made hypothetically live and rolled back: `ios_app` only, never `web`/`ios_pwa`, and still needs deployed PSP credentials); a handoff request is `in_person` / `merchant` with the app + reference + amount in its instructions; a PSP "event" is refused (no verified API path) and the request stays pending; confirming without the app receipt is refused; the attested event carries `verification = operator_attested_provider_receipt`
+- host collect: no options before setup; a bad app link is refused; options list the enabled PSP with its app and the pack's `CG-####`; the receipt is mandatory; a confirmed tap marks the pack `paid` with source `card_present`, `payments.capability = softpos`, reconciled once, no Stripe earning; the client report page still never lists an in-person capability
 
 ## Rules
 - Preserve all existing Coach Gari financial suites; a change to the host adapter must keep `cg003` and `cg012` green.

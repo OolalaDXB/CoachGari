@@ -23,6 +23,54 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## BEAU PH — in-person / SoftPOS acceptance (capability model + V0 handoff)
+
+**Status: built, applied and proven — `BEAU_PH_TESTS ok=59 fail=0` (16 new
+checks), `CG003_TESTS ok=24 fail=0`, `CG012_TESTS ok=26 fail=0`. Advisors:
+0 ERROR. Investigation with sources in `beau-ph/docs/SOFTPOS.md`. Forward
+migrations `20260919_beau_ph_capabilities.sql` (core) and
+`20260920_beau_ph_coach_gari_collect.sql` (host).**
+
+### Decision
+`card_present` / `softpos` / `tap_to_pay` are first-class **future**
+capabilities of BEAU PH. Providers now declare **capabilities** (the generic
+vocabulary `online_checkout · payment_link · manual_instructions · wallet ·
+bank_transfer · mobile_money · softpos · card_present · tap_to_pay · qr ·
+crypto`), each with its own readiness, confirmation mode, platform restriction,
+initiator and an explicit `handoff` flag. Eligibility now considers merchant,
+country, currency, **device/platform**, **who initiates** and readiness.
+
+### UAE facts (verified)
+Apple launched Tap to Pay on iPhone in the UAE on 10 Dec 2024; launch platforms
+Adyen, Magnati (SwipeX app), Network International (N-Genius One app); iPhone
+XS+. A native integration needs an organisation Apple Developer account, the
+Tap to Pay entitlement, a supported PSP SDK, PSP-owned certification.
+
+### V0 = provider-app handoff (implemented)
+Session / package → **Collect in person** → amount + `CG-####` → the operator
+takes the tap in the PSP's certified app → enters the app's receipt reference
+→ `payment_record_manual(source = magnati | network_international, capability
+softpos)` → BEAU PH request (`in_person`, merchant-initiated) → operator
+attestation (`verification = operator_attested_provider_receipt`, receipt
+**mandatory**) → ledger once, pack source `card_present`, **no Oolala
+earning** (PSP settles to Gari). BEAU PH never sees card/PIN data; nothing NFC
+runs in the PWA; only the app name + optional app link are stored (no MID, no
+key). Adyen is SDK-only → no handoff. Providers `network_international`,
+`magnati`, `adyen` are readiness boundaries for their API paths.
+
+### Reserved, not built
+`tap_to_pay` native (PSP SDK inside a BEAU PH Merchant iOS app) is a
+placeholder gated to `ios_app` — proven never offered on web/PWA even when
+hypothetically live. Stated limit: V0 is operator-attested, not
+provider-verified, until a PSP API integration exists (V1).
+
+### Owner actions
+Choose and onboard one PSP (recommendation: Magnati / SwipeX for self-serve
+onboarding, or Network International if already an N-Genius merchant); enable
+it in Finance → In-person acceptance; do a first tap on a test package.
+
+---
+
 ## BEAU PH — BEAU Payment Hub: productisation decision (V0, embedded)
 
 **Status: built, applied and proven — `BEAU_PH_TESTS ok=43 fail=0`; the existing

@@ -547,6 +547,7 @@ async function openSession(id) {
         ${has('client_profile:view') ? '<button class="btn btn-line" data-open>Open client</button>' : ''}
         ${ph ? `<a class="btn btn-line" href="${waHref(ph)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
         ${s.status !== 'completed' ? '<button class="btn btn-accent" data-complete>Mark completed</button>' : ''}
+        ${(pack && pack.payment_status && pack.payment_status !== 'paid' && has('finance:manage')) ? '<button class="btn btn-line" data-collect>Collect payment</button>' : ''}
         ${s.status === 'scheduled' ? '<button class="btn btn-line" data-noshow>No-show</button>' : ''}
         <button class="btn btn-line" data-pack>Link / change package</button>
         <button class="btn btn-line" data-edit>Edit / reschedule</button>
@@ -561,6 +562,8 @@ async function openSession(id) {
   on('[data-copylink]', async () => { try { await navigator.clipboard.writeText(s.meeting_url); toast('Link copied'); } catch {} });
   on('[data-open]', () => { closeSheet(); openProfile(s.crm_contact_id, null, 'overview'); });
   on('[data-complete]', () => sessStatus(id, 'completed'));
+  // Session → Collect payment → (Tap to Pay in the PSP app) → paid → pack/ledger updated. Same BEAU PH capability as from the client profile.
+  on('[data-collect]', () => { pfPackActions(pack, () => calRender().catch(fail)); pfCollectInPerson(pack, () => calRender().catch(fail)); });
   on('[data-noshow]', () => noShowSheet(id));
   on('[data-cancel]', async () => { if (await confirmAct('Cancel this session?')) sessStatus(id, 'cancelled'); });
   on('[data-edit]', () => { closeSheet(); sessionForm(s); });
@@ -993,14 +996,29 @@ async function finance() {
   const aani = (pms || []).find((m) => m.method === 'aani');
   const bank = (pms || []).find((m) => m.method === 'bank_transfer');
   const READY = { available: 'Available', not_configured: 'Not onboarded', placeholder: 'Coming soon' };
+  const capChip = (c) => `<span class="st st-${esc(c.readiness)}" title="${esc(c.notes || '')}">${esc(String(c.capability).replace(/_/g, ' '))}${c.handoff ? ' · app handoff' : ''}${c.readiness === 'placeholder' ? ' · soon' : c.readiness === 'not_configured' ? ' · not onboarded' : ''}</span>`;
   const railsPanel = `<div class="ad-panel"><h2>Payment rails — BEAU Payment Hub</h2>
-      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Every rail BEAU PH knows, whether it is onboarded, and whether it is enabled for Coach Gari. What a given client is actually offered is decided server-side per country, currency and provider readiness — never in a page. Card payments stay in Stripe <b>test mode</b> (CHECK-LICENCE-001).</p>
-      ${table(['Rail', 'Type', 'Confirmed by', 'Readiness', 'Countries', 'Currencies', 'For Coach Gari'], (rails || []).map((r) => `<tr>
+      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Every rail BEAU PH knows, its capabilities, whether it is onboarded, and whether it is enabled for Coach Gari. What a given client or device is actually offered is decided server-side per country, currency, platform and readiness — never in a page. Card payments stay in Stripe <b>test mode</b> (CHECK-LICENCE-001).</p>
+      ${table(['Rail', 'Capabilities', 'Readiness (API)', 'Countries', 'Currencies', 'For Coach Gari'], (rails || []).map((r) => `<tr>
         <td><b>${esc(r.display_name)}</b><br><span class="ad-muted" style="font-size:12px">${esc(r.notes || '')}</span></td>
-        <td>${esc(r.kind)}</td><td>${esc(String(r.confirmation || '').replace('_', ' '))}</td>
+        <td style="max-width:260px;line-height:1.9">${(r.capabilities || []).map(capChip).join(' ') || '—'}</td>
         <td>${st(r.readiness)}<div class="msg">${esc(READY[r.readiness] || r.readiness)}</div></td>
         <td>${esc((r.countries || ['any']).join(', '))}</td><td>${esc((r.currencies || ['any']).join(', '))}</td>
-        <td>${r.readiness === 'available' ? st(r.enabled ? 'enabled' : 'disabled') : '—'}</td></tr>`), 'No rails registered.')}</div>`;
+        <td>${(r.capabilities || []).some((c) => c.readiness === 'available') ? st(r.enabled ? 'enabled' : 'disabled') : '—'}</td></tr>`), 'No rails registered.')}</div>`;
+  // In-person acceptance (BEAU PH softpos, V0 = handoff to the PSP's certified Tap to Pay app)
+  const HANDOFF_DEFAULT = { network_international: 'N-Genius One', magnati: 'SwipeX' };
+  const handoffRails = (rails || []).filter((r) => (r.capabilities || []).some((c) => c.capability === 'softpos' && c.handoff && c.readiness === 'available'));
+  const pspPanel = `<div class="ad-panel"><h2>In-person acceptance — Tap to Pay on iPhone (PSP app handoff)</h2>
+      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Apple's Tap to Pay on iPhone is live in the UAE with Network International (<i>N-Genius One</i> app) and Magnati (<i>SwipeX</i> app). V0 = handoff: from a session or package you tap <b>Collect in person</b>, take the contactless payment in the PSP's app, then enter the app's receipt reference here — BEAU PH records an operator-attested receipt and the package/ledger update. Card data never touches Coach Gari or BEAU PH; nothing NFC runs in this app. Native Tap to Pay inside a BEAU PH Merchant iOS app is reserved for later. ${manage ? '' : 'View only — editing needs finance:manage.'}</p>
+      ${handoffRails.map((r) => { const cfg = (pms || []).find((m) => m.method === r.provider) || {}; return `
+      <form class="ad-form psp-form" data-psp="${esc(r.provider)}" ${manage ? '' : 'style="pointer-events:none;opacity:.7"'} style="margin-bottom:14px">
+        <div class="row">
+          <label style="flex-direction:row;align-items:center;gap:8px;font-weight:700"><input type="checkbox" name="enabled" ${cfg.enabled ? 'checked' : ''}> ${esc(r.display_name)}</label>
+          <label>App name <input name="handoff_app" value="${esc(cfg.handoff_app || HANDOFF_DEFAULT[r.provider] || '')}" placeholder="${esc(HANDOFF_DEFAULT[r.provider] || 'PSP app')}"></label>
+          <label>App link (optional) <input name="handoff_url" value="${esc(cfg.handoff_url || '')}" placeholder="app scheme or https:// link"></label></div>
+        ${manage ? `<div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save ${esc(r.display_name)}</button></div>` : ''}
+      </form>`; }).join('') || '<p class="ad-empty">No handoff-capable PSP registered.</p>'}
+      <p class="ad-note">Only the app name and an optional link are stored — never a merchant id, key or credential. Adyen is SDK-only (no standalone app) and stays reserved.</p></div>`;
   const open = orders.filter((o) => o.earning_status === 'open');
   const sum = (arr, k) => arr.reduce((a, o) => a + (o[k] || 0), 0);
   const today = new Date(); const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
@@ -1040,6 +1058,7 @@ async function finance() {
         <label>Instructions <input name="instructions" value="${esc(bank?.instructions || '')}" placeholder="Shown to the client on the payment page"></label>
         ${manage ? '<div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save bank transfer settings</button></div>' : ''}
       </form></div>
+    ${pspPanel}
     <div class="ad-panel"><h2>Settlements</h2>
       ${table(['Ref', 'Period', 'Items', 'Gross', 'Fees', 'Refunds/CB', 'Net', 'Commission', 'Payable', 'Status', ''], settlements.map((s) => `<tr>
         <td>${esc(s.reference)}</td><td>${s.period_start} → ${s.period_end}</td><td class="num">${(orders.filter((o) => o.settlement_id === s.id)).length}</td>
@@ -1085,6 +1104,12 @@ async function finance() {
       currency: (f.get('currency') || 'AED').toUpperCase(), instructions: f.get('instructions') } });
     if (error) return fail(error); toast('Bank transfer settings saved'); finance().catch(fail);
   });
+  view.querySelectorAll('form.psp-form').forEach((form) => form.addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = new FormData(form);
+    const { error } = await sb.rpc('payment_method_set', { p: { method: form.dataset.psp, enabled: !!f.get('enabled'),
+      handoff_app: f.get('handoff_app'), handoff_url: f.get('handoff_url'), currency: 'AED' } });
+    if (error) return fail(error); toast('In-person acceptance saved'); finance().catch(fail);
+  }));
 }
 
 /* =============================== ANALYTICS =============================== */
@@ -1223,16 +1248,25 @@ async function pfSessions() {
   $('#pf-body').querySelectorAll('[data-packact]').forEach((b) => b.onclick = () => pfPackActions(pk.find((x) => x.id === b.dataset.packact)));
 }
 
-/* ---- pack: recap, share, payment, renewal, history (CG-012) ---- */
-function pfPackActions(p) {
+/* ---- pack: recap, share, payment, renewal, history (CG-012) + collect in person (BEAU PH softpos handoff) ---- */
+// Device/platform this cockpit runs on — one of BEAU PH's eligibility inputs (server-side decides; this only reports).
+function detectPlatform() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return 'ios_pwa';
+  if (/Android/i.test(ua)) return 'android_pwa';
+  return 'web';
+}
+function pfPackActions(p, after) {
   const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
   const money2 = (mi, cur) => mi == null ? '—' : money(mi, cur);
+  const refresh = after || (() => pfSessions().catch(fail));
   sheet.innerHTML = `<div class="cg-sheet-h"><b>${esc(p.title)}</b>${p.public_ref ? `<span class="ad-muted" style="font-size:12px;font-weight:600">${esc(p.public_ref)}</span>` : ''}<button class="pf-close" data-x>×</button></div>
     <div class="cg-sheet-b">
       <div class="cg-pack"><div class="cg-pack-x">${p.used} / ${p.total_sessions}</div><div class="cg-pack-r">${p.remaining} remaining</div></div>
       ${'price_amount' in p ? `<p class="ad-muted" style="font-size:13px;margin:0 0 8px">${money2(p.price_amount, p.currency)} · ${esc(p.payment_status)}</p>` : ''}
       <div class="cg-actions cg-actions-grid">
         <button class="btn btn-accent" data-a="share">Recap &amp; share</button>
+        ${(has('finance:manage') && p.payment_status !== 'paid') ? '<button class="btn btn-line" data-a="collect">Collect in person</button>' : ''}
         ${has('finance:manage') ? '<button class="btn btn-line" data-a="record">Record payment</button>' : ''}
         <button class="btn btn-line" data-a="renew">Renew package</button>
         <button class="btn btn-line" data-a="history">Payment history</button>
@@ -1242,8 +1276,9 @@ function pfPackActions(p) {
   sheet.querySelector('[data-x]').onclick = closeSheet;
   const on = (a, fn) => { const el = sheet.querySelector(`[data-a="${a}"]`); if (el) el.onclick = fn; };
   on('share', () => pfShareRecap(p));
-  on('record', () => pfRecordPayment(p));
-  on('renew', async () => { if (!await confirmAct('Renew this package? A NEW package is created (the old one stays exactly as it is).')) return; const { error } = await sb.rpc('pack_renew', { p_pack_id: p.id }); if (error) return fail(error); toast('New package created'); closeSheet(); pfSessions().catch(fail); });
+  on('collect', () => pfCollectInPerson(p, refresh));
+  on('record', () => pfRecordPayment(p, refresh));
+  on('renew', async () => { if (!await confirmAct('Renew this package? A NEW package is created (the old one stays exactly as it is).')) return; const { error } = await sb.rpc('pack_renew', { p_pack_id: p.id }); if (error) return fail(error); toast('New package created'); closeSheet(); refresh(); });
   on('history', async () => {
     const { data, error } = await sb.rpc('pack_payment_history', { p_pack_id: p.id }); if (error) return fail(error);
     const rows = data || [];
@@ -1283,9 +1318,58 @@ async function pfShareRecap(p) {
   sOn('revoke', async () => { if (!await confirmAct('Revoke this recap link? Anyone holding it will no longer be able to open it.')) return; const { error: e2 } = await sb.rpc('report_revoke', { p_pack_id: p.id }); if (e2) return fail(e2); toast('Link revoked'); out.innerHTML = '<p class="ad-muted" style="font-size:13px">Link revoked. Use “Recap &amp; share” again to issue a new one.</p>'; });
 }
 
-function pfRecordPayment(p) {
+/* Collect in person — BEAU PH `softpos` capability, V0 = handoff to the PSP's certified Tap to Pay app.
+   The server decides what can be offered (merchant config × country × currency × device × readiness);
+   this page shows the amount + reference, sends the operator to the PSP app, and records the app's
+   receipt reference. No card data, no NFC, nothing charged from here. */
+async function pfCollectInPerson(p, after) {
+  const out = $('#pf-pack-out'); out.innerHTML = '<p class="ad-muted" style="font-size:13px">Checking in-person options…</p>';
+  const { data: o, error } = await sb.rpc('cg_ph_collect_options', { p_pack_id: p.id, p_platform: detectPlatform() });
+  if (error) { out.innerHTML = ''; return fail(error); }
+  if (o.paid) { out.innerHTML = '<p class="ad-muted" style="font-size:13px">This package is already paid.</p>'; return; }
+  const opts = o.options || [];
+  if (!opts.length) {
+    out.innerHTML = '<p class="ad-muted" style="font-size:13px">No in-person acceptance is set up yet. In <b>Finance → In-person acceptance</b>, enable the Tap to Pay app you use (Network International <i>N-Genius One</i> or Magnati <i>SwipeX</i>). The customer taps in the PSP\'s certified app; you then enter the receipt reference here. Card data never touches this app.</p>';
+    return;
+  }
+  const cur = o.currency || 'AED';
+  out.innerHTML = `<form id="pf-collect" class="cg-form" style="margin-top:4px">
+    <div class="cg-row"><label>Amount <input type="number" name="amount_major" min="0" step="0.01" required value="${o.amount != null ? (o.amount / 100).toFixed(2) : ''}"></label>
+      <label>Currency <input name="currency" value="${esc(cur)}" maxlength="3" readonly></label></div>
+    <label>Reference <span style="display:flex;gap:8px;align-items:center"><input name="reference_show" value="${esc(o.reference || '')}" readonly style="flex:1"><button type="button" class="btn btn-line btn-xs" data-copyref>Copy</button></span></label>
+    <label>Accept with <select name="opt">${opts.map((x, i) => `<option value="${i}">${esc(x.display_name)} — ${esc((x.settings && x.settings.handoff_app) || x.capability)}${x.handoff ? ' (PSP app)' : ''}</option>`).join('')}</select></label>
+    <ol class="ad-muted" id="pf-collect-steps" style="font-size:12.5px;margin:6px 0 8px 18px;padding:0;line-height:1.5"></ol>
+    <div class="cg-actions" id="pf-collect-open"></div>
+    <label>Receipt / transaction reference from the app <input name="receipt" required placeholder="e.g. RRN or receipt number" autocomplete="off"></label>
+    <div class="cg-actions"><button class="btn btn-accent btn-sm" type="submit">Customer tapped — confirm paid</button></div>
+    <p class="ad-muted" style="font-size:12px;margin:6px 0 0">Confirming records an operator-attested receipt in BEAU PH and marks the package paid. The money settles to your PSP merchant account (no Oolala earning). Nothing is charged from this page.</p>
+  </form>`;
+  const form = out.querySelector('#pf-collect');
+  const renderOpt = () => {
+    const x = opts[Number(form.opt.value)] || opts[0];
+    const app = (x.settings && x.settings.handoff_app) || x.display_name; const url = x.settings && x.settings.handoff_url;
+    const amt = Math.round(Number(form.amount_major.value) * 100) || o.amount;
+    $('#pf-collect-steps').innerHTML = [`Open <b>${esc(app)}</b> on this phone`, `Choose Tap to Pay and enter <b>${money(amt, cur)}</b>`, 'Let the customer tap their card, phone or watch', 'Copy the receipt / transaction reference shown by the app into the field below']
+      .map((s) => `<li>${s}</li>`).join('');
+    $('#pf-collect-open').innerHTML = url ? `<a class="btn btn-line btn-sm" href="${esc(url)}" rel="noopener">Open ${esc(app)}</a>` : `<span class="ad-muted" style="font-size:12px">Switch to the ${esc(app)} app, then come back here.</span>`;
+  };
+  form.opt.onchange = renderOpt; form.amount_major.oninput = renderOpt; renderOpt();
+  out.querySelector('[data-copyref]').onclick = async () => { try { await navigator.clipboard.writeText(o.reference || ''); toast('Reference copied'); } catch {} };
+  form.onsubmit = async (e) => {
+    e.preventDefault(); const x = opts[Number(form.opt.value)] || opts[0];
+    const amt = Math.round(Number(form.amount_major.value) * 100); if (!amt || amt <= 0) return toast('Enter an amount', true);
+    const receipt = (form.receipt.value || '').trim(); if (!receipt) return toast('Enter the receipt reference from the app', true);
+    const { error: e2 } = await sb.rpc('payment_record_manual', {
+      p_pack_id: p.id, p_amount: amt, p_currency: cur, p_source: x.provider, p_reference: receipt, p_paid_at: null,
+      p_capability: x.capability, p_platform: detectPlatform() });
+    if (e2) return fail(e2); toast('Paid — package and ledger updated'); closeSheet(); if (after) after();
+  };
+}
+
+function pfRecordPayment(p, after) {
   const out = $('#pf-pack-out');
   const cur = ('currency' in p) ? p.currency : 'AED';
+  const refresh = after || (() => pfSessions().catch(fail));
   out.innerHTML = `<form id="pf-pay-form" class="cg-form" style="margin-top:4px">
     <p class="ad-muted" style="font-size:12.5px;margin:0">Record a payment actually received (Aani, bank transfer, cash…). This is manual reconciliation — it never happens automatically, and card payments are handled by Stripe, not here.</p>
     <div class="cg-row"><label>Amount <input type="number" name="amount_major" min="0" step="0.01" required placeholder="e.g. 3120"></label>
@@ -1302,7 +1386,7 @@ function pfRecordPayment(p) {
       p_pack_id: p.id, p_amount: amt, p_currency: (f.get('currency') || 'AED').toUpperCase(),
       p_source: f.get('source'), p_reference: f.get('reference') || null,
       p_paid_at: f.get('paid_date') ? zonedToUtc(`${f.get('paid_date')}T12:00`, CAL_TZ) : null });
-    if (error) return fail(error); toast('Payment recorded'); closeSheet(); pfSessions().catch(fail);
+    if (error) return fail(error); toast('Payment recorded'); closeSheet(); refresh();
   };
 }
 
