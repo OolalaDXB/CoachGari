@@ -25,8 +25,9 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ## CG-012 — Client session recap + payment requests (Stripe + Aani), renewal
 
-**Status: DB built, applied and proven — `CG012_TESTS ok=22 fail=0`, plus the
-CG-003 payments suite re-run green after `process_stripe_event` was patched
+**Status: DB built, applied and proven — `CG012_TESTS ok=26 fail=0` (22 from
+CG-012 + 4 from CG-012b bank transfer / public reference), plus the CG-003
+payments suite re-run green after `process_stripe_event` was patched
 (booking-optional + pack projection). Advisors: no new ERROR; the two hardening
 findings raised on CG-011 were fixed (see below). `report` Edge Function
 deployed (`verify_jwt=false`, token-authorised). `/r/<token>` client page and
@@ -69,6 +70,27 @@ Request-to-Pay / auto-confirmation.** **No silent USD→AED conversion** — the
 Aani amount is shown only when the pack is priced in Aani's currency (AED);
 otherwise the client is asked to confirm the AED amount with the coach. A
 verified QR can be added later (`qr_url`), never a fabricated one.
+
+### Bank transfer — CG-012b (same money path as Aani)
+
+A second manual option, in English: **Account holder / IBAN / BIC-SWIFT / Bank
+name**, stored in `payment_methods` (`method='bank_transfer'`; migration
+`20260913_cg012b_bank_transfer.sql`). Same rules as Aani, deliberately: details
+are **admin-configured under finance:manage and never seeded** (the repo holds no
+real IBAN); they appear **only** in the authenticated Finance configuration and
+on the tokenised `/r/<token>` page when enabled — **never** on the public
+marketing site. Viewing/copying **never** marks an order paid; the operator
+reconciles the received transfer manually (`payment_record_manual`, source
+stored as **`bank_transfer`**), which creates **no Stripe earning/transaction**.
+The amount is shown in the pack's own currency — **no silent conversion**.
+
+**Human public reference (CG-012c).** Manual payments need a reference a client
+can type into a bank app, so every pack gets `session_packs.public_ref`
+(`CG-####`, from `pack_ref_seq` starting at 1001; migration
+`20260914_cg012c_pack_public_ref.sql`). It is quoted by `report_view` as
+`pay_ref` and by both the Aani and bank panels, in the share message, and shown
+on the pack card — a UUID is never surfaced to the client. Applied migrations are
+never rewritten: CG-012c was added as a new file rather than editing CG-012b.
 
 ### Secure client report page (`/r/<token>`)
 
