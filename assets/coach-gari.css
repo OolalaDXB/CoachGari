@@ -74,7 +74,10 @@ p{margin:0 0 1em;}
 .nav-right .plain{font-size:14px;font-weight:700;text-transform:uppercase;text-decoration:none;}
 
 .hero{padding:92px 0 86px;}
-.hero h1{margin-bottom:24px;}
+.hero-brand{font-size:clamp(1.05rem,2.3vw,1.4rem);font-weight:800;letter-spacing:-.025em;line-height:1.15;margin-bottom:22px;color:var(--black);}
+.hero-brand span{color:var(--accent);}
+.hero h1{margin-bottom:20px;}
+.hero-lead{font-size:clamp(1.18rem,2.6vw,1.55rem);font-weight:700;letter-spacing:-.025em;line-height:1.2;max-width:22ch;margin:0 auto 16px;color:var(--black);}
 .hero .sub{font-size:1.18rem;max-width:54ch;}
 .hero-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:38px;}
 .hero-meta{margin-top:28px;font-size:14.5px;font-weight:600;color:var(--grey-text);}
