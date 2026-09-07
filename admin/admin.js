@@ -95,7 +95,7 @@ async function boot() {
 function navModel() {
   return [
     { key: 'overview', label: 'Overview', icon: '▦', show: () => true, run: overview },
-    { key: 'crm', label: 'CRM', icon: '☺', show: () => has('coach:operations') || has('client_profile:view'),
+    { key: 'crm', label: 'CRM', icon: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="7.5" r="3"/><path d="M3.8 19c0-2.9 2.3-5 5.2-5s5.2 2.1 5.2 5"/><path d="M16.2 5.2a3 3 0 0 1 0 5.6"/><path d="M17 14.3c2.3.4 3.9 2.2 3.9 4.7"/></svg>', show: () => has('coach:operations') || has('client_profile:view'),
       subs: [ { key: 'leads', label: 'Leads', show: () => has('coach:operations'), run: leads },
               { key: 'contacts', label: 'Contacts', show: () => has('client_profile:view'), run: crmContacts } ] },
     { key: 'schedule', label: 'Schedule', icon: '◷', show: () => has('coach:operations'),
@@ -322,7 +322,7 @@ function bindBookingActions() {
    the coach's zone. Tapping a session opens a popup; tapping an empty slot
    offers Add session / Block time, prefilled. iPhone-first. */
 const CAL_TZ = 'Asia/Dubai';
-const CAL_H0 = 7, CAL_H1 = 22;                 // visible hours 07:00–22:00
+const calH0 = 0, calH1 = 24;                   // full day; the timeline scrolls and auto-lands near 07:00 / the first session
 function todayISO() { const o = tzParts(new Date(), CAL_TZ); return `${o.year}-${o.month}-${o.day}`; }  // today in the coach's zone
 const cal = { view: (() => { try { return localStorage.getItem('cg_cal_view') || 'day'; } catch { return 'day'; } })(), anchor: todayISO(), selDay: null };
 function anchorISO() { return cal.anchor; }  // 'YYYY-MM-DD' in CAL_TZ
@@ -384,6 +384,7 @@ async function calRender() {
   else if (cal.view === 'week') body.innerHTML = (window.matchMedia('(max-width:760px)').matches ? renderWeekMobile(a) : renderWeekDesktop(a));
   else body.innerHTML = renderMonth(a);
   bindCalBody();
+  if (cal.view !== 'month') requestAnimationFrame(calScrollDefault);
 }
 function eventsFor(dateStr) {
   const s = calData.sessions.filter((x) => lp(x.start_at).date === dateStr);
@@ -419,10 +420,19 @@ function hourRows(dateStr) {
 }
 function renderTimeline(dateStr) {
   const { s, b } = eventsFor(dateStr);
-  return `<div class="cal-day"><div class="cal-grid">
+  return `<div class="cal-day cal-scroll"><div class="cal-grid">
     ${hourRows(dateStr)}
     <div class="cal-layer">${b.map(blockChip).join('')}${s.map(sessionChip).join('')}</div>
   </div></div>`;
+}
+// scroll the timeline so ~07:00 (or the first session, if earlier) is at the top
+function calScrollDefault() {
+  const sc = $('#cal-body .cal-scroll') || $('#cal-body .cal-week'); if (!sc) return;
+  let h = 7;
+  const mins = [...calData.sessions, ...calData.blocks].map((x) => lp(x.start_at).mins).filter((m) => Number.isFinite(m) && m >= 0);
+  if (mins.length) h = Math.max(0, Math.min(7, Math.floor(Math.min(...mins) / 60)));
+  const row = sc.querySelector(`.cal-hr[data-hour="${h}"]`);
+  if (row) { const off = row.getBoundingClientRect().top - sc.getBoundingClientRect().top; sc.scrollTop += off - (sc.classList.contains('cal-week') ? 42 : 8); }
 }
 function renderWeekDesktop(dateStr) {
   const ws = weekStartISO(dateStr); const today = anchorISO(); const realToday = tzParts(new Date(), CAL_TZ);
