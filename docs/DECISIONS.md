@@ -23,6 +23,91 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## CG-012 — Client session recap + payment requests (Stripe + Aani), renewal
+
+**Status: DB built, applied and proven — `CG012_TESTS ok=22 fail=0`, plus the
+CG-003 payments suite re-run green after `process_stripe_event` was patched
+(booking-optional + pack projection). Advisors: no new ERROR; the two hardening
+findings raised on CG-011 were fixed (see below). `report` Edge Function
+deployed (`verify_jwt=false`, token-authorised). `/r/<token>` client page and
+admin UI shipped. Forward migration `20260912_cg012_reports_payments.sql`;
+existing booking→order behaviour preserved. Stripe stays TEST mode
+(CHECK-LICENCE-001).**
+
+### Financial architecture (unchanged, enforced)
+
+`session_packs` is the operational **projection**. `orders + payments + refunds
++ chargebacks + partner ledger` remain the **authoritative** financial truth
+(CG-003). An order now belongs to a booking **or** a pack
+(`orders.booking_id` made nullable + `orders.session_pack_id` + `order_reason`,
+guarded by a CHECK). A paid order projects onto the pack
+(`payment_status`/`paid_at`/`order_id`/`payment_source`) via
+`project_pack_payment`. No second ledger lives in `session_packs`.
+
+### Two money paths (who collected decides the ledger)
+
+- **Stripe — Oolala collects.** `pack → create_order_for_pack (amount/currency
+  from the pack snapshot, never the client) → Checkout → webhook →
+  process_stripe_event → payment + recompute_earning (Oolala commission) →
+  project onto pack`. A forged/ mismatched amount is refused (proven). Only the
+  webhook can mark a card payment paid — the success URL never does.
+- **Aani / manual — paid straight to Gari.** An **authorised operator**
+  records the money actually received (`payment_record_manual`, finance:manage):
+  a payment row with the source stored (`aani`/`bank_transfer`/`cash`/…), **no
+  Stripe id fabricated**, order marked paid, pack projected. **No Oolala
+  earning** is created — the money never passed through Oolala's Stripe (settle
+  Oolala's share separately if ever agreed; flagged for the owner). Viewing or
+  copying Aani details **never** marks anything paid.
+
+### Aani (UAE instant payment) — V1
+
+Config-driven, in `payment_methods` (managed under **finance:manage**, seeded
+with Gari's Aani mobile; the number is **not** hardcoded in frontend code and is
+**not** committed to the repo). The report page shows the registered number, a
+payment reference, and Copy buttons. **No invented Aani API / deep link /
+Request-to-Pay / auto-confirmation.** **No silent USD→AED conversion** — the
+Aani amount is shown only when the pack is priced in Aani's currency (AED);
+otherwise the client is asked to confirm the AED amount with the coach. A
+verified QR can be added later (`qr_url`), never a fabricated one.
+
+### Secure client report page (`/r/<token>`)
+
+`report_tokens` (256-bit, sha256 stored, revocable, expiring). The `report`
+Edge Function (service role, token only — no JWT, no CRM access) serves the
+authoritative recap and starts a card payment. The recap **never** exposes body
+metrics, BMI, health data or private notes — proven: it is built only from
+`session_packs` (money) and `coaching_sessions` (dates), and the leakage test
+asserts a private note and a weight value never appear. `pack_recap` is
+finance-gated for staff; the client page legitimately shows the client's own
+amount due.
+
+### Renewal
+
+`pack_renew` creates a **new** pack (`renewed_from_pack_id`, unpaid, price
+copied only with finance:view) and leaves the old pack **immutable** — historic
+cycles stay correct.
+
+### Advisor hardening (fixed this sprint)
+
+The CG-011 trigger functions (`coaching_sessions_pack_guard`,
+`sync_session_from_booking`) had EXECUTE exposed to anon via PostgREST — revoked
+(they only ever run as triggers). And `pack_recap_data(uuid, boolean)` /
+`project_pack_payment(uuid)` are now revoked from `authenticated` so a
+signed-in user cannot bypass the finance gate by passing `p_finance=true`
+directly; they are reachable only through the gated `pack_recap`, the
+service-role `report_view`, and the definer payment functions. New
+`report_tokens` shows the accepted deny-all `rls_enabled_no_policy` INFO
+(service-role only), like `consent_tokens`.
+
+### Flagged for the owner
+
+Commercial treatment of Oolala's commission on Aani/manual payments (currently
+none, as the money bypasses Oolala) — confirm the intended split. Set
+`STRIPE_SECRET_KEY` (test) and `SITE_URL` on the `report` function for card
+payments; without them the page shows Aani only.
+
+---
+
 ## CG-011 — Schedule as Gari's operating calendar; sessions + packages
 
 **Status: DB built, applied and proven — `CG011_TESTS ok=31 fail=0`; advisors

@@ -988,6 +988,7 @@ async function finance() {
     sb.from('partner_settlements').select('*').order('created_at', { ascending: false }),
     sb.rpc('finance_webhook_log').limit(30),
   ]); if (error) throw error;
+  const { data: aani } = await sb.from('payment_methods').select('*').eq('method', 'aani').maybeSingle();
   const open = orders.filter((o) => o.earning_status === 'open');
   const sum = (arr, k) => arr.reduce((a, o) => a + (o[k] || 0), 0);
   const today = new Date(); const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
@@ -999,6 +1000,19 @@ async function finance() {
       <div class="ad-kpi"><b>${money(sum(orders, 'oolala_commission'))}</b><span>Oolala commission (${CONFIG.COMMISSION_RATE})</span></div>
       <div class="ad-kpi"><b>${money(sum(open, 'gari_payable'))}</b><span>Payable to Gari — not yet settled</span></div>
     </div>
+    <div class="ad-panel"><h2>Payment methods — Aani</h2>
+      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">The UAE instant-payment (Aani) details shown on client recap/payment pages. Aani is settled manually: a client paying by Aani never marks anything paid — an operator records the received payment under a package. ${manage ? '' : 'View only — editing needs finance:manage.'}</p>
+      <form id="aani-form" class="ad-form" ${manage ? '' : 'style="pointer-events:none;opacity:.7"'}>
+        <div class="row">
+          <label style="flex-direction:row;align-items:center;gap:8px;font-weight:700"><input type="checkbox" name="enabled" ${aani?.enabled ? 'checked' : ''}> Enabled</label>
+          <label>Proxy type <select name="proxy_type"><option value="mobile" ${aani?.proxy_type === 'mobile' ? 'selected' : ''}>Mobile</option><option value="email" ${aani?.proxy_type === 'email' ? 'selected' : ''}>Email</option><option value="merchant" ${aani?.proxy_type === 'merchant' ? 'selected' : ''}>Merchant</option></select></label>
+          <label>Currency <input name="currency" value="${esc(aani?.currency || 'AED')}" maxlength="3"></label></div>
+        <div class="row">
+          <label>Aani value (machine) <input name="proxy_value" value="${esc(aani?.proxy_value || '')}" placeholder="+9715XXXXXXXX"></label>
+          <label>Display value <input name="display_value" value="${esc(aani?.display_value || '')}" placeholder="+971 5X XXX XXXX"></label></div>
+        <label>Instructions <input name="instructions" value="${esc(aani?.instructions || '')}" placeholder="Shown to the client on the payment page"></label>
+        ${manage ? '<div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save Aani settings</button></div>' : ''}
+      </form></div>
     <div class="ad-panel"><h2>Settlements</h2>
       ${table(['Ref', 'Period', 'Items', 'Gross', 'Fees', 'Refunds/CB', 'Net', 'Commission', 'Payable', 'Status', ''], settlements.map((s) => `<tr>
         <td>${esc(s.reference)}</td><td>${s.period_start} → ${s.period_end}</td><td class="num">${(orders.filter((o) => o.settlement_id === s.id)).length}</td>
@@ -1029,6 +1043,13 @@ async function finance() {
     e.preventDefault(); const f = new FormData(e.target);
     const { data, error } = await sb.rpc('finance_create_settlement', { p_period_start: f.get('from'), p_period_end: f.get('to'), p_currency: f.get('currency') || 'USD' }); if (error) return fail(error);
     toast(`${data.reference}: ${data.items} item(s), payable ${money(data.amount_payable, data.currency)}`); finance().catch(fail);
+  });
+  $('#aani-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const { error } = await sb.rpc('payment_method_set', { p: { method: 'aani', enabled: !!f.get('enabled'),
+      proxy_type: f.get('proxy_type'), proxy_value: f.get('proxy_value'), display_value: f.get('display_value'),
+      currency: (f.get('currency') || 'AED').toUpperCase(), instructions: f.get('instructions') } });
+    if (error) return fail(error); toast('Aani settings saved'); finance().catch(fail);
   });
 }
 
@@ -1149,9 +1170,10 @@ async function pfSessions() {
   if (pe) throw pe; if (se) throw se;
   const pk = packs || [], ss = sess || [];
   const cname = pf.contact?.display_name || 'this client';
-  const packCard = (p) => `<div class="cg-packcard"><div class="cg-packcard-h"><b>${esc(p.title)}</b>${p.status !== 'active' ? st(p.status) : ''}</div>
+  const packCard = (p) => `<div class="cg-packcard"><div class="cg-packcard-h"><b>${esc(p.title)}</b>${p.status !== 'active' ? st(p.status) : ''}${'payment_status' in p ? `<span class="cal-pay ${p.payment_status === 'paid' ? 'ok' : 'due'}" style="margin-left:auto">${esc(p.payment_status)}</span>` : ''}</div>
     <div class="cg-pack"><div class="cg-pack-x">${p.used} / ${p.total_sessions}</div><div class="cg-pack-r">${p.remaining} remaining</div></div>
-    ${'price_amount' in p ? `<div class="ad-muted" style="font-size:12.5px">${money(p.price_amount, p.currency)} · ${esc(p.payment_status)}${p.paid_at ? ' · paid ' + fmt(p.paid_at, CAL_TZ, { dateStyle: 'medium' }) : ''}</div>` : ''}</div>`;
+    ${'price_amount' in p ? `<div class="ad-muted" style="font-size:12.5px">${money(p.price_amount, p.currency)}${p.paid_at ? ' · paid ' + fmt(p.paid_at, CAL_TZ, { dateStyle: 'medium' }) : ''}</div>` : ''}
+    <div class="cg-actions" style="margin-top:10px"><button class="btn btn-line btn-xs" data-packact="${p.id}">Recap &amp; payment…</button></div></div>`;
   $('#pf-body').innerHTML = `
     <div class="ad-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
       <button class="btn btn-accent btn-sm" id="pf-new-sess">+ Session</button>
@@ -1164,6 +1186,89 @@ async function pfSessions() {
   $('#pf-new-sess').onclick = () => sessionForm({ crm_contact_id: pf.crmId, crm_name: cname });
   $('#pf-new-pack').onclick = () => packForm(pf.crmId, () => pfSessions().catch(fail));
   $('#pf-body').querySelectorAll('tr.clik').forEach((tr) => tr.onclick = () => { calData = { sessions: ss, blocks: [] }; openSession(tr.dataset.sess); });
+  $('#pf-body').querySelectorAll('[data-packact]').forEach((b) => b.onclick = () => pfPackActions(pk.find((x) => x.id === b.dataset.packact)));
+}
+
+/* ---- pack: recap, share, payment, renewal, history (CG-012) ---- */
+function pfPackActions(p) {
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  const money2 = (mi, cur) => mi == null ? '—' : money(mi, cur);
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>${esc(p.title)}</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b">
+      <div class="cg-pack"><div class="cg-pack-x">${p.used} / ${p.total_sessions}</div><div class="cg-pack-r">${p.remaining} remaining</div></div>
+      ${'price_amount' in p ? `<p class="ad-muted" style="font-size:13px;margin:0 0 8px">${money2(p.price_amount, p.currency)} · ${esc(p.payment_status)}</p>` : ''}
+      <div class="cg-actions cg-actions-grid">
+        <button class="btn btn-accent" data-a="share">Recap &amp; share</button>
+        ${has('finance:manage') ? '<button class="btn btn-line" data-a="record">Record payment</button>' : ''}
+        <button class="btn btn-line" data-a="renew">Renew package</button>
+        <button class="btn btn-line" data-a="history">Payment history</button>
+      </div>
+      <div id="pf-pack-out" style="margin-top:12px"></div>
+    </div>`;
+  sheet.querySelector('[data-x]').onclick = closeSheet;
+  const on = (a, fn) => { const el = sheet.querySelector(`[data-a="${a}"]`); if (el) el.onclick = fn; };
+  on('share', () => pfShareRecap(p));
+  on('record', () => pfRecordPayment(p));
+  on('renew', async () => { if (!await confirmAct('Renew this package? A NEW package is created (the old one stays exactly as it is).')) return; const { error } = await sb.rpc('pack_renew', { p_pack_id: p.id }); if (error) return fail(error); toast('New package created'); closeSheet(); pfSessions().catch(fail); });
+  on('history', async () => {
+    const { data, error } = await sb.rpc('pack_payment_history', { p_pack_id: p.id }); if (error) return fail(error);
+    const rows = data || [];
+    $('#pf-pack-out').innerHTML = rows.length ? `<div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>Reference</th><th>Status</th><th>Source</th><th>${has('finance:view') ? 'Amount' : ''}</th><th>Paid</th></tr></thead><tbody>
+      ${rows.map((o) => `<tr><td>${esc(o.order_reference)}</td><td>${st(o.status)}</td><td>${esc(o.source || '—')}</td><td>${o.amount != null ? money(o.amount, o.currency) : ''}</td><td>${o.paid_at ? fmt(o.paid_at, CAL_TZ, { dateStyle: 'medium' }) : '—'}</td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="ad-muted" style="font-size:13px">No payment requests or payments yet.</p>';
+  });
+}
+
+async function pfShareRecap(p) {
+  const out = $('#pf-pack-out'); out.innerHTML = '<p class="ad-muted" style="font-size:13px">Creating secure link…</p>';
+  const { data, error } = await sb.rpc('report_issue_link', { p_pack_id: p.id });
+  if (error) { out.innerHTML = ''; return fail(error); }
+  const url = `${location.origin}/r/${data.token}`;
+  const first = (pf.contact?.display_name || '').split(' ')[0] || '';
+  const due = ('price_amount' in p && p.payment_status !== 'paid' && p.price_amount) ? `\nAmount due: ${money(p.price_amount, p.currency)}` : '';
+  const msg = `Hi ${first},\n\nHere is your Coach Gari session recap:\n${url}\n\n${p.title}\n${p.used}/${p.total_sessions} completed${due}\n\nYou can pay by card or instantly with Aani on the link above.\n\nThanks,\nGari`;
+  const ph = pf.contact?.phone; const em = pf.contact?.email;
+  out.innerHTML = `
+    <label style="font-size:12px;font-weight:700;color:var(--grey-text);display:block;margin-bottom:4px">Message (edit before sending)</label>
+    <textarea id="pf-share-msg" style="width:100%;min-height:150px;font:inherit;font-size:13px;padding:10px;border:1px solid var(--line);border-radius:10px">${esc(msg)}</textarea>
+    <div class="cg-actions" style="margin-top:10px">
+      ${ph ? '<button class="btn btn-accent btn-sm" data-s="wa">WhatsApp</button>' : ''}
+      <button class="btn btn-line btn-sm" data-s="email">Email</button>
+      <button class="btn btn-line btn-sm" data-s="copymsg">Copy message</button>
+      <button class="btn btn-line btn-sm" data-s="copylink">Copy link</button>
+      <button class="btn btn-line btn-sm" data-s="revoke" style="color:var(--danger,#a12a2a)">Revoke link</button>
+    </div>
+    <p class="ad-muted" style="font-size:12px;margin-top:8px">The link opens the client's recap and payment options. It never shows body metrics, health data or private notes. Nothing is auto-sent.</p>`;
+  const getMsg = () => $('#pf-share-msg').value;
+  const sOn = (s, fn) => { const el = out.querySelector(`[data-s="${s}"]`); if (el) el.onclick = fn; };
+  sOn('wa', () => window.open(`${waHref(ph)}?text=${encodeURIComponent(getMsg())}`, '_blank', 'noopener'));
+  sOn('email', () => { const subject = 'Your Coach Gari session recap'; window.location.href = `mailto:${em ? encodeURIComponent(em) : ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(getMsg())}`; });
+  sOn('copymsg', async () => { try { await navigator.clipboard.writeText(getMsg()); toast('Message copied'); } catch {} });
+  sOn('copylink', async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch {} });
+  sOn('revoke', async () => { if (!await confirmAct('Revoke this recap link? Anyone holding it will no longer be able to open it.')) return; const { error: e2 } = await sb.rpc('report_revoke', { p_pack_id: p.id }); if (e2) return fail(e2); toast('Link revoked'); out.innerHTML = '<p class="ad-muted" style="font-size:13px">Link revoked. Use “Recap &amp; share” again to issue a new one.</p>'; });
+}
+
+function pfRecordPayment(p) {
+  const out = $('#pf-pack-out');
+  const cur = ('currency' in p) ? p.currency : 'AED';
+  out.innerHTML = `<form id="pf-pay-form" class="cg-form" style="margin-top:4px">
+    <p class="ad-muted" style="font-size:12.5px;margin:0">Record a payment actually received (Aani, bank transfer, cash…). This is manual reconciliation — it never happens automatically, and card payments are handled by Stripe, not here.</p>
+    <div class="cg-row"><label>Amount <input type="number" name="amount_major" min="0" step="0.01" required placeholder="e.g. 3120"></label>
+      <label>Currency <input name="currency" value="${esc(cur)}" maxlength="3"></label></div>
+    <div class="cg-row"><label>Source <select name="source"><option value="aani">Aani</option><option value="bank_transfer">Bank transfer</option><option value="cash">Cash</option><option value="manual">Manual</option><option value="external">External</option></select></label>
+      <label>Paid on <input type="date" name="paid_date" value="${new Date().toISOString().slice(0, 10)}"></label></div>
+    <label>Reference (from the client) <input name="reference" placeholder="Optional"></label>
+    <div class="cg-actions"><button class="btn btn-accent btn-sm" type="submit">Record payment</button></div></form>`;
+  out.querySelector('#pf-pay-form').onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const amt = Math.round(Number(f.get('amount_major')) * 100);
+    if (!amt || amt <= 0) return toast('Enter an amount', true);
+    const { error } = await sb.rpc('payment_record_manual', {
+      p_pack_id: p.id, p_amount: amt, p_currency: (f.get('currency') || 'AED').toUpperCase(),
+      p_source: f.get('source'), p_reference: f.get('reference') || null,
+      p_paid_at: f.get('paid_date') ? zonedToUtc(`${f.get('paid_date')}T12:00`, CAL_TZ) : null });
+    if (error) return fail(error); toast('Payment recorded'); closeSheet(); pfSessions().catch(fail);
+  };
 }
 
 function renderProfile(section) {

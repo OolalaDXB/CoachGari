@@ -2,6 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
   "trailingSlash": false,
+  "rewrites": [
+    { "source": "/r/:token", "destination": "/r.html" }
+  ],
   "redirects": [
     { "source": "/routes/c", "destination": "/", "permanent": true },
     { "source": "/routes/c/(.*)", "destination": "/", "permanent": true },
@@ -33,6 +36,13 @@
     },
     {
       "source": "/consent",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/r/(.*)",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
         { "key": "Cache-Control", "value": "no-store" }

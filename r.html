@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Your session recap — Coach Gari</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{ --ink:#15181d; --grey:#5c636e; --line:#e6e8ec; --bg:#f5f6f8; --card:#fff; --accent:#1540E8; --accent-ink:#0F32BE; --accent-pale:#F3F5FE; --ok:#0a7d3c; }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:Manrope,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:620px;margin:0 auto;padding:28px 18px 64px;}
+  .brand{font-weight:800;letter-spacing:-.02em;font-size:19px;margin:0 0 18px;}
+  .brand i{color:var(--accent);font-style:normal;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px 22px;margin-bottom:16px;}
+  h1{font-size:22px;letter-spacing:-.02em;margin:0 0 4px;}
+  .muted{color:var(--grey);}
+  .pack-x{font-size:34px;font-weight:800;letter-spacing:-.03em;}
+  .pack-sub{font-size:14px;color:var(--grey);font-weight:600;}
+  .row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:14.5px;}
+  .row:first-of-type{border-top:0;}
+  .row .k{color:var(--grey);} .row .v{font-weight:700;text-align:right;}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--grey);margin:20px 0 8px;font-weight:800;}
+  ol{margin:0;padding-left:20px;} li{margin:3px 0;font-size:14.5px;}
+  .due{background:var(--accent-pale);border:1px solid #dfe6fb;border-radius:14px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:12px;margin:6px 0 4px;}
+  .due .lbl{font-size:12.5px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--accent-ink);}
+  .due .amt{font-size:22px;font-weight:800;letter-spacing:-.02em;}
+  .pay{display:grid;gap:12px;margin-top:8px;}
+  .paybtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;font:inherit;font-size:16px;font-weight:700;border-radius:12px;padding:15px;border:1px solid transparent;cursor:pointer;text-decoration:none;}
+  .paybtn.card{background:var(--accent);color:#fff;} .paybtn.card:hover{background:var(--accent-ink);}
+  .paybtn:disabled{opacity:.5;cursor:not-allowed;}
+  .aani{border:1px solid var(--line);border-radius:14px;padding:16px;}
+  .aani-h{font-weight:800;font-size:15px;margin-bottom:2px;}
+  .aani-line{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line);}
+  .aani-line:first-of-type{border-top:0;}
+  .aani-line .k{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--grey);}
+  .aani-line .val{font-size:16px;font-weight:700;}
+  .copy{font:inherit;font-size:12.5px;font-weight:700;border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:#fff;cursor:pointer;color:var(--ink);}
+  .copy:hover{background:var(--bg);}
+  .note{font-size:13px;color:var(--grey);margin-top:10px;line-height:1.5;}
+  .banner{background:#e4f5ea;border:1px solid #b7e0c6;color:#0a5a41;border-radius:12px;padding:12px 14px;font-size:14px;font-weight:600;margin-bottom:16px;}
+  .state{text-align:center;padding:44px 20px;}
+  .state .big{font-size:20px;font-weight:800;margin:0 0 8px;}
+  .spin{display:inline-block;width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:s .8s linear infinite;}
+  @keyframes s{to{transform:rotate(360deg);}}
+  [hidden]{display:none!important;}
+  footer{margin-top:22px;text-align:center;font-size:12.5px;color:var(--grey);}
+  img.qr{max-width:180px;display:block;margin:10px auto 0;border:1px solid var(--line);border-radius:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="brand">Coach Gari<i>.</i></p>
+  <div id="loading" class="card state"><span class="spin" aria-label="Loading"></span></div>
+  <div id="error" class="card state" hidden>
+    <p class="big" id="err-title">This link is not valid</p>
+    <p class="muted" id="err-msg"></p>
+    <p class="muted">If you think this is a mistake, please contact Coach Gari.</p>
+  </div>
+  <div id="content" hidden>
+    <div id="paid-banner" class="banner" hidden>Thank you. If you paid by card, your payment is being confirmed automatically — this page will update shortly.</div>
+    <div class="card">
+      <h1 id="r-title">Coaching session recap</h1>
+      <p class="muted" id="r-greeting"></p>
+      <div style="display:flex;align-items:baseline;gap:12px;margin:14px 0 4px">
+        <span class="pack-x" id="r-x"></span><span class="pack-sub" id="r-remaining"></span>
+      </div>
+      <div id="r-money"></div>
+      <h2>Completed</h2>
+      <ol id="r-completed"></ol>
+      <div id="r-upcoming-wrap"><h2>Upcoming</h2><ol id="r-upcoming"></ol></div>
+    </div>
+    <div id="pay-card" class="card" hidden>
+      <h1 style="font-size:18px">Payment</h1>
+      <div class="due" id="r-due"><span class="lbl">Amount due</span><span class="amt" id="r-due-amt"></span></div>
+      <div class="pay">
+        <button class="paybtn card" id="btn-card" hidden>Pay securely by card</button>
+        <div class="aani" id="aani-panel" hidden>
+          <div class="aani-h">Pay instantly with Aani</div>
+          <p class="muted" style="font-size:13px;margin:2px 0 8px">Open your UAE bank app, choose Aani, and pay the number below.</p>
+          <div class="aani-line"><div><div class="k">Aani number</div><div class="val" id="aani-num"></div></div><button class="copy" data-c="num">Copy</button></div>
+          <div class="aani-line" id="aani-amt-line"><div><div class="k">Amount</div><div class="val" id="aani-amt"></div></div><button class="copy" data-c="amt">Copy</button></div>
+          <div class="aani-line"><div><div class="k">Reference</div><div class="val" id="aani-ref"></div></div><button class="copy" data-c="ref">Copy</button></div>
+          <img class="qr" id="aani-qr" hidden alt="Aani QR">
+          <p class="note" id="aani-note"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <footer>Coach Gari — coaching. This page shows your session recap and payment options only.</footer>
+</div>
+
+<script type="module">
+import { CONFIG } from '/config.js';
+const $ = (id) => document.getElementById(id);
+const show = (id) => { for (const s of ['loading','error','content']) $(s).hidden = (s !== id); };
+const endpoint = CONFIG.REPORT_ENDPOINT;
+// token is the last path segment: /r/<token>
+const token = (location.pathname.split('/').filter(Boolean).pop() || '').trim();
+const qs = new URLSearchParams(location.search);
+
+function fail(title, msg) { $('err-title').textContent = title; $('err-msg').textContent = msg || ''; show('error'); }
+function money(minor, cur) { if (minor == null) return ''; try { return new Intl.NumberFormat('en-AE', { style: 'currency', currency: cur || 'USD' }).format(minor / 100); } catch { return (cur || '') + ' ' + (minor / 100).toLocaleString(); } }
+function dt(iso) { try { return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso)) + ' — ' + new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }).format(new Date(iso)); } catch { return iso; } }
+
+async function api(action, extra) {
+  const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, token, ...extra }) });
+  let data = {}; try { data = await res.json(); } catch {}
+  return { res, data };
+}
+
+let AANI = { num: '', amt: '', ref: '' };
+
+function render(d) {
+  const r = d.recap;
+  $('r-greeting').textContent = r.first_name ? ('Hello ' + r.first_name + ',') : 'Hello,';
+  $('r-title').textContent = r.title || 'Coaching session recap';
+  $('r-x').textContent = `${r.used} / ${r.total_sessions}`;
+  $('r-remaining').textContent = `${r.remaining} remaining`;
+  // money summary rows
+  const rows = [];
+  if (r.price_amount != null) rows.push(['Package price', money(r.price_amount, r.currency)]);
+  if (r.agreement_date) rows.push(['Agreed', new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(r.agreement_date))]);
+  rows.push(['Payment', r.payment_status === 'paid' ? 'Paid' : 'Due']);
+  $('r-money').innerHTML = rows.map(([k, v]) => `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('');
+  // sessions
+  $('r-completed').innerHTML = (r.completed || []).map((s) => `<li>${dt(s.start_at)}</li>`).join('') || '<li class="muted">None yet.</li>';
+  const up = r.upcoming || [];
+  $('r-upcoming').innerHTML = up.map((s) => `<li>${dt(s.start_at)}</li>`).join('');
+  $('r-upcoming-wrap').hidden = up.length === 0;
+
+  // payment (only when something is due)
+  const due = r.amount_due;
+  if (r.payment_status !== 'paid' && due && due > 0) {
+    $('pay-card').hidden = false;
+    $('r-due-amt').textContent = money(due, r.currency);
+    if (d.card_enabled) $('btn-card').hidden = false;
+    const aani = d.aani || {};
+    if (aani.enabled) {
+      $('aani-panel').hidden = false;
+      AANI.num = aani.display_value || '';
+      AANI.ref = aani.reference || d.pay_ref || '';
+      $('aani-num').textContent = AANI.num;
+      $('aani-ref').textContent = AANI.ref;
+      // amount is only shown for Aani when the pack is priced in Aani's currency (no conversion)
+      if ((aani.currency || 'AED') === r.currency) {
+        AANI.amt = money(due, r.currency);
+        $('aani-amt').textContent = AANI.amt;
+        $('aani-note').textContent = aani.instructions || '';
+      } else {
+        $('aani-amt-line').hidden = true;
+        $('aani-note').textContent = `Aani is settled in ${aani.currency || 'AED'}. Please confirm the exact ${aani.currency || 'AED'} amount with Coach Gari before paying. ` + (aani.instructions || '');
+      }
+      if (aani.qr_url) { $('aani-qr').src = aani.qr_url; $('aani-qr').hidden = false; }
+    }
+  }
+  if (qs.get('paid') === '1') $('paid-banner').hidden = false;
+  show('content');
+}
+
+$('btn-card').addEventListener('click', async () => {
+  $('btn-card').disabled = true; $('btn-card').textContent = 'Opening secure checkout…';
+  const { res, data } = await api('pay_card', {});
+  if (res.ok && data.ok && data.url) { location.href = data.url; return; }
+  $('btn-card').disabled = false; $('btn-card').textContent = 'Pay securely by card';
+  alert(data.error === 'live_mode_blocked' || data.error === 'payments_not_configured' ? 'Card payment is not available right now — please use Aani or contact Coach Gari.' : 'Could not start the card payment. Please try again or use Aani.');
+});
+document.querySelectorAll('.copy').forEach((b) => b.addEventListener('click', async () => {
+  const v = AANI[b.dataset.c]; if (!v) return;
+  try { await navigator.clipboard.writeText(v); b.textContent = 'Copied'; setTimeout(() => (b.textContent = 'Copy'), 1500); } catch {}
+}));
+
+async function init() {
+  if (!endpoint) return fail('Unavailable', 'This page is not configured.');
+  if (!/^[0-9a-f]{64}$/.test(token)) return fail('This link is not valid', 'Please open the link exactly as Coach Gari sent it.');
+  const { res, data } = await api('view', {});
+  if (!res.ok || !data.ok) {
+    if (res.status === 410) return fail('This link is no longer available', 'It may have expired or been revoked. Please ask Coach Gari for a new one.');
+    if (res.status === 404) return fail('This link is not valid', 'Please ask Coach Gari for a new one.');
+    return fail('Something went wrong', 'Please try again shortly.');
+  }
+  render(data);
+}
+init().catch(() => fail('Something went wrong', 'Please try again shortly.'));
+</script>
+</body>
+</html>

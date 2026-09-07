@@ -33,6 +33,12 @@ export const CONFIG = {
   // record accept/decline. Token-authorised only — no CRM access.
   CONSENT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/consent',
 
+  // Client-facing session recap + payment page (CG-012). The /r/<token> page
+  // reads a secure token from the URL and POSTs here to view the commercial
+  // recap and start a card (Stripe) payment. Token-authorised only — no CRM
+  // access, and never any body-metrics/health/notes.
+  REPORT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/report',
+
   // Back-office (/admin): Supabase project URL + publishable key. The
   // publishable key is public by design; every row is protected by RLS and
   // a signed-in email only sees what app_permissions grants it.
