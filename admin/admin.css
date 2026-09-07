@@ -239,8 +239,18 @@ details.pf-tech summary{cursor:pointer;font-size:12.5px;font-weight:700;color:va
 .cg-packcard{border:1px solid var(--line);border-radius:14px;padding:14px;} .cg-packcard-h{display:flex;gap:8px;align-items:center;margin-bottom:6px;}
 @media(max-width:760px){
   .cal-head-r{width:100%;justify-content:space-between;}
+  .cal-title{min-width:0;flex:1;font-size:15px;}
+  .cal-nav{width:100%;}
   .cg-sheet{width:100%;max-width:100%;align-self:flex-end;border-radius:18px 18px 0 0;max-height:92vh;}
   .cg-sheet-host{align-items:flex-end;}
+  .cg-sheet-b{padding-bottom:calc(22px + env(safe-area-inset-bottom));}
   .cal-wcol{min-width:104px;}
   .cg-row{grid-template-columns:1fr;} .cg-row:has(>label:nth-child(3)){grid-template-columns:1fr;}
+  /* iOS zooms a focused field when its text is < 16px — keep form text at 16px */
+  .cg-form input,.cg-form select,.ad-form input,.ad-form select,.ad-form textarea,.ad-filters input,.ad-filters select{font-size:16px;}
+  .cg-actions-grid{grid-template-columns:1fr;}
+  .ov-next{flex-basis:78vw;}
 }
+/* never let a table/calendar push the page into horizontal scroll */
+.ad-main{max-width:100%;overflow-x:hidden;}
+.cal-body,.ov-nextwrap{max-width:100%;}

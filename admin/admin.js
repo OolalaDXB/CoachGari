@@ -614,6 +614,10 @@ async function sessionForm(prefill) {
   let cname = prefill?.crm_name || '';
   const lockClient = editing || !!(prefill && prefill.crm_contact_id);
   if (cid && !cname && has('client_profile:view')) { const { data } = await sb.from('crm_contacts').select('display_name').eq('id', cid).maybeSingle(); cname = data?.display_name || ''; }
+  // when the client is known, offer their packages so a session links in one step
+  let packs = [];
+  if (cid) { const { data } = await sb.rpc('packs_for_contact', { p_contact_id: cid }); packs = data || []; }
+  const packOpts = `<option value="">— No package</option>${packs.map((p) => `<option value="${p.id}" ${editing && prefill.session_pack_id === p.id ? 'selected' : ''}>${esc(p.title)} · ${p.used}/${p.total_sessions}</option>`).join('')}`;
   const svcOpts = services.map((s) => `<option value="${s.id}" data-dur="${s.duration_minutes}" data-mode="${s.delivery_mode}" ${editing && prefill.service_id === s.id ? 'selected' : ''}>${esc(s.title)}</option>`).join('');
   sheet.innerHTML = `<div class="cg-sheet-h"><b>${editing ? 'Edit session' : 'New session'}</b><button class="pf-close" data-x>×</button></div>
     <div class="cg-sheet-b"><form id="sess-form" class="cg-form">
@@ -624,6 +628,7 @@ async function sessionForm(prefill) {
       <div class="cg-row"><label>Type <select name="service_id"><option value="">—</option>${svcOpts}</select></label>
         <label>Mode <select name="delivery_mode"><option value="in_person" ${editing && prefill.delivery_mode==='in_person'?'selected':''}>In person</option><option value="online" ${editing && prefill.delivery_mode==='online'?'selected':''}>Online</option></select></label></div>
       <label>Title / label <input name="title" value="${editing ? esc(prefill.title || '') : ''}" placeholder="e.g. Private coaching"></label>
+      ${cid ? `<label>Package <select name="session_pack_id">${packOpts}</select></label>` : ''}
       <div id="loc-fields" ${editing && prefill.delivery_mode==='online' ? 'hidden' : ''}>
         <label>Location name <input name="location_name" value="${editing ? esc(prefill.location_name || '') : ''}" placeholder="e.g. Dubai Padel Academy"></label>
         <label>Address <input name="location_address" value="${editing ? esc(prefill.location_address || '') : ''}"></label>
@@ -652,6 +657,7 @@ async function sessionForm(prefill) {
       service_id: f.get('service_id') || null, title: f.get('title') || null, note: f.get('note') || null,
       location_name: f.get('location_name') || null, location_address: f.get('location_address') || null,
       location_lat: f.get('location_lat') || null, location_lng: f.get('location_lng') || null, meeting_url: f.get('meeting_url') || null };
+    if (form.querySelector('[name=session_pack_id]')) p.session_pack_id = f.get('session_pack_id') || null;
     if (editing) p.id = prefill.id; else p.crm_contact_id = contactId;
     const { error } = await sb.rpc('session_write', { p }); if (error) return fail(error);
     toast(editing ? 'Session saved' : 'Session created'); closeSheet(); calRender().catch(fail);

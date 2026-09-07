@@ -99,8 +99,41 @@ authenticated calendar can't be exercised by the sandbox's tooling.
 
 Session recap / shareable client report, secure `/r/<token>` report page,
 Stripe payment-request flow (order → Checkout → webhook → pack paid), renewal
-UI. The schema already carries the fields these need, so CG-012 adds no churn.
-Stripe stays **test mode** (CHECK-LICENCE-001).
+UI. Stripe stays **test mode** (CHECK-LICENCE-001).
+
+### Financial architecture guardrail (canonical — applies to CG-012)
+
+`session_packs` is the **coaching entitlement / operational projection**. It is
+**not** a ledger. The authoritative financial truth stays where it already
+lives: **`orders`, `payments`, `refunds`, `chargebacks`, and the partner
+ledger / earnings / settlements** (CG-003). CG-012 must link a Stripe or manual
+payment to those authoritative records and **project** the resulting state onto
+the pack (`payment_status`, `paid_at`, `order_id`, `payment_source` are a
+snapshot/projection, not a second source of truth). **Do not** build a second
+independent payment ledger inside `session_packs`. A pack may *reference* an
+order/payment; financial events remain authoritative in the finance domain.
+
+### CG-012 readiness — schema check (verified 2026-09-07)
+
+The CG-011 model already exposes everything CG-012's report + payment request
+needs: completed/upcoming session dates (`coaching_sessions.start_at`+`status`),
+X/total and remaining (`pack_used()` + `total_sessions`), price snapshot
+(`price_amount`/`currency`), `agreement_date`, payment date/status projection
+(`paid_at`/`payment_status`/`payment_source`), order relation
+(`session_packs.order_id`), and renewal as a new pack (`renewed_from_pack_id`).
+
+**Two things CG-012 must add (not gaps in the canonical model, but required for
+CG-012 and flagged now):**
+1. **`orders.booking_id` is `NOT NULL`** — orders currently assume a website
+   booking. A pack/report payment request creates an order **not** tied to a
+   booking, so CG-012's first forward migration must make `orders.booking_id`
+   nullable and add a nullable `session_pack_id` (or an order-source
+   discriminator) so a pack can own an order. Until then a pack cannot mint a
+   Checkout order.
+2. **No report-token table yet** — the secure `/r/<token>` client report page
+   needs a new revocable, expiring, high-entropy token table following the
+   existing `consent_tokens` / upload-token pattern (SHA-256 stored, no
+   sequential ids). This is a normal CG-012 addition.
 
 ---
 
