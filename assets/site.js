@@ -128,7 +128,7 @@ import { CONFIG } from '/config.js';
   els.forEach(function(el){
     var context = el.getAttribute('data-wa') || '';
     var text = context
-      ? 'Hi Coach Gari — ' + context
+      ? 'Hi Coach Gari. ' + context
       : 'Hi Coach Gari, I found you online.';
     el.setAttribute('href', 'https://wa.me/' + num + '?text=' + encodeURIComponent(text));
     el.setAttribute('rel', 'noopener');
@@ -422,7 +422,7 @@ function uploadOne(uploadToken, file){
         var sent = res.body.upload_token || '';   // server-issued, 30-minute upload credential (absent on a duplicate submission)
         var done = travelEntry
           ? 'You’re on the list. If enough people ask for your city, Coach Gari may bring a session there.'
-          : 'Thanks — that’s with Coach Gari. You’ll hear back soon.';
+          : 'Thanks, that’s with Coach Gari. You’ll hear back soon.';
         var finish = function(extra){
           form.reset(); if (media) media.clear();
           submissionId = newId(); // next enquiry gets a fresh id
@@ -430,10 +430,10 @@ function uploadOne(uploadToken, file){
           if (travelEntry && form.resetTravel) form.resetTravel();
         };
         if (!files.length) { finish(''); return; }
-        if (!sent) { finish(' Your files could not be attached this time — send them on WhatsApp.'); return; }
+        if (!sent) { finish(' Your files could not be attached this time. Send them on WhatsApp.'); return; }
         var okCount = 0, i = 0;
         var next = function(){
-          if (i >= files.length) { finish(okCount === files.length ? ' ' + okCount + ' file' + (okCount > 1 ? 's' : '') + ' attached.' : ' ' + okCount + ' of ' + files.length + ' files attached — you can send the rest on WhatsApp.'); return; }
+          if (i >= files.length) { finish(okCount === files.length ? ' ' + okCount + ' file' + (okCount > 1 ? 's' : '') + ' attached.' : ' ' + okCount + ' of ' + files.length + ' files attached. You can send the rest on WhatsApp.'); return; }
           var f = files[i++];
           say('Sending file ' + i + ' of ' + files.length + '…');
           return uploadOne(sent, f).then(function(){ okCount++; }).catch(function(){}).then(next);
@@ -448,7 +448,7 @@ function uploadOne(uploadToken, file){
         return;
       }
       if (res.status === 429) {
-        say('Too many messages in a row — give it a few minutes, or message on WhatsApp.', 'err');
+        say('Too many messages in a row. Give it a few minutes, or message on WhatsApp.', 'err');
         return;
       }
       throw new Error('status ' + res.status);
@@ -461,16 +461,21 @@ function uploadOne(uploadToken, file){
 })();
 
 /* ---- 6b. Plausible — aggregate website analytics ----------- */
-/* Loads the official Plausible script only when
-   CONFIG.PLAUSIBLE_DOMAIN is set. Cookie-free, no personal data.
-   The first-touch attribution above remains the conversion source;
-   Plausible is for aggregate traffic only.                       */
+/* Loads the site's own Plausible script (CONFIG.PLAUSIBLE_SCRIPT,
+   the `pa--<site id>.js` URL from the Plausible dashboard) only when
+   it is set. Cookie-free, no personal data. The queue + init below is
+   Plausible's official bootstrap, kept here rather than inline in the
+   HTML because the CSP allows scripts from 'self' and plausible.io
+   only, never inline. The first-touch attribution above remains the
+   conversion source; Plausible is for aggregate traffic only.     */
 (function plausible(){
-  if (!CONFIG.PLAUSIBLE_DOMAIN) return;
+  if (!CONFIG.PLAUSIBLE_SCRIPT) return;
+  window.plausible = window.plausible || function(){ (window.plausible.q = window.plausible.q || []).push(arguments); };
+  window.plausible.init = window.plausible.init || function(i){ window.plausible.o = i || {}; };
+  window.plausible.init();
   var s = document.createElement('script');
-  s.defer = true;
-  s.setAttribute('data-domain', CONFIG.PLAUSIBLE_DOMAIN);
-  s.src = 'https://plausible.io/js/script.js';
+  s.async = true;
+  s.src = CONFIG.PLAUSIBLE_SCRIPT;
   document.head.appendChild(s);
 })();
 

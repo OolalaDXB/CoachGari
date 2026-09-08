@@ -55,7 +55,7 @@ export const CONFIG = {
   COMMISSION_RATE: '10%',
 
   // Plausible (aggregate, cookie-free analytics). Empty = script not loaded.
-  // Activate by setting the site domain once the Plausible property exists,
-  // e.g. 'coachgari.com'. No key needed — Plausible identifies the site by domain.
-  PLAUSIBLE_DOMAIN: '',
+  // The site's own script URL from the Plausible dashboard (the site id is
+  // in the file name; nothing secret). Loaded by site.js, never inline.
+  PLAUSIBLE_SCRIPT: 'https://plausible.io/js/pa--Hs8UsMcvjjnXmKx7lcTL.js',
 };

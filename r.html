@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Your session recap — Coach Gari</title>
+<title>Your session recap | Coach Gari</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -64,7 +64,7 @@
     <p class="muted">If you think this is a mistake, please contact Coach Gari.</p>
   </div>
   <div id="content" hidden>
-    <div id="paid-banner" class="banner" hidden>Thank you. If you paid by card, your payment is being confirmed automatically — this page will update shortly.</div>
+    <div id="paid-banner" class="banner" hidden>Thank you. If you paid by card, your payment is being confirmed automatically. This page will update shortly.</div>
     <div class="card">
       <h1 id="r-title">Coaching session recap</h1>
       <p class="muted" id="r-greeting"></p>
@@ -105,7 +105,7 @@
       </div>
     </div>
   </div>
-  <footer>Coach Gari — coaching. This page shows your session recap and payment options only.</footer>
+  <footer>Coach Gari coaching. This page shows your session recap and payment options only.</footer>
 </div>
 
 <script type="module">
@@ -119,7 +119,7 @@ const qs = new URLSearchParams(location.search);
 
 function fail(title, msg) { $('err-title').textContent = title; $('err-msg').textContent = msg || ''; show('error'); }
 function money(minor, cur) { if (minor == null) return ''; try { return new Intl.NumberFormat('en-AE', { style: 'currency', currency: cur || 'USD' }).format(minor / 100); } catch { return (cur || '') + ' ' + (minor / 100).toLocaleString(); } }
-function dt(iso) { try { return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso)) + ' — ' + new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }).format(new Date(iso)); } catch { return iso; } }
+function dt(iso) { try { return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso)) + ', ' + new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }).format(new Date(iso)); } catch { return iso; } }
 
 async function api(action, extra) {
   const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, token, ...extra }) });
@@ -196,7 +196,7 @@ $('btn-card').addEventListener('click', async () => {
   const { res, data } = await api('pay_card', {});
   if (res.ok && data.ok && data.url) { location.href = data.url; return; }
   $('btn-card').disabled = false; $('btn-card').textContent = 'Pay securely by card';
-  alert(data.error === 'live_mode_blocked' || data.error === 'payments_not_configured' ? 'Card payment is not available right now — please use another option on this page or contact Coach Gari.' : (data.message ? `Could not start the card payment: ${data.message}` : 'Could not start the card payment. Please try again or use another option on this page.'));
+  alert(data.error === 'live_mode_blocked' || data.error === 'payments_not_configured' ? 'Card payment is not available right now. Please use another option on this page or contact Coach Gari.' : (data.message ? `Could not start the card payment: ${data.message}` : 'Could not start the card payment. Please try again or use another option on this page.'));
 });
 document.querySelectorAll('.copy').forEach((b) => b.addEventListener('click', async () => {
   const el = document.querySelector(b.dataset.copy); const v = el ? el.textContent.trim() : '';

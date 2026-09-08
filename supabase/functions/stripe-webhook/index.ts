@@ -50,12 +50,12 @@ async function sendQueuedEmails(supabase: any, orderId: string) {
   for (const ev of events) {
     let subject: string, html: string, to: string;
     if (ev.kind === "booking_confirmed") {
-      to = ev.to_address; subject = `You're booked — ${b.services.title}, ${when}`;
+      to = ev.to_address; subject = `You're booked: ${b.services.title}, ${when}`;
       html = `<div style="font-family:system-ui,sans-serif;font-size:16px;line-height:1.6;color:#0A0A0B;max-width:560px;margin:0 auto;padding:32px 24px">
         <p style="margin:0 0 20px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6C6C78">Coach Gari · Confirmation</p>
         <h1 style="margin:0 0 16px;font-size:26px;letter-spacing:-.02em;line-height:1.15">You're booked, ${esc(b.customer_name)}.</h1>
         <p><b>${esc(b.services.title)}</b><br>${esc(when)}<br>${esc(where)}<br>Reference ${b.reference}</p>
-        <p style="font-size:14px;color:#6C6C78">Need to move it? Reply to this email — it reaches Coach Gari directly.</p></div>`;
+        <p style="font-size:14px;color:#6C6C78">Need to move it? Reply to this email. It reaches Coach Gari directly.</p></div>`;
     } else if (ev.kind === "payment_received") {
       to = LEAD_TO; subject = `Payment received — ${b.reference} — ${b.customer_name}`;
       html = `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B"><p><b>${esc(b.customer_name)}</b> · ${esc(b.customer_contact)}</p><p>${esc(b.services.title)} · ${esc(when)} · ${esc(where)}</p><p>Booking ${b.reference} is confirmed and paid${paymentsMode(env) === "live" ? "" : " (Stripe test mode)"}.</p></div>`;

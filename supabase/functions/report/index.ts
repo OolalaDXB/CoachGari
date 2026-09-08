@@ -84,7 +84,7 @@ Deno.serve(async (req: Request) => {
     const created = await providers.stripe.createPaymentRequest!({
       requestId: request.id, publicReference: request.public_reference, externalReference: request.external_reference,
       amount: request.amount, currency: request.currency,
-      description: `Coach Gari coaching package — ${request.public_reference}`,
+      description: `Coach Gari coaching package (${request.public_reference})`,
       customerEmail: order.customer_contact,
       returnUrls: { success: `${SITE_URL}/r/${token}?paid=1`, cancel: `${SITE_URL}/r/${token}?cancelled=1` },
       attempt: (request.attempts ?? 0) + 1,

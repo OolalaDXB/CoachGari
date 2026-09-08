@@ -66,7 +66,7 @@ Deno.serve(async (req: Request) => {
   const created = await providers.stripe.createPaymentRequest!({
     requestId: request.id, publicReference: request.public_reference, externalReference: request.external_reference,
     amount: request.amount, currency: request.currency,                                        // trusted, from the DB
-    description: `${order.booking?.service_title ?? "Coaching session"} — ${order.booking?.reference ?? request.public_reference}`,
+    description: `${order.booking?.service_title ?? "Coaching session"} (${order.booking?.reference ?? request.public_reference})`,
     customerEmail: order.customer_contact,
     returnUrls: {
       success: `${SITE_URL}/?booking=${order.booking?.reference ?? ref}&t=${encodeURIComponent(token)}&paid=1#book`,

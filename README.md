@@ -61,18 +61,20 @@ export const CONFIG = {
   STUDIO_URL: 'https://thestudio.mt',    // "Studio MT" footer credit
   SOCIAL_URL: 'https://myoolala.com/u/coachgari',
   COMMISSION_RATE: '10%',                // shown in the proposal
-  PLAUSIBLE_DOMAIN: '',                  // '' = analytics off; 'coachgari.com' once the property exists
+  PLAUSIBLE_SCRIPT: 'https://plausible.io/js/pa--….js',   // '' = analytics off; the site's script URL from Plausible
 };
 ```
 
 ## Analytics (Plausible)
 
-Aggregate, cookie-free website analytics. Prepared, **off** until the Plausible
-property exists. To activate: set `PLAUSIBLE_DOMAIN: 'coachgari.com'` in
-`config.js` and push — `site.js` then loads `https://plausible.io/js/script.js`,
-already allowed by the CSP (`script-src` + `connect-src`). No key, no secret.
-No other tracker is, or should be, added. Conversion attribution stays the
-first-touch UTM data captured with each enquiry.
+Aggregate, cookie-free website analytics, **on**. `config.js` carries the
+site's own script URL (`PLAUSIBLE_SCRIPT`, the `pa--<site id>.js` file from the
+Plausible dashboard; the id is public, nothing secret). `site.js` runs
+Plausible's queue/init bootstrap and loads that script; it lives in `site.js`
+rather than inline in the HTML because the CSP allows scripts from `'self'`
+and `plausible.io` only, never inline. Set `PLAUSIBLE_SCRIPT: ''` to switch
+analytics off. No other tracker is, or should be, added. Conversion
+attribution stays the first-touch UTM data captured with each enquiry.
 
 This file is served to every visitor. It must never contain a key, a token or
 a service role. All secrets live in the Supabase Edge Function environment.

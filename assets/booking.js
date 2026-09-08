@@ -98,7 +98,7 @@ function init(){
       state.tourStops = res[1].body.tour_stops || [];
       if (!state.services.length) {
         console.warn('booking_init_failed: no_active_services (API reachable, catalogue empty)');
-        say('Booking opens soon — message on WhatsApp in the meantime.', 'err');
+        say('Booking opens soon. Message on WhatsApp in the meantime.', 'err');
         return;
       }
       say('');
@@ -107,7 +107,7 @@ function init(){
       var reason = (e && e.message) || 'network_error';
       if (attempt < 2) { console.warn('booking_init_retry: ' + reason); return new Promise(function(r){ setTimeout(r, 1500); }).then(function(){ return loadCatalogue(attempt + 1); }); }
       console.error('booking_init_failed: ' + reason + ' — endpoint ' + CONFIG.BOOKING_ENDPOINT);
-      say('Booking is temporarily unavailable — message Coach Gari on WhatsApp in the meantime.', 'err');
+      say('Booking is temporarily unavailable. Message Coach Gari on WhatsApp in the meantime.', 'err');
     });
   }
   loadCatalogue(1);
@@ -160,7 +160,7 @@ function init(){
       .then(function(res){
         stepSlots.removeChild(wait);
         state.slots = (res.body && res.body.slots) || [];
-        if (!state.slots.length) { stepSlots.appendChild(el('p', { class: 'bk-note', text: 'Nothing free that day — try another one.' })); return; }
+        if (!state.slots.length) { stepSlots.appendChild(el('p', { class: 'bk-note', text: 'Nothing free that day. Try another one.' })); return; }
         var grid = el('div', { class: 'bk-slots' });
         state.slots.forEach(function(s){
           var label = fmtTime(s.start_at, tz) + (s.tour_stop_id ? ' · ' + s.city : '');
@@ -179,7 +179,7 @@ function init(){
     stepForm.appendChild(el('h4', { text: '4. Your details' }));
     stepForm.appendChild(el('p', { class: 'bk-summary', html:
       '<b>' + svc.title + '</b> · ' + fmtDateTime(s.start_at, tz) +
-      (s.tour_stop_id ? '<br>In person — ' + s.city + ', ' + s.country + ' (' + s.session_timezone + ')' + (s.venue ? ' · ' + s.venue : '') : '<br>Online · session timezone ' + s.session_timezone) +
+      (s.tour_stop_id ? '<br>In person: ' + s.city + ', ' + s.country + ' (' + s.session_timezone + ')' + (s.venue ? ' · ' + s.venue : '') : '<br>Online · session timezone ' + s.session_timezone) +
       '<br>' + money(svc.price_amount, svc.currency) }));
     var form = el('form', { class: 'bk-form', novalidate: '' });
     form.appendChild(el('div', { class: 'two' }, [
@@ -203,7 +203,7 @@ function init(){
           if (res.status === 200 && res.body.ok) { state.booking = res.body.booking; onHeld(); return; }
           if (res.status === 409) { say('That time just went. Pick another one.', 'err'); state.key = uuid(); loadSlots(); return; }
           if (res.status === 400) { say('Add your name and an email or WhatsApp number.', 'err'); return; }
-          if (res.status === 429) { say('Too many attempts — give it a few minutes.', 'err'); return; }
+          if (res.status === 429) { say('Too many attempts. Give it a few minutes.', 'err'); return; }
           throw new Error('status ' + res.status);
         })
         .catch(function(){ say('Something went wrong. Try again, or message on WhatsApp.', 'err'); })
@@ -215,21 +215,21 @@ function init(){
     var b = state.booking;
     stepForm.hidden = true; say('');
     stepDone.innerHTML = '';
-    stepDone.appendChild(el('h4', { text: 'Time held — ' + b.reference }));
+    stepDone.appendChild(el('h4', { text: 'Time held: ' + b.reference }));
     stepDone.appendChild(el('p', { class: 'bk-summary', html: '<b>' + b.service.title + '</b> · ' + fmtDateTime(b.start_at, tz) + '<br>Session timezone: ' + b.session_timezone + (b.tour_stop ? '<br>' + b.tour_stop.city + ', ' + b.tour_stop.country + (b.tour_stop.venue ? ' · ' + b.tour_stop.venue : '') : '') }));
     if (b.price_amount === null || b.price_amount === undefined) {
       stepDone.appendChild(el('p', { class: 'bk-note', text: 'This session is priced on request. Coach Gari will confirm the price and the time with you directly.' }));
       return;
     }
     var mins = Math.max(1, Math.round((new Date(b.hold_expires_at) - Date.now()) / 60000));
-    stepDone.appendChild(el('p', { class: 'bk-note', text: 'Held for ' + mins + ' minutes. Pay to confirm — ' + money(b.price_amount, b.currency) + '.' }));
+    stepDone.appendChild(el('p', { class: 'bk-note', text: 'Held for ' + mins + ' minutes. Pay ' + money(b.price_amount, b.currency) + ' to confirm.' }));
     var pay = el('button', { type: 'button', class: 'btn btn-accent', text: 'Continue to payment →' });
     pay.addEventListener('click', function(){ startCheckout(b, pay); });
     stepDone.appendChild(pay);
   }
 
   function startCheckout(b, btn){
-    if (!CONFIG.CHECKOUT_ENDPOINT) { say('Payment is not switched on yet — Coach Gari will confirm with you directly.', 'err'); return; }
+    if (!CONFIG.CHECKOUT_ENDPOINT) { say('Payment is not switched on yet. Coach Gari will confirm with you directly.', 'err'); return; }
     btn.disabled = true; say('Taking you to secure payment…');
     fetch(CONFIG.CHECKOUT_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ref: b.reference, token: b.manage_token }) })
@@ -247,7 +247,7 @@ function init(){
     var tries = 0;
     stepDone.innerHTML = '';
     stepDone.appendChild(el('h4', { text: 'Confirming your session…' }));
-    var line = el('p', { class: 'bk-note', text: 'Payment received. We’re confirming your session now — you’ll receive the details by email shortly.' });
+    var line = el('p', { class: 'bk-note', text: 'Payment received. We’re confirming your session now. You’ll receive the details by email shortly.' });
     stepDone.appendChild(line);
     (function tick(){
       api('?action=state&ref=' + encodeURIComponent(ref) + '&token=' + encodeURIComponent(token)).then(function(res){
@@ -255,7 +255,7 @@ function init(){
         if (!b) { line.textContent = 'We could not find that booking.'; return; }
         if (b.status === 'confirmed') {
           stepDone.innerHTML = '';
-          stepDone.appendChild(el('h4', { text: 'Booking confirmed — ' + b.reference }));
+          stepDone.appendChild(el('h4', { text: 'Booking confirmed: ' + b.reference }));
           stepDone.appendChild(el('p', { class: 'bk-summary', html: '<b>' + b.service.title + '</b> · ' + fmtDateTime(b.start_at, tz) + '<br>Session timezone: ' + b.session_timezone + (b.tour_stop ? '<br>' + b.tour_stop.city + ', ' + b.tour_stop.country + (b.tour_stop.venue ? ' · ' + b.tour_stop.venue : '') : '') }));
           stepDone.appendChild(el('p', { class: 'bk-note', text: 'The details are on their way by email.' }));
           return;
@@ -264,7 +264,7 @@ function init(){
         // Came back without paying (cancel_url): the hold is still live — offer payment again.
         if (q.get('paid') !== '1' && (b.status === 'hold' || b.status === 'pending_payment')) {
           stepDone.innerHTML = '';
-          stepDone.appendChild(el('h4', { text: 'Your time is still held — ' + b.reference }));
+          stepDone.appendChild(el('h4', { text: 'Your time is still held: ' + b.reference }));
           stepDone.appendChild(el('p', { class: 'bk-note', text: 'Payment wasn’t completed. Your time stays held until ' + fmtTime(b.hold_expires_at, tz) + '.' }));
           var pay = el('button', { type: 'button', class: 'btn btn-accent', text: 'Continue to payment →' });
           pay.addEventListener('click', function(){ startCheckout(b, pay); });
@@ -272,7 +272,7 @@ function init(){
           return;
         }
         if (++tries < 40) setTimeout(tick, 3000);
-        else line.textContent = 'Still confirming. Your reference is ' + b.reference + ' — you’ll get an email as soon as it’s done.';
+        else line.textContent = 'Still confirming. Your reference is ' + b.reference + '. You’ll get an email as soon as it’s done.';
       }).catch(function(){ if (++tries < 40) setTimeout(tick, 4000); });
     })();
   }

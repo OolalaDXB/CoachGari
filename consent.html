@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>Progress tracking consent — Coach Gari</title>
+<title>Progress tracking consent | Coach Gari</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -88,7 +88,7 @@
         <span id="agree-label">I have read this notice and I agree to Coach Gari recording my fitness progress data as described above.</span>
       </label>
       <div class="actions">
-        <button class="agree" id="btn-agree" disabled>I agree — start tracking</button>
+        <button class="agree" id="btn-agree" disabled>Agree and start tracking</button>
         <button class="decline" id="btn-decline">I do not agree</button>
       </div>
       <p class="note">You can withdraw your consent at any time by asking your coach. Withdrawal stops future recording; it does not require you to keep tracking.</p>
@@ -101,7 +101,7 @@
     <p id="done-msg" class="contact"></p>
   </div>
 
-  <footer>Coach Gari — fitness coaching. This page records a coaching-data preference only; it gives no access to any account.</footer>
+  <footer>Coach Gari fitness coaching. This page records a coaching-data preference only; it gives no access to any account.</footer>
 </div>
 
 <script type="module">
@@ -152,11 +152,11 @@ async function submit(decision) {
   }
   if (decision === 'accept') {
     $('done').className = 'card state ok';
-    $('done-title').textContent = 'Thank you — consent recorded';
+    $('done-title').textContent = 'Thank you, your consent is recorded';
     $('done-msg').textContent = 'Your coach can now record your fitness progress. You can withdraw at any time by asking your coach.';
   } else {
     $('done').className = 'card state';
-    $('done-title').textContent = 'Noted — no progress tracking';
+    $('done-title').textContent = 'Noted: no progress tracking';
     $('done-msg').textContent = 'We have recorded that you do not want progress tracking. Your coaching continues as normal.';
   }
   show('done');
