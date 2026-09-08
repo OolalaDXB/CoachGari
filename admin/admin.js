@@ -393,7 +393,7 @@ function eventsFor(dateStr) {
 }
 function posStyle(iso, endIso) {
   const a = lp(iso), b = lp(endIso);
-  const top = Math.max(0, (a.mins - CAL_H0 * 60)) / 60;
+  const top = Math.max(0, (a.mins - calH0 * 60)) / 60;
   const dur = Math.max(0.5, (b.mins - a.mins) / 60);
   return `top:${top * 3}rem;height:${dur * 3}rem`;
 }
@@ -415,7 +415,7 @@ function blockChip(x) {
 }
 function hourRows(dateStr) {
   let h = '';
-  for (let i = CAL_H0; i < CAL_H1; i++) h += `<div class="cal-hr" data-date="${dateStr}" data-hour="${i}"><span class="cal-hrl">${String(i).padStart(2, '0')}:00</span></div>`;
+  for (let i = calH0; i < calH1; i++) h += `<div class="cal-hr" data-date="${dateStr}" data-hour="${i}"><span class="cal-hrl">${String(i).padStart(2, '0')}:00</span></div>`;
   return h;
 }
 function renderTimeline(dateStr) {
@@ -444,7 +444,7 @@ function renderWeekDesktop(dateStr) {
       <div class="cal-wch" data-goday="${ds}">${DOW_SHORT[i]} <b>${d.getDate()}</b></div>
       <div class="cal-grid cal-grid-w">${hourRows(ds)}<div class="cal-layer">${b.map(blockChip).join('')}${s.map(sessionChip).join('')}</div></div></div>`;
   }
-  return `<div class="cal-week"><div class="cal-wgutter"><div class="cal-wch">&nbsp;</div>${Array.from({ length: CAL_H1 - CAL_H0 }, (_, i) => `<div class="cal-gh">${String(CAL_H0 + i).padStart(2, '0')}:00</div>`).join('')}</div>${cols}</div>`;
+  return `<div class="cal-week"><div class="cal-wgutter"><div class="cal-wch">&nbsp;</div>${Array.from({ length: calH1 - calH0 }, (_, i) => `<div class="cal-gh">${String(calH0 + i).padStart(2, '0')}:00</div>`).join('')}</div>${cols}</div>`;
 }
 function renderWeekMobile(dateStr) {
   const ws = weekStartISO(dateStr); const we = addDaysISO(ws, 6);
