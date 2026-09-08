@@ -33,14 +33,14 @@ or { ignore: "<why>" }
 
 `beau_ph.ingest_provider_event(provider, provider_event_id, event_type, payload, normalized)` then: stores the evidence verbatim (idempotent on `provider_event_id`), refuses providers that cannot confirm by event (manual → `manual_provider_requires_operator`), refuses `not_configured`/`placeholder` providers, locates the request, applies the guards (rail enabled for the merchant, live/test mode, amount & currency for a paid claim, already paid, legal transition), and records the normalized event. Return value: `{ok, duplicate, outcome, request_id, payment_event_id, from, to, external_reference, public_reference, merchant}` with `outcome ∈ normalized | evidence | ignored:<why> | rejected:<why> | no_request`.
 
-Implemented today: `normalize_stripe_event` + `ingest_stripe_event`. Manual rails have no normalizer; they are confirmed by `beau_ph.confirm_manual(request, operator, amount, currency, reference, paid_at, note)`.
+Implemented today: `normalize_stripe_event` + `ingest_stripe_event`. Manual rails have no normalizer; they are confirmed by `beau_ph.confirm_manual(request, operator, amount, currency, reference, paid_at, note, merchant_key)` — the trailing `merchant_key` (also on `cancel_request`, `expire_request`, `attach_attempt`, `mark_reconciled`, `get_request`, `request_events`) scopes the call to the host's own merchant: a foreign request is "not found" (`P0002`).
 
 ## C. Host adapter contract — `beau-ph/contracts/host.ts`
 
 A host must provide exactly two translations and keep its own ledger authoritative:
 
 1. **host object → BEAU PH request** — the host decides `amount`, `currency`, `external_reference` (its order), `public_reference` (payer-facing, human) and the customer country. It calls `beau_ph.create_request` (idempotent: the live request for that order + rail is reused).
-2. **BEAU PH normalized event → host ledger, exactly once** — on `outcome = normalized, to = paid` the host writes its payment/order/earning/entitlement rows and calls `beau_ph.mark_reconciled(payment_event_id, host_reference)`. The unique receipt makes a second write impossible; `beau_ph.is_reconciled` lets the host short-circuit duplicates.
+2. **BEAU PH normalized event → host ledger, exactly once** — on `outcome = normalized, to = paid` the host first checks `beau_ph.owned_by(request_id, merchant_key)` (a foreign request is ignored, never paid), then writes its payment/order/earning/entitlement rows and calls `beau_ph.mark_reconciled(payment_event_id, host_reference, note, merchant_key)`. The unique receipt makes a second write impossible; `beau_ph.is_reconciled` lets the host short-circuit duplicates.
 
 Manual rails add: the host **authenticates and authorises the operator** and passes their identity to `confirm_manual`; the core never trusts an anonymous confirmation.
 

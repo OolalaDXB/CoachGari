@@ -17,6 +17,7 @@ declare
   mk text := 'ph_contract'; rt jsonb := '{"stripe":{"configured":true,"mode":"test"}}'::jsonb;
   j jsonb; e1 jsonb; e2 jsonb; r1 uuid; r2 uuid; r3 uuid; txt text;
   cA uuid; p1 uuid; p2 uuid; p3 uuid; oref text; oref2 text; ph_ev uuid; ordid uuid; tok text; ev jsonb;
+  p4 uuid; oref4 text; rA uuid; rB uuid; jB jsonb; nB int;
 begin
   insert into beau_ph.merchants (key, name, country, default_currency, mode) values (mk, 'Contract Test', 'ZW', 'USD', 'test');
   perform beau_ph.merchant_method_set(mk, 'stripe', true, null, '{}'::jsonb, '{}'::jsonb, null, 't');
@@ -301,6 +302,123 @@ begin
   execute 'reset role';
   j := public.report_view(tok, rt);
   if j::text not like '%softpos%' and j::text not like '%magnati%' then ok := ok + 1; else fail := fail + 1; log := log || ' [report lists in-person]'; end if;
+
+  /* ---- 18. MULTI-RAIL RACE / IDEMPOTENCY: one order, Stripe + Aani ---- */
+  -- (a) Aani settles first (same amount): host payment recorded once, the sibling Stripe request cancelled
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '5-session pack #race', 5, 120000, 'AED', 'unpaid', 'seed') returning id into p4;
+  j := public.cg_ph_request_for_pack(p4, 'stripe', rt); oref4 := j -> 'order' ->> 'reference';
+  perform public.attach_checkout(oref4, 'cs_race_1', 'https://checkout.example/race1', now() + interval '30 min');
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.payment_record_manual(p4, 120000, 'AED', 'aani', 'AANI-RACE-1');
+  execute 'reset role';
+  select id into ordid from public.orders where reference = oref4;
+  if (j ->> 'order') = oref4 and (j ->> 'superseded_order') is null
+     and (select count(*) from public.payments where order_id = ordid) = 1
+     and (select status from beau_ph.payment_requests where external_reference = oref4 and provider_key = 'stripe') = 'cancelled'
+     and (select status from beau_ph.payment_requests where external_reference = oref4 and provider_key = 'aani') = 'paid'
+     and (select payment_status from public.session_packs where id = p4) = 'paid'
+     and (select payment_source from public.session_packs where id = p4) = 'aani'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [race: aani first ' || j::text || ']'; end if;
+  -- (b) a late Stripe webhook for the cancelled card request (and a re-delivery under another id)
+  ev := jsonb_build_object('id', 'evt_race_1', 'type', 'checkout.session.completed', 'livemode', false,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_race_1', 'payment_status', 'paid', 'amount_total', 120000, 'currency', 'aed', 'payment_intent', 'pi_race_1', 'client_reference_id', oref4)));
+  e1 := public.process_stripe_event(ev);
+  e2 := public.process_stripe_event(ev || jsonb_build_object('id', 'evt_race_1b'));
+  if (e1 ->> 'status') = 'ignored' and (e1 ->> 'note') like 'rejected:illegal_transition%' and (e2 ->> 'status') = 'ignored'
+     and (select count(*) from public.payments where order_id = ordid) = 1                                                   -- no duplicate host payment
+     and (select count(*) from public.partner_earnings where order_id = ordid) = 0                                           -- no partner earning (Aani money never passed through Oolala)
+     and (select count(*) from beau_ph.reconciliations rc join beau_ph.payment_requests r on r.id = rc.request_id where r.external_reference = oref4) = 1
+     and (select count(*) from beau_ph.payment_events pe join beau_ph.payment_requests r on r.id = pe.request_id where r.external_reference = oref4 and pe.to_status = 'paid') = 1
+     and (select status from public.orders where id = ordid) = 'paid'
+     and (select payment_status from public.session_packs where id = p4) = 'paid'
+     and (select payment_source from public.session_packs where id = p4) = 'aani'
+     and (select count(*) from public.orders where session_pack_id = p4) = 1                                                 -- pack paid exactly once
+     and (select count(*) from beau_ph.provider_events where provider_key = 'stripe' and provider_event_id in ('evt_race_1','evt_race_1b') and outcome like 'rejected:illegal_transition%') = 2
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [race: late webhook ' || e1::text || ']'; end if;
+  -- (c) reverse: Stripe settles first; a later manual confirmation must not double-pay the order
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '5-session pack #race2', 5, 130000, 'AED', 'unpaid', 'seed') returning id into p3;
+  j := public.cg_ph_request_for_pack(p3, 'stripe', rt); oref := j -> 'order' ->> 'reference';
+  perform public.attach_checkout(oref, 'cs_race_2', 'https://checkout.example/race2', now() + interval '30 min');
+  e1 := public.process_stripe_event(jsonb_build_object('id', 'evt_race_2', 'type', 'checkout.session.completed', 'livemode', false,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_race_2', 'payment_status', 'paid', 'amount_total', 130000, 'currency', 'aed', 'payment_intent', 'pi_race_2', 'client_reference_id', oref))));
+  select id into ordid from public.orders where reference = oref;
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  begin perform public.payment_record_manual(p3, 130000, 'AED', 'aani', 'AANI-LATE'); fail := fail + 1; log := log || ' [race: double pay same amount]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  begin perform public.payment_record_manual(p3, 90000, 'AED', 'bank_transfer', 'BANK-LATE'); fail := fail + 1; log := log || ' [race: double pay other amount]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  execute 'reset role';
+  begin perform beau_ph.create_request('coach_gari', 'aani', oref, 'CG-RACE', 130000, 'AED'); fail := fail + 1; log := log || ' [race: request on paid order]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  if (e1 ->> 'status') = 'processed'
+     and (select count(*) from public.payments where order_id = ordid) = 1
+     and (select count(*) from public.partner_earnings where order_id = ordid) = 1
+     and (select count(*) from public.orders where session_pack_id = p3) = 1
+     and (select payment_status from public.session_packs where id = p3) = 'paid'
+     and (select payment_source from public.session_packs where id = p3) = 'stripe'
+     and (select count(*) from beau_ph.payment_requests where external_reference = oref) = 1
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [race: stripe first ' || e1::text || ']'; end if;
+
+  /* ---- 19. MULTI-TENANT ISOLATION: merchant B vs merchant A (and vs the Coach Gari host) ---- */
+  insert into beau_ph.merchants (key, name, country, default_currency, mode) values ('ph_other', 'Other Host', 'ZW', 'USD', 'test');
+  perform beau_ph.merchant_method_set('ph_other', 'stripe', true, null, '{}'::jsonb, '{}'::jsonb, null, 't');
+  perform beau_ph.merchant_method_set('ph_other', 'bank_transfer', true, 'USD', '{"account_holder":"Other Co","iban":"ZZ99OTHER","bic":"OTHRZWHX"}'::jsonb, '{}'::jsonb, null, 't');
+  -- (a) provider configuration never leaks across merchants
+  if beau_ph.eligible_methods(mk, 'ZW', 'USD', rt)::text not like '%ZZ99OTHER%'
+     and beau_ph.eligible_methods('ph_other', 'ZW', 'USD', rt)::text not like '%ZW00TEST%'
+     and beau_ph.method_matrix('ph_other', 'AE', 'AED', rt)::text not like '%+971 50 000 0000%'
+     and beau_ph.eligible_capabilities('ph_other', null, 'AED', rt, 'ios_pwa', 'merchant')::text not like '%SwipeX%'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [tenant: config leak]'; end if;
+  -- (b) public + external references are scoped per merchant: B may reuse A's references without collision or crossing
+  jB := beau_ph.create_request('ph_other', 'bank_transfer', 'ORD-2', 'REF-2003', 7000, 'USD', 'ZW'); rB := (jB ->> 'id')::uuid;
+  if rB <> r2 and (jB ->> 'status') = 'pending' and (jB -> 'instructions' ->> 'iban') = 'ZZ99OTHER'
+     and jsonb_array_length(beau_ph.requests_for('ph_other', 'ORD-2')) = 1 and (beau_ph.requests_for('ph_other', 'ORD-2') -> 0 ->> 'id')::uuid = rB
+     and (select count(*) from jsonb_array_elements(beau_ph.requests_for(mk, 'ORD-2')) e where (e ->> 'id')::uuid = rB) = 0
+     and (select status from beau_ph.payment_requests where id = r2) = 'paid'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [tenant: reference scope ' || jB::text || ']'; end if;
+  -- (c) B cannot read / use / cancel / expire / confirm / reconcile A's requests
+  j := beau_ph.create_request(mk, 'stripe', 'ORD-9', 'REF-2009', 3000, 'USD', 'ZW', null, '{}'::jsonb, rt); r3 := (j ->> 'id')::uuid;
+  perform beau_ph.attach_attempt(r3, 'cs_a9', 'https://checkout.example/a9', now() + interval '30 min', mk);
+  j := beau_ph.create_request(mk, 'bank_transfer', 'ORD-10', 'REF-2010', 8000, 'USD', 'ZW'); rA := (j ->> 'id')::uuid;
+  if beau_ph.get_request(r3, 'ph_other') is null and beau_ph.request_events(r3, 'ph_other') = '[]'::jsonb
+     and not beau_ph.owned_by(r3, 'ph_other') and beau_ph.owned_by(r3, mk) and beau_ph.get_request(r3, mk) is not null
+     and jsonb_array_length(beau_ph.request_events(r3, mk)) = 2
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [tenant: read scope]'; end if;
+  begin perform beau_ph.attach_attempt(r3, 'cs_hijack', 'https://x.example/h', now() + interval '10 min', 'ph_other'); fail := fail + 1; log := log || ' [tenant: B attached]'; exception when sqlstate 'P0002' then ok := ok + 1; end;
+  begin perform beau_ph.cancel_request(r3, 'operator', 'opB', 'hijack', 'ph_other'); fail := fail + 1; log := log || ' [tenant: B cancelled]'; exception when sqlstate 'P0002' then ok := ok + 1; end;
+  begin perform beau_ph.expire_request(r3, 'hijack', 'ph_other'); fail := fail + 1; log := log || ' [tenant: B expired]'; exception when sqlstate 'P0002' then ok := ok + 1; end;
+  begin perform beau_ph.confirm_manual(rA, 'opB', 8000, 'USD', 'B-REF', null, null, 'ph_other'); fail := fail + 1; log := log || ' [tenant: B confirmed]'; exception when sqlstate 'P0002' then ok := ok + 1; end;
+  begin perform beau_ph.mark_reconciled(ph_ev, 'other-ledger', null, 'ph_other'); fail := fail + 1; log := log || ' [tenant: B reconciled]'; exception when sqlstate 'P0002' then ok := ok + 1; end;
+  if (select status from beau_ph.payment_requests where id = r3) = 'requires_action'
+     and (select status from beau_ph.payment_requests where id = rA) = 'pending'
+     and (select count(*) from beau_ph.payment_attempts where request_id = r3) = 1
+     and (select count(*) from beau_ph.reconciliations where payment_event_id = ph_ev) = 1
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [tenant: A untouched]'; end if;
+  -- (d) host adapters cannot cross-reconcile: a Stripe event whose Checkout Session belongs to merchant B's request,
+  --     addressed (client_reference_id) to a pending Coach Gari order — Coach Gari must not pay its order with B's money
+  jB := beau_ph.create_request('ph_other', 'stripe', 'ORD-B1', 'REF-B1', 4500, 'USD', 'ZW', null, '{}'::jsonb, rt); rB := (jB ->> 'id')::uuid;
+  perform beau_ph.attach_attempt(rB, 'cs_other_1', 'https://checkout.example/o1', now() + interval '30 min', 'ph_other');
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '1-session pack #x', 1, 4500, 'AED', 'unpaid', 'seed') returning id into p3;
+  j := public.cg_ph_request_for_pack(p3, 'stripe', rt); oref := j -> 'order' ->> 'reference';
+  e1 := public.process_stripe_event(jsonb_build_object('id', 'evt_x1', 'type', 'checkout.session.completed', 'livemode', false,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_other_1', 'payment_status', 'paid', 'amount_total', 4500, 'currency', 'usd', 'payment_intent', 'pi_other_1', 'client_reference_id', oref))));
+  if (e1 ->> 'status') = 'ignored' and (e1 ->> 'note') = 'foreign_merchant'
+     and (select status from beau_ph.payment_requests where id = rB) = 'paid'                 -- B's own truth is intact; B's host reconciles it
+     and not exists (select 1 from beau_ph.reconciliations where request_id = rB)
+     and (select status from public.orders where reference = oref) = 'pending_payment'
+     and not exists (select 1 from public.payments p join public.orders o on o.id = p.order_id where o.reference = oref)
+     and (select payment_status from public.session_packs where id = p3) = 'unpaid'
+     and exists (select 1 from public.webhook_events where event_id = 'evt_x1' and status = 'ignored' and note = 'beau_ph foreign_merchant')
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [tenant: cross-host ' || e1::text || ']'; end if;
+  -- (e) the core is unreachable for an application user: no execute, deny-all RLS
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  begin perform beau_ph.get_request(r3); fail := fail + 1; log := log || ' [tenant: authenticated called core]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin select count(*) into nB from beau_ph.payment_requests; if nB = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [tenant: authenticated read core]'; end if;
+  exception when insufficient_privilege then ok := ok + 1; end;
+  execute 'reset role';
 
   raise exception 'BEAU_PH_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

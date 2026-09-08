@@ -23,6 +23,93 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## BEAU PH V0 — final runtime / merge gate (2026-09-08)
+
+**Decision: BEAU PH V0 is complete at the database / contract level; the runtime
+round trip on the deployed stack is owner-run.** No feature was added at the gate;
+two guards were closed by a forward migration.
+
+### What the gate found
+
+- **Multi-tenant isolation gap (core).** Every request-addressed core function
+  (`confirm_manual`, `cancel_request`, `expire_request`, `attach_attempt`,
+  `mark_reconciled`, `get_request`, `request_events`) was keyed by the request
+  uuid alone. Reachable only by `service_role` and the host's definer functions,
+  but nothing in the core stopped a host from acting on another merchant's
+  request, and the Coach Gari webhook path would have paid a Coach Gari order
+  from a Stripe session that belonged to another merchant's request if the
+  event named that order (`client_reference_id`).
+- **Reverse-race double pay (host).** After Stripe settled a pack, a manual
+  receipt (`payment_record_manual`) created a *new* order for the same pack and
+  paid it again — the core's "one paid request per external order" rule could
+  not see it because the host had minted a second external reference.
+- **Runtime state.** The live project holds zero orders, zero payments and zero
+  BEAU PH requests; the only Edge invocations in the last 24 h were the booking
+  function. The Vercel production alias serves `main` (`f6052b8`); the branch
+  preview serves the SoftPOS step (`002544b`). The sandbox cannot reach
+  `*.supabase.co` or `*.vercel.app`, so no HTTP probe was possible from here.
+
+### What was done (migration `20260921_beau_ph_tenant_scope.sql`, applied)
+
+- `beau_ph.owned_by(request, merchant)`; every request-addressed core function
+  takes an optional `p_merchant_key` and answers `P0002` (not found) for a
+  request of another merchant — never revealed, never acted on. Signatures
+  changed by drop + recreate (defaulted parameter, callers unchanged); grants
+  re-swept (`service_role` only).
+- Coach Gari host adapter passes `'coach_gari'` everywhere; the Stripe webhook
+  path ignores a normalized event whose request is foreign (`foreign_merchant`,
+  evidence kept, ledger untouched); `payment_record_manual` refuses a receipt on
+  a pack that is already paid or that already has a paid order (`P0003`).
+- Contract suite §18 (multi-rail race, both orders) and §19 (tenant isolation:
+  config leak, reference scope, read/use/cancel/expire/confirm/reconcile,
+  cross-host webhook, application-user reachability) → `BEAU_PH_TESTS ok=77`.
+- `scripts/e2e-runtime.mjs` for the owner-run runtime E2E (report view, no
+  health data / secrets, Aani + bank instructions without payment, `--pay`
+  Stripe TEST Checkout, `--wait` webhook → ledger → pack).
+
+### Gate results
+
+| Check | Result |
+|---|---|
+| `beau_ph_contract.sql` | ok=77 fail=0 |
+| `cg003_payments.sql` | ok=24 fail=0 |
+| `cg012_payments.sql` | ok=26 fail=0 |
+| `cg0025_permissions.sql` (RLS) | ok=236 fail=0 |
+| `cg010_privacy.sql` | ok=48 fail=0 |
+| `test-webhook-signature.mjs` | ok=24 fail=0 |
+| Supabase security advisor | 0 ERROR (INFO: deny-all RLS on `beau_ph` by design; WARN: permission-gated definer RPCs, accepted pattern; WARN: leaked-password protection — owner auth setting) |
+| Supabase performance advisor | 0 ERROR (INFO unindexed FKs, unused indexes; 1 pre-existing WARN on `services` policies) |
+
+### SoftPOS status at the gate
+
+`softpos`, `card_present`, `tap_to_pay` stay in the model as supported future
+capabilities. **No in-person method is active**: no PSP is enabled for
+`coach_gari` (`merchant_methods` holds `stripe` and `aani` only); `tap_to_pay`
+is a placeholder on `ios_app`; `card_present` is `not_configured` on every PSP;
+the `softpos` handoff exists at product level but stays inert until the owner
+onboards a PSP and enables it in Finance. Nothing in-person ever reaches the
+client page (proven).
+
+### Active vs placeholder providers (live DB)
+
+- **Active for Coach Gari:** `stripe` (test mode, webhook path proven),
+  `aani` (V1 static instructions, manual reconciliation).
+- **Available, not configured by the owner:** `bank_transfer` (no account
+  details entered — nothing seeded).
+- **Boundary only (`not_configured`):** `paynow`, `mpesa`, `ozow`, `payshap`,
+  `network_international`, `magnati`, `adyen`.
+- **Placeholder:** `beau_wallet`.
+
+### Known limitations carried
+
+See `beau-ph/docs/ROADMAP.md` "Known gaps" 1–10 — notably: provider-side cancel
+on supersede not invoked; legacy `no_request` webhook path; `cash/manual/
+external` host-only sources; SoftPOS V0 operator-attested; runtime E2E
+owner-run; tenant scope host-cooperative until V2 derives the merchant from the
+caller's credential.
+
+---
+
 ## BEAU PH — in-person / SoftPOS acceptance (capability model + V0 handoff)
 
 **Status: built, applied and proven — `BEAU_PH_TESTS ok=59 fail=0` (16 new

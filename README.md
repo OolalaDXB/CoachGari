@@ -218,6 +218,7 @@ Secrets (Supabase, never committed): `STRIPE_SECRET_KEY` (`sk_test_…`),
 ```
 node scripts/test-webhook-signature.mjs                                # offline, CI: Stripe signature scheme, 24 cases
 STRIPE_WEBHOOK_SECRET=whsec_… node scripts/test-webhook.mjs            # laptop: signed probes against the deployed function
+REPORT_TOKEN=<64-hex> node scripts/e2e-runtime.mjs [--pay] [--wait]    # laptop: BEAU PH runtime E2E on the deployed /r page (view, Aani/bank without payment, Stripe TEST checkout, webhook → pack)
 psql "$DATABASE_URL" -f supabase/tests/cg003_payments.sql              # ledger / idempotency, rolls back
 node scripts/test-checkout.mjs --wait                                  # real Stripe round trip
 ```
