@@ -105,9 +105,11 @@ Migadu mailboxes are set up separately when the domain is connected.
   submissions per 10 minutes per hashed IP, 16 KB body cap, server-side
   validation (`name` required; `contact` must look like an email or a phone
   number). Bot submissions get `200 {ok:true}` with no id.
-- **CORS**: `https://coachgari.com`, `https://www.coachgari.com`, `*.vercel.app`
-  (previews), `localhost` (dev). Edit the list at the top of
-  `supabase/functions/contact/index.ts`.
+- **CORS**: `https://coachgari28.com` (canonical), `https://www.coachgari28.com`,
+  `https://coachgari.com`, `https://www.coachgari.com`,
+  `https://coachgariv0.vercel.app` + `coachgariv0-*` branch previews,
+  `localhost` (dev). One shared allowlist for every browser-facing function:
+  `supabase/functions/_shared/cors.ts` (never `*`; allowed origin echoed).
 - **Privacy**: only a salted SHA-256 of the IP is stored, for rate limiting.
   Logs carry event names and record ids — never the message, contact or IP.
 - **Location**: the single "City and country" field is stored verbatim in

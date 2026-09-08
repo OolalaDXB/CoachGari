@@ -14,20 +14,9 @@
    Logs never contain the message, the contact or the raw IP.
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 
 /* ---- configuration (not secrets) -------------------------- */
-const ALLOWED_ORIGINS = new Set([
-  "https://coachgari.com",
-  "https://www.coachgari.com",
-]);
-// Vercel previews + local dev. Tighten the Vercel pattern to the
-// project's own preview domain once it is known.
-const ALLOWED_ORIGIN_PATTERNS: RegExp[] = [
-  /^https:\/\/[a-z0-9-]+\.vercel\.app$/i,
-  /^http:\/\/localhost(:\d+)?$/i,
-  /^http:\/\/127\.0\.0\.1(:\d+)?$/i,
-];
-
 const LEAD_TO   = Deno.env.get("LEAD_TO_EMAIL") ?? "letsgo@coachgari.com";
 const MAIL_FROM = Deno.env.get("MAIL_FROM") ?? "Coach Gari <yoursession@coachgari.com>";
 const IP_SALT   = Deno.env.get("IP_HASH_SALT") ?? "coachgari-cg001";
@@ -44,27 +33,6 @@ const LIMITS = {
 };
 
 /* ---- helpers ---------------------------------------------- */
-function originAllowed(origin: string | null): boolean {
-  if (!origin) return true; // non-browser callers (curl, tests); CORS is a browser concern
-  if (ALLOWED_ORIGINS.has(origin)) return true;
-  return ALLOWED_ORIGIN_PATTERNS.some((re) => re.test(origin));
-}
-
-function corsHeaders(origin: string | null, allowed: boolean): HeadersInit {
-  const h: Record<string, string> = {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store",
-    "Vary": "Origin",
-  };
-  if (origin && allowed) {
-    h["Access-Control-Allow-Origin"] = origin;
-    h["Access-Control-Allow-Methods"] = "POST, OPTIONS";
-    h["Access-Control-Allow-Headers"] = "Content-Type";
-    h["Access-Control-Max-Age"] = "86400";
-  }
-  return h;
-}
-
 function json(status: number, body: unknown, origin: string | null, allowed: boolean): Response {
   return new Response(JSON.stringify(body), { status, headers: corsHeaders(origin, allowed) });
 }

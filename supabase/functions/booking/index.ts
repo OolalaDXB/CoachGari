@@ -17,34 +17,14 @@
    injects SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 
-const ALLOWED_ORIGINS = new Set(["https://coachgari.com", "https://www.coachgari.com"]);
-const ALLOWED_ORIGIN_PATTERNS: RegExp[] = [
-  /^https:\/\/[a-z0-9-]+\.vercel\.app$/i,
-  /^http:\/\/localhost(:\d+)?$/i,
-  /^http:\/\/127\.0\.0\.1(:\d+)?$/i,
-];
 const IP_SALT = Deno.env.get("IP_HASH_SALT") ?? "coachgari-cg001";
 const HOLD_RATE_WINDOW_MIN = 10;
 const HOLD_RATE_MAX = 10;
 const MAX_BODY_BYTES = 8 * 1024;
 
-function originAllowed(o: string | null) {
-  if (!o) return true;
-  return ALLOWED_ORIGINS.has(o) || ALLOWED_ORIGIN_PATTERNS.some((r) => r.test(o));
-}
-function cors(origin: string | null, allowed: boolean): HeadersInit {
-  const h: Record<string, string> = {
-    "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "Vary": "Origin",
-  };
-  if (origin && allowed) {
-    h["Access-Control-Allow-Origin"] = origin;
-    h["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
-    h["Access-Control-Allow-Headers"] = "Content-Type";
-    h["Access-Control-Max-Age"] = "86400";
-  }
-  return h;
-}
+const cors = (origin: string | null, allowed: boolean): HeadersInit => corsHeaders(origin, allowed, "GET, POST, OPTIONS");
 const json = (status: number, body: unknown, origin: string | null, allowed: boolean) =>
   new Response(JSON.stringify(body), { status, headers: cors(origin, allowed) });
 

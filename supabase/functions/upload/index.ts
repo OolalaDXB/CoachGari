@@ -15,15 +15,9 @@
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+import { originAllowed, corsHeaders as cors } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
+
 const BUCKET = "enquiry-media";
-const ALLOWED_ORIGINS = new Set(["https://coachgari.com", "https://www.coachgari.com"]);
-const ALLOWED_ORIGIN_PATTERNS: RegExp[] = [/^https:\/\/[a-z0-9-]+\.vercel\.app$/i, /^http:\/\/localhost(:\d+)?$/i, /^http:\/\/127\.0\.0\.1(:\d+)?$/i];
-const originAllowed = (o: string | null) => !o || ALLOWED_ORIGINS.has(o) || ALLOWED_ORIGIN_PATTERNS.some((r) => r.test(o));
-function cors(origin: string | null, allowed: boolean): HeadersInit {
-  const h: Record<string, string> = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "Vary": "Origin" };
-  if (origin && allowed) { h["Access-Control-Allow-Origin"] = origin; h["Access-Control-Allow-Methods"] = "POST, OPTIONS"; h["Access-Control-Allow-Headers"] = "Content-Type"; h["Access-Control-Max-Age"] = "86400"; }
-  return h;
-}
 const json = (status: number, body: unknown, origin: string | null, allowed: boolean) => new Response(JSON.stringify(body), { status, headers: cors(origin, allowed) });
 const log = (event: string, data: Record<string, unknown> = {}) => console.log(JSON.stringify({ fn: "upload", event, ...data }));
 const isToken = (s: unknown) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);

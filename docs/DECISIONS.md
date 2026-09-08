@@ -23,6 +23,37 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Coach Gari — production domains added to CORS (2026-09-08)
+
+**Incident.** The public site is now served from `https://www.coachgari28.com`
+(apex `coachgari28.com` redirects to `www`). That host is a different Vercel
+project than `coachgari_v0`, whose only domains are the `*.vercel.app` aliases.
+Every browser-facing Edge Function carried its own inline origin allowlist
+(`coachgari.com`, `www.coachgari.com`, `*.vercel.app`, localhost), so
+`booking?action=services` — the source of the Programmes catalogue — answered
+`403 origin_not_allowed` to the new origin and the page showed no programmes.
+Booking, contact, consent, upload and the payment page were rejected the same
+way; admin login was unaffected (Supabase Auth / PostgREST, not Edge Functions).
+
+**Decision.** One allowlist, in one file: `supabase/functions/_shared/cors.ts`
+(`ALLOWED_ORIGINS`, `ALLOWED_ORIGIN_PATTERNS`, `originAllowed`, `corsHeaders`).
+Allowed: `https://coachgari28.com`, `https://www.coachgari28.com`,
+`https://coachgari.com`, `https://www.coachgari.com`,
+`https://coachgariv0.vercel.app`, the `coachgariv0-*.vercel.app` branch
+previews, localhost / 127.0.0.1 for development. The old `*.vercel.app`
+wildcard is gone: an arbitrary `<x>.vercel.app` origin is refused. The allowed
+origin is echoed (`Vary: Origin`); `Access-Control-Allow-Origin: *` is never
+sent. Canonical production domain: `https://coachgari28.com` (`www` allowed
+during the cut-over). Functions importing the helper: booking, contact,
+consent, upload, checkout, report (all six redeployed). `stripe-webhook` is
+server-to-server and has no CORS.
+
+**Carried.** `SITE_URL` stays `https://coachgariv0.vercel.app` by owner rule
+until `coachgari.com` is attached to the production Vercel project; Stripe
+return URLs therefore land on the Vercel alias, not on `coachgari28.com`.
+
+---
+
 ## Coach Gari / BEAU PH — Stripe LIVE cut-over (2026-09-08)
 
 **Decision: the categorical live-key refusal (CHECK-LICENCE-001) is replaced
