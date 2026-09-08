@@ -998,7 +998,7 @@ async function finance() {
   const READY = { available: 'Available', not_configured: 'Not onboarded', placeholder: 'Coming soon' };
   const capChip = (c) => `<span class="st st-${esc(c.readiness)}" title="${esc(c.notes || '')}">${esc(String(c.capability).replace(/_/g, ' '))}${c.handoff ? ' · app handoff' : ''}${c.readiness === 'placeholder' ? ' · soon' : c.readiness === 'not_configured' ? ' · not onboarded' : ''}</span>`;
   const railsPanel = `<div class="ad-panel"><h2>Payment rails — BEAU Payment Hub</h2>
-      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Every rail BEAU PH knows, its capabilities, whether it is onboarded, and whether it is enabled for Coach Gari. What a given client or device is actually offered is decided server-side per country, currency, platform and readiness — never in a page. Card payments stay in Stripe <b>test mode</b> (CHECK-LICENCE-001).</p>
+      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Every rail BEAU PH knows, its capabilities, whether it is onboarded, and whether it is enabled for Coach Gari. What a given client or device is actually offered is decided server-side per country, currency, platform and readiness — never in a page. Card payments run in the mode the deployment declares (<b>PAYMENTS_MODE</b>: test or live); a key of another mode, or no declared mode, is refused server-side.</p>
       ${table(['Rail', 'Capabilities', 'Readiness (API)', 'Countries', 'Currencies', 'For Coach Gari'], (rails || []).map((r) => `<tr>
         <td><b>${esc(r.display_name)}</b><br><span class="ad-muted" style="font-size:12px">${esc(r.notes || '')}</span></td>
         <td style="max-width:260px;line-height:1.9">${(r.capabilities || []).map(capChip).join(' ') || '—'}</td>

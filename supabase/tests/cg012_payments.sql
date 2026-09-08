@@ -13,6 +13,7 @@ declare
   ok int := 0; fail int := 0; log text := '';
   cA uuid; p1 uuid; p2 uuid; p3 uuid; s1 uuid; oref text; tok text; j jsonb; jh jsonb; n int; ordid uuid; pref text;
 begin
+  update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
   insert into public.app_users (email, display_name, party) values
     ('fin@test.local','Fin','gari'),('coachonly@test.local','Coach','gari'),('padmin@test.local','PA','studio');
   insert into public.app_permissions (email, permission) values

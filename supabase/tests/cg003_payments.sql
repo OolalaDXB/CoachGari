@@ -13,6 +13,7 @@ declare
   svc uuid; d date; base timestamptz; j jsonb; o jsonb; ev jsonb; res jsonb; n int; e record; s jsonb;
   ref text; tok text; oref text; sess text := 'cs_test_' || replace(gen_random_uuid()::text, '-', ''); pi text := 'pi_test_' || replace(gen_random_uuid()::text, '-', '');
 begin
+  update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
   d := current_date + 3; while extract(isodow from d) <> 1 loop d := d + 1; end loop;
   update public.availability_rules set active = false;
   insert into public.services (slug, title, category, duration_minutes, price_amount, currency, delivery_mode, default_capacity, active, listed)

@@ -19,6 +19,7 @@ declare
   cA uuid; p1 uuid; p2 uuid; p3 uuid; oref text; oref2 text; ph_ev uuid; ordid uuid; tok text; ev jsonb;
   p4 uuid; oref4 text; rA uuid; rB uuid; jB jsonb; nB int;
 begin
+  update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
   insert into beau_ph.merchants (key, name, country, default_currency, mode) values (mk, 'Contract Test', 'ZW', 'USD', 'test');
   perform beau_ph.merchant_method_set(mk, 'stripe', true, null, '{}'::jsonb, '{}'::jsonb, null, 't');
   perform beau_ph.merchant_method_set(mk, 'aani', true, 'AED', '{"display_value":"+971 50 000 0000"}'::jsonb, '{}'::jsonb, null, 't');
@@ -419,6 +420,52 @@ begin
   begin select count(*) into nB from beau_ph.payment_requests; if nB = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [tenant: authenticated read core]'; end if;
   exception when insufficient_privilege then ok := ok + 1; end;
   execute 'reset role';
+
+  /* ---- 20. PAYMENT MODE: test and live never cross (both directions) ---- */
+  -- a LIVE merchant: a test-mode runtime is not eligible; a live runtime is; a test-mode event on a live request is refused
+  update beau_ph.merchants set mode = 'live' where key = mk;
+  j := beau_ph.method_matrix(mk, 'ZW', 'USD', rt);
+  if (select e ->> 'reason' from jsonb_array_elements(j) e where e ->> 'provider' = 'stripe') = 'mode_mismatch'
+     and beau_ph.eligible_methods(mk, 'ZW', 'USD', rt)::text not like '%"stripe"%'
+     and beau_ph.eligible_methods(mk, 'ZW', 'USD', '{"stripe":{"configured":true,"mode":"live"}}'::jsonb)::text like '%"stripe"%'
+     and beau_ph.eligible_methods(mk, 'ZW', 'USD', '{"stripe":{"configured":false,"mode":"live","reason":"key_mode_mismatch"}}'::jsonb)::text not like '%"stripe"%'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [mode: live merchant eligibility ' || j::text || ']'; end if;
+  begin perform beau_ph.create_request(mk, 'stripe', 'ORD-M1', 'REF-M1', 900, 'USD', 'ZW', null, '{}'::jsonb, rt); fail := fail + 1; log := log || ' [mode: test runtime request on live merchant]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  j := beau_ph.create_request(mk, 'stripe', 'ORD-M1', 'REF-M1', 900, 'USD', 'ZW', null, '{}'::jsonb, '{"stripe":{"configured":true,"mode":"live"}}'::jsonb); rA := (j ->> 'id')::uuid;
+  perform beau_ph.attach_attempt(rA, 'cs_live_1', 'https://checkout.example/l1', now() + interval '30 min', mk);
+  e1 := beau_ph.ingest_stripe_event(jsonb_build_object('id', 'evt_m1', 'type', 'checkout.session.completed', 'livemode', false,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_live_1', 'payment_status', 'paid', 'amount_total', 900, 'currency', 'usd', 'payment_intent', 'pi_m1'))));
+  if (e1 ->> 'outcome') = 'rejected:mode_mismatch' and (select status from beau_ph.payment_requests where id = rA) = 'requires_action'
+     and exists (select 1 from beau_ph.provider_events where provider_key = 'stripe' and provider_event_id = 'evt_m1' and outcome = 'rejected:mode_mismatch')
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [mode: test event on live merchant ' || e1::text || ']'; end if;
+  e1 := beau_ph.ingest_stripe_event(jsonb_build_object('id', 'evt_m2', 'type', 'checkout.session.completed', 'livemode', true,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_live_1', 'payment_status', 'paid', 'amount_total', 900, 'currency', 'usd', 'payment_intent', 'pi_m1'))));
+  if (e1 ->> 'outcome') = 'normalized' and (e1 ->> 'to') = 'paid' then ok := ok + 1; else fail := fail + 1; log := log || ' [mode: live event on live merchant ' || e1::text || ']'; end if;
+  update beau_ph.merchants set mode = 'test' where key = mk;
+  -- the production host merchant is intended LIVE: a test runtime offers no card on its report page; a live runtime does
+  update beau_ph.merchants set mode = 'live' where key = 'coach_gari';
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '5-session pack #live', 5, 50000, 'AED', 'unpaid', 'seed') returning id into p4;
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  tok := public.report_issue_link(p4) ->> 'token';
+  execute 'reset role';
+  if public.report_view(tok, rt)::text not like '%"stripe"%'
+     and public.report_view(tok, '{"stripe":{"configured":true,"mode":"live"}}'::jsonb)::text like '%"stripe"%'
+     and public.report_view(tok, '{}'::jsonb)::text not like '%"stripe"%'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [mode: host report page]'; end if;
+  begin perform public.cg_ph_request_for_pack(p4, 'stripe', rt); fail := fail + 1; log := log || ' [mode: host test request on live merchant]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  j := public.cg_ph_request_for_pack(p4, 'stripe', '{"stripe":{"configured":true,"mode":"live"}}'::jsonb); oref4 := j -> 'order' ->> 'reference';
+  perform public.attach_checkout(oref4, 'cs_live_h1', 'https://checkout.example/lh1', now() + interval '30 min');   -- declares the merchant's own (live) mode
+  e1 := public.process_stripe_event(jsonb_build_object('id', 'evt_mh1', 'type', 'checkout.session.completed', 'livemode', false,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_live_h1', 'payment_status', 'paid', 'amount_total', 50000, 'currency', 'aed', 'payment_intent', 'pi_mh1', 'client_reference_id', oref4))));
+  e2 := public.process_stripe_event(jsonb_build_object('id', 'evt_mh2', 'type', 'checkout.session.completed', 'livemode', true,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_live_h1', 'payment_status', 'paid', 'amount_total', 50000, 'currency', 'aed', 'payment_intent', 'pi_mh1', 'client_reference_id', oref4))));
+  if (e1 ->> 'status') = 'ignored' and (e1 ->> 'note') = 'rejected:mode_mismatch'
+     and (e2 ->> 'status') = 'processed' and (select payment_status from public.session_packs where id = p4) = 'paid'
+     and (select count(*) from public.payments p join public.orders o on o.id = p.order_id where o.reference = oref4) = 1
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [mode: host live webhook ' || e1::text || ' ' || e2::text || ']'; end if;
+  update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
 
   raise exception 'BEAU_PH_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

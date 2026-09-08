@@ -1,7 +1,8 @@
 /* =============================================================
    CG-003 — stripe-webhook  (on BEAU PH since the productisation step)
    1. The Stripe ADAPTER verifies the signature (Stripe's own scheme, raw
-      body, 300 s tolerance) and refuses live-mode events for a test merchant.
+      body, 300 s tolerance) and refuses an event whose livemode does not
+      match PAYMENTS_MODE (test | live; unset → everything refused).
    2. The adapter enriches checkout.session.completed with fee / charge /
       balance-transaction evidence.
    3. The Coach Gari HOST ADAPTER (process_stripe_event) hands the verified
@@ -12,13 +13,16 @@
    4. Queued transactional emails are sent if Resend is configured.
 
    Secrets (Supabase secrets): STRIPE_WEBHOOK_SECRET (whsec_…),
-   STRIPE_SECRET_KEY (test, for fee enrichment), RESEND_API_KEY
-   (optional). Subscribe the endpoint to: checkout.session.completed,
+   STRIPE_SECRET_KEY (for fee enrichment), PAYMENTS_MODE, RESEND_API_KEY
+   (optional). Logs carry only event id / type, order reference, BEAU PH
+   request id, Checkout Session id, normalized outcome — never secrets or
+   card data. Subscribe the endpoint to: checkout.session.completed,
    checkout.session.expired, refund.created, refund.updated,
    charge.dispute.created, charge.dispute.updated, charge.dispute.closed.
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { providers } from "../../../beau-ph/core/registry.ts";
+import { paymentsMode } from "../../../beau-ph/providers/stripe/adapter.ts";
 import { processStripeEvent } from "../../../beau-ph/host-adapters/coach-gari/adapter.ts";
 
 const LEAD_TO = Deno.env.get("LEAD_TO_EMAIL") ?? "letsgo@coachgari.com";
@@ -54,7 +58,7 @@ async function sendQueuedEmails(supabase: any, orderId: string) {
         <p style="font-size:14px;color:#6C6C78">Need to move it? Reply to this email — it reaches Coach Gari directly.</p></div>`;
     } else if (ev.kind === "payment_received") {
       to = LEAD_TO; subject = `Payment received — ${b.reference} — ${b.customer_name}`;
-      html = `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B"><p><b>${esc(b.customer_name)}</b> · ${esc(b.customer_contact)}</p><p>${esc(b.services.title)} · ${esc(when)} · ${esc(where)}</p><p>Booking ${b.reference} is confirmed and paid (Stripe test mode).</p></div>`;
+      html = `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B"><p><b>${esc(b.customer_name)}</b> · ${esc(b.customer_contact)}</p><p>${esc(b.services.title)} · ${esc(when)} · ${esc(where)}</p><p>Booking ${b.reference} is confirmed and paid${paymentsMode(env) === "live" ? "" : " (Stripe test mode)"}.</p></div>`;
     } else { continue; }
     try {
       const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -86,8 +90,12 @@ Deno.serve(async (req: Request) => {
   // 3. host adapter → BEAU PH → authoritative ledger (idempotent; Stripe retries on 500)
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
   const { data, error } = await processStripeEvent(supabase, event);
-  if (error) { log("process_failed", { type: event.type, code: error.code }); return reply(500, { ok: false, error: "processing_failed" }); }
-  log("processed", { type: event.type, status: data?.status, duplicate: !!data?.duplicate, beau_ph: data?.beau_ph?.outcome ?? data?.beau_ph ?? null });
+  // deno-lint-ignore no-explicit-any
+  const obj = (event as any).data?.object ?? {};
+  const safe = { event_id: event.id, type: event.type, livemode: event.livemode === true, session: typeof obj.id === "string" && obj.id.startsWith("cs_") ? obj.id : null };
+  if (error) { log("process_failed", { ...safe, code: error.code }); return reply(500, { ok: false, error: "processing_failed" }); }
+  log("processed", { ...safe, status: data?.status, duplicate: !!data?.duplicate, order: data?.order ?? null, request_id: data?.beau_ph?.request_id ?? null,
+                     beau_ph: data?.beau_ph?.outcome ?? data?.beau_ph ?? null, note: data?.note ?? null });
 
   // 4. host concern: queued emails
   if (event.type === "checkout.session.completed" && data?.status === "processed" && data?.order) {

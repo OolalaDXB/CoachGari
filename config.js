@@ -24,7 +24,7 @@ export const CONFIG = {
   // Empty = the attachment field is hidden.
   UPLOAD_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/upload',
 
-  // Server-side Stripe Checkout creation (test mode until CHECK-LICENCE-001 is cleared).
+  // Server-side Stripe Checkout creation (mode = the deployment's PAYMENTS_MODE: test | live).
   // Empty = payment step disabled; holds are still created.
   CHECKOUT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/checkout',
 

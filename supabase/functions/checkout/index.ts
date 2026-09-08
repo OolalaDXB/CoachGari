@@ -2,11 +2,13 @@
    CG-003 — checkout  (on BEAU PH since the productisation step)
    POST {ref, token} → held booking → trusted order (amount from the DB) →
    BEAU PH payment request → Stripe Checkout Session via the Stripe adapter
-   (TEST MODE) → attempt recorded → {url}.
+   → attempt recorded → {url}. The success redirect is NEVER authoritative:
+   only the signature-verified webhook (stripe-webhook) marks anything paid.
 
-   Secrets (Supabase secrets, never in git):
-     STRIPE_SECRET_KEY   — must be a TEST key (sk_test_…). A live key is
-                           refused by the adapter: CHECK-LICENCE-001.
+   Secrets / config (Supabase secrets, never in git):
+     PAYMENTS_MODE       — test | live. The adapter refuses a key whose mode
+                           differs, and refuses everything when it is unset.
+     STRIPE_SECRET_KEY   — sk_test_… under test, sk_live_… under live.
      SITE_URL            — where Stripe sends the customer back
                            (default: the Vercel production alias).
    The browser never supplies an amount; any such field is ignored.
@@ -44,9 +46,9 @@ Deno.serve(async (req: Request) => {
   const runtime = runtimeMap(env);
   const rt = runtime.stripe!;
   if (!rt.configured) {
-    // CHECK-LICENCE-001: live collection is blocked; the adapter only ever reports a TEST key as configured.
-    log(rt.mode === "live" ? "live_key_refused" : "not_configured");
-    return json(503, { ok: false, error: rt.mode === "live" ? "live_mode_blocked" : "payments_not_configured" }, origin, allowed);
+    // payment-mode gate: PAYMENTS_MODE unset, or a key whose mode differs from it — refuse, never guess
+    log("not_configured", { mode: rt.mode ?? null, reason: rt.reason ?? null });
+    return json(503, { ok: false, error: "payments_not_configured", mode: rt.mode ?? null, reason: rt.reason ?? null }, origin, allowed);
   }
 
   let body: Record<string, unknown>;
@@ -84,6 +86,6 @@ Deno.serve(async (req: Request) => {
   const { error: attachErr } = await attachCheckout(supabase, order.reference, created.providerReference, created.url, created.expiresAt);
   if (attachErr) return rpcError(attachErr, origin, allowed);
 
-  log("session_created", { order: order.reference, mode: "test" });
+  log("session_created", { order: order.reference, request_id: request.id, session: created.providerReference, mode: rt.mode });
   return json(200, { ok: true, url: created.url, order: order.reference }, origin, allowed);
 });

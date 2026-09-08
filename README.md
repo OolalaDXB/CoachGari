@@ -177,11 +177,16 @@ psql "$DATABASE_URL" -f supabase/tests/cg002_booking.sql
 node scripts/test-booking.mjs
 ```
 
-## Payments (CG-003) — Stripe TEST mode only
+## Payments (CG-003) — Stripe, mode gated by `PAYMENTS_MODE`
 
-Server-side Stripe Checkout, verified webhook, financial ledger. Live mode is
-blocked in code (CHECK-LICENCE-001): `checkout` refuses non-`sk_test_` keys,
-`stripe-webhook` refuses `livemode: true` events.
+Server-side Stripe Checkout, verified webhook, financial ledger. The payment
+mode is declared, never guessed: `PAYMENTS_MODE=test` accepts only an
+`sk_test_` key and only `livemode:false` events; `PAYMENTS_MODE=live` accepts
+only an `sk_live_` key and only `livemode:true` events; unset/unknown refuses
+payment creation and every webhook (`payments_not_configured` /
+`payments_mode_unset`). The BEAU PH merchant `coach_gari` is intended **live**
+(`beau_ph.merchants.mode`); the DB refuses a runtime or an event whose mode
+differs from it. Oolala's Stripe account is the merchant (no Connect).
 
 - **Tables**: `orders`, `payments`, `refunds`, `chargebacks`, `webhook_events`,
   `partner_earnings`, `partner_settlements`, `partner_settlement_items`,
@@ -205,9 +210,11 @@ blocked in code (CHECK-LICENCE-001): `checkout` refuses non-`sk_test_` keys,
   payable = net − commission. Settlements are manual bank transfers recorded
   with `mark_settlement_paid`.
 
-Secrets (Supabase, never committed): `STRIPE_SECRET_KEY` (`sk_test_…`),
-`STRIPE_WEBHOOK_SECRET` (`whsec_…`), optional `SITE_URL` (default
-`https://coachgariv0.vercel.app`). Webhook endpoint:
+Secrets (Supabase, never committed): `STRIPE_SECRET_KEY` (mode must match
+`PAYMENTS_MODE`), `STRIPE_WEBHOOK_SECRET` (`whsec_…`), `PAYMENTS_MODE`
+(`test` | `live`; set with `supabase secrets set PAYMENTS_MODE=live`), optional
+`SITE_URL` (default `https://coachgariv0.vercel.app` — keep it until
+`coachgari.com` is attached to the Vercel project). Webhook endpoint:
 `https://<project-ref>.supabase.co/functions/v1/stripe-webhook`, events
 `checkout.session.completed`, `checkout.session.expired`, `refund.created`,
 `refund.updated`, `charge.dispute.created`, `charge.dispute.updated`,

@@ -11,8 +11,10 @@
                       renders exactly this list — no country logic in JS.
      POST {action:"pay_card", token}
           → {ok, url}   BEAU PH request (amount from the DB order) → Stripe
-                        Checkout via the Stripe adapter (TEST mode only —
-                        CHECK-LICENCE-001) → attempt recorded.
+                        Checkout via the Stripe adapter (mode = PAYMENTS_MODE;
+                        a key of another mode, or no mode, is refused) →
+                        attempt recorded. The ?paid=1 return is NEVER
+                        authoritative: only the verified webhook marks paid.
    Authorisation = the report token only (256-bit, sha256 stored, revocable,
    expiring). No JWT, no CRM/admin access. This function never marks anything
    paid — only a verified Stripe webhook (card) or an authorised operator
@@ -71,8 +73,8 @@ Deno.serve(async (req: Request) => {
   if (body.action === "pay_card") {
     const rt = runtime.stripe!;
     if (!rt.configured) {
-      log(rt.mode === "live" ? "live_key_refused" : "not_configured");
-      return json(503, { ok: false, error: rt.mode === "live" ? "live_mode_blocked" : "payments_not_configured" }, origin, allowed);
+      log("not_configured", { mode: rt.mode ?? null, reason: rt.reason ?? null });
+      return json(503, { ok: false, error: "payments_not_configured", mode: rt.mode ?? null, reason: rt.reason ?? null }, origin, allowed);
     }
     const { data: packId, error: rErr } = await packIdForToken(supabase, token);
     if (rErr) return rpcError(rErr, origin, allowed);
@@ -98,7 +100,7 @@ Deno.serve(async (req: Request) => {
 
     const { error: aErr } = await attachCheckout(supabase, order.reference, created.providerReference, created.url, created.expiresAt);
     if (aErr) return rpcError(aErr, origin, allowed, 409);
-    log("session_created", { status: "ok", mode: "test" });
+    log("session_created", { status: "ok", request_id: request.id, public_reference: request.public_reference, session: created.providerReference, mode: rt.mode });
     return json(200, { ok: true, url: created.url }, origin, allowed);
   }
 

@@ -19,6 +19,7 @@ declare
   svc uuid; bid uuid; cid uuid; tok text; oref text; n int; j jsonb; s jsonb; q text; b boolean;
   sess text := 'cs_test_' || replace(gen_random_uuid()::text, '-', ''); pi text := 'pi_test_' || replace(gen_random_uuid()::text, '-', '');
 begin
+  update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
   /* ---- seed as postgres ---- */
   insert into public.app_users (email, display_name, party) values
     ('coach@test.local', 'Coach', 'gari'), ('finance@test.local', 'Finance', 'oolala'),

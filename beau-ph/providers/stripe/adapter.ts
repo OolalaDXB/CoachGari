@@ -3,18 +3,40 @@
 
    createPaymentRequest → hosted Checkout Session (redirect). The amount and
    currency come from the BEAU PH request (i.e. the host's order); the payer
-   never supplies them. TEST MODE ONLY: a live key is refused in code
-   (CHECK-LICENCE-001) and `runtime()` reports it as not configured.
+   never supplies them.
+
+   PAYMENT MODE GATE (replaces CHECK-LICENCE-001's categorical live refusal):
+     PAYMENTS_MODE=test  → sk_test_ allowed, sk_live_ refused
+     PAYMENTS_MODE=live  → sk_live_ allowed, sk_test_ refused
+     PAYMENTS_MODE unset / unknown → refused (never guessed)
+   `runtime()` reports only {configured, mode, reason}: never a key, never a
+   prefix beyond the mode word. Every other call in this adapter (create,
+   status, cancel, enrich) is gated on `runtime().configured`.
+
    verifyWebhook → Stripe's own signing scheme (signature.js), raw body,
-   300 s tolerance; a live-mode event is refused for a test merchant.
+   300 s tolerance; an event whose `livemode` does not match PAYMENTS_MODE is
+   refused (mode_mismatch). The DB core independently refuses evidence whose
+   livemode does not match the merchant's mode.
    enrich → adds the Stripe fee / charge / balance transaction as evidence
    before the DB normalizer (beau_ph.normalize_stripe_event) runs.
-   Secrets: STRIPE_SECRET_KEY (sk_test_…), STRIPE_WEBHOOK_SECRET (whsec_…).
+   Secrets: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET; config: PAYMENTS_MODE.
    ============================================================= */
 import type { CreateRequestInput, CreateRequestResult, EnvReader, ProviderAdapter, ProviderCapabilities, RuntimeReadiness, VerifiedEvent } from "../../contracts/provider.ts";
 import { verifyStripeSignature } from "./signature.js";
 
 const DEFAULT_EXPIRES_S = 30 * 60; // Stripe minimum for Checkout expiry
+
+/** The deployment's declared payment mode, or null when unset / unknown. Safe to log. */
+export function paymentsMode(env: EnvReader): "test" | "live" | null {
+  const m = (env("PAYMENTS_MODE") ?? "").trim().toLowerCase();
+  return m === "test" || m === "live" ? m : null;
+}
+
+function keyMode(key: string): "test" | "live" | null {
+  if (key.startsWith("sk_test_") || key.startsWith("rk_test_")) return "test";
+  if (key.startsWith("sk_live_") || key.startsWith("rk_live_")) return "live";
+  return null;
+}
 
 export const stripe: ProviderAdapter = {
   key: "stripe",
@@ -23,7 +45,7 @@ export const stripe: ProviderAdapter = {
     return {
       key: "stripe", displayName: "Card (Stripe)", kind: "online", confirmation: "provider_event", readiness: "available",
       capabilities: [
-        { capability: "online_checkout", readiness: "available", confirmation: "provider_event", platforms: null, initiatedBy: "customer", handoff: false, notes: "Hosted Checkout, webhook-confirmed. TEST mode." },
+        { capability: "online_checkout", readiness: "available", confirmation: "provider_event", platforms: null, initiatedBy: "customer", handoff: false, notes: "Hosted Checkout, webhook-confirmed. Mode follows PAYMENTS_MODE." },
         { capability: "payment_link", readiness: "not_configured", confirmation: "provider_event", platforms: null, initiatedBy: "merchant", handoff: false, notes: "Stripe Payment Links — not implemented." },
       ],
       supports: { checkout: true, instructions: false, webhook: true, statusPoll: true, cancel: true, refundEvents: true },
@@ -33,11 +55,14 @@ export const stripe: ProviderAdapter = {
   },
 
   runtime(env: EnvReader): RuntimeReadiness {
+    const mode = paymentsMode(env);
+    if (!mode) return { configured: false, reason: "payments_mode_unset" };            // never guess a mode
     const key = env("STRIPE_SECRET_KEY") ?? "";
-    if (!key) return { configured: false, reason: "STRIPE_SECRET_KEY missing" };
-    if (key.startsWith("sk_test_")) return { configured: true, mode: "test" };
-    if (key.startsWith("sk_live_")) return { configured: false, mode: "live", reason: "live key refused (CHECK-LICENCE-001)" };
-    return { configured: false, reason: "unrecognised key format" };
+    if (!key) return { configured: false, mode, reason: "STRIPE_SECRET_KEY missing" };
+    const km = keyMode(key);
+    if (!km) return { configured: false, mode, reason: "unrecognised key format" };
+    if (km !== mode) return { configured: false, mode, reason: "key_mode_mismatch" };   // the key's mode ≠ PAYMENTS_MODE
+    return { configured: true, mode };
   },
 
   async createPaymentRequest(input: CreateRequestInput, env: EnvReader): Promise<CreateRequestResult> {
@@ -76,8 +101,8 @@ export const stripe: ProviderAdapter = {
   },
 
   async getStatus(providerReference: string, env: EnvReader) {
-    const key = env("STRIPE_SECRET_KEY") ?? "";
-    if (!key.startsWith("sk_test_")) return { providerStatus: "unavailable", status: null };
+    if (!stripe.runtime(env).configured) return { providerStatus: "unavailable", status: null };
+    const key = env("STRIPE_SECRET_KEY")!;
     const r = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(providerReference)}`, { headers: { Authorization: `Bearer ${key}` } });
     const s = await r.json().catch(() => null);
     if (!r.ok || !s) return { providerStatus: `error ${r.status}`, status: null };
@@ -86,8 +111,8 @@ export const stripe: ProviderAdapter = {
   },
 
   async cancel(providerReference: string, env: EnvReader) {
-    const key = env("STRIPE_SECRET_KEY") ?? "";
-    if (!key.startsWith("sk_test_")) return { ok: false, reason: "not configured" };
+    if (!stripe.runtime(env).configured) return { ok: false, reason: "not configured" };
+    const key = env("STRIPE_SECRET_KEY")!;
     const r = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(providerReference)}/expire`, { method: "POST", headers: { Authorization: `Bearer ${key}` } });
     return r.ok ? { ok: true } : { ok: false, reason: `stripe ${r.status}` };
   },
@@ -100,16 +125,20 @@ export const stripe: ProviderAdapter = {
     let event: Record<string, unknown>;
     try { event = JSON.parse(req.rawBody); } catch { return { ok: false, reason: "invalid_json" }; }
     if (typeof event.id !== "string" || typeof event.type !== "string") return { ok: false, reason: "malformed_event" };
-    if (event.livemode === true && stripe.runtime(env).mode !== "live") return { ok: false, reason: "live_mode_blocked" };
+    // the event's mode must match the deployment's declared mode — in both directions; an unset mode refuses everything
+    const mode = paymentsMode(env);
+    if (!mode) return { ok: false, reason: "payments_mode_unset" };
+    if ((event.livemode === true) !== (mode === "live")) return { ok: false, reason: "mode_mismatch" };
     return { ok: true, providerEventId: event.id, eventType: event.type, payload: event };
   },
 
   async enrich(event: Record<string, unknown>, env: EnvReader) {
     if (event.type !== "checkout.session.completed") return event;
-    const key = env("STRIPE_SECRET_KEY") ?? "";
+    if (!stripe.runtime(env).configured) return event;
+    const key = env("STRIPE_SECRET_KEY")!;
     // deno-lint-ignore no-explicit-any
     const pi = (event as any).data?.object?.payment_intent;
-    if (!key.startsWith("sk_test_") || typeof pi !== "string") return event;
+    if (typeof pi !== "string") return event;
     try {
       const r = await fetch(`https://api.stripe.com/v1/payment_intents/${pi}?expand[]=latest_charge.balance_transaction`, { headers: { Authorization: `Bearer ${key}` } });
       const p = await r.json();

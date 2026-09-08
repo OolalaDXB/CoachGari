@@ -23,6 +23,56 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Coach Gari / BEAU PH — Stripe LIVE cut-over (2026-09-08)
+
+**Decision: the categorical live-key refusal (CHECK-LICENCE-001) is replaced
+by a declared payment mode.** `PAYMENTS_MODE` (`test` | `live`) is the
+deployment's intent; the key's mode must match it (`sk_test_` ↔ test,
+`sk_live_` ↔ live) or the Stripe adapter reports `key_mode_mismatch`; an unset
+or unknown mode reports `payments_mode_unset`. In both cases payment creation is
+refused and every webhook is refused — never guessed. The adapter never exposes
+a key or a prefix, only `{configured, mode, reason}`.
+
+- **Both directions, both layers.** The Edge refuses an event whose `livemode`
+  differs from `PAYMENTS_MODE`; the DB core refuses evidence whose `livemode`
+  differs from the merchant's mode (`20260922_beau_ph_stripe_live.sql`,
+  previously one-way); eligibility refuses a runtime whose mode differs from
+  the merchant's. `beau_ph.merchants.mode` for `coach_gari` is now **live**;
+  `attach_checkout` declares the merchant's own mode instead of a hardcoded
+  test runtime.
+- **Merchant identity unchanged**: Oolala's Stripe account collects; Coach
+  Gari is the host; no Stripe Connect. Ledger, commission and settlements as
+  before (CG-003).
+- **Success page never authoritative**: `?paid=1` only makes the page poll;
+  the verified webhook (`checkout.session.completed`) is the only paid source.
+- **Webhook events handled** (deployed code): `checkout.session.completed`,
+  `checkout.session.expired`, `refund.created`, `refund.updated`,
+  `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`.
+  Anything else → `ignored: unhandled type` (200).
+- **Diagnostics**: logs carry event id/type, livemode, Checkout Session id,
+  order reference, BEAU PH request id, normalized outcome, mode and refusal
+  reason — never a key, a signing secret, or card data.
+- **Suites** pin the merchant to test mode inside their transaction; §20 proves
+  the mode gate both ways. Contract 84/0, CG003 24/0, CG012 26/0, CG0025
+  236/0, signature 24/0; security advisor 0 ERROR.
+- **SITE_URL**: `coachgari.com` is **not** attached to the Vercel project
+  (`coachgari_v0` domains: `coachgariv0.vercel.app` + git aliases). The
+  configured value cannot be read from here (secrets are write-only);
+  the code default is `https://coachgariv0.vercel.app`. Decision: **do not
+  change it** until the domain is attached and serves the app (GATE-DOMAIN-001).
+- **Owner actions (no secret ever displayed)**: set `PAYMENTS_MODE=live` on the
+  Supabase project (`supabase secrets set PAYMENTS_MODE=live --project-ref
+  acrjrlgeeyseyolmofuq`) — it cannot be written from this session (no secrets
+  tool; egress blocked); confirm the production webhook endpoint subscribes to
+  the seven events; run `PAYMENTS_MODE=live STRIPE_WEBHOOK_SECRET=… node
+  scripts/test-webhook.mjs` from a laptop; make the first live payment
+  deliberately (a small real amount) and check `payments` / the pack projection.
+  Until `PAYMENTS_MODE` is set, checkout and report answer 503
+  `payments_not_configured` (`payments_mode_unset`) and the webhook refuses
+  everything — payments are closed, not guessed.
+
+---
+
 ## BEAU PH V0 — final runtime / merge gate (2026-09-08)
 
 **Decision: BEAU PH V0 is complete at the database / contract level; the runtime
