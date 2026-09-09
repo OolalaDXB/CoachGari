@@ -77,6 +77,12 @@ const svcTitle = (id) => services.find((s) => s.id === id)?.title || '—';
 async function confirmAct(msg) { return window.confirm(msg); }
 
 /* ---------- auth ---------- */
+// installed as an app (home screen / dock): standalone display, the service worker keeps the shell available offline
+const standalone = !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+if (standalone) document.documentElement.classList.add('standalone');
+if ('serviceWorker' in navigator && location.pathname.startsWith('/admin')) {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' }).catch(() => {}); });
+}
 async function boot() {
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -85,7 +91,18 @@ async function boot() {
     m.textContent = 'Sending…';
     const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/admin/`, shouldCreateUser: false } });
     if (error) { m.className = 'ad-msg err'; m.textContent = /signup|not allowed|not found/i.test(error.message) ? 'This email is not provisioned for the back-office. Ask the owner.' : error.message; return; }
-    m.className = 'ad-msg ok'; m.textContent = 'Check your inbox and open the link on this device.';
+    m.className = 'ad-msg ok'; m.textContent = standalone ? 'Check your inbox: enter the 6-digit code from the email below (the link opens in the browser, not in this app).' : 'Check your inbox and open the link on this device, or enter the code from the email below.';
+    $('#code-form').hidden = false; $('#code-form').dataset.email = email; $('#code-form [name=code]').focus();
+  });
+  // the same one-time email carries a 6-digit code: the way in for the installed app, where the link cannot land
+  $('#code-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = e.target.dataset.email; const token = new FormData(e.target).get('code').replace(/\D/g, '');
+    const m = $('#login-msg'); m.hidden = false; m.className = 'ad-msg'; m.textContent = 'Checking…';
+    if (!email || token.length !== 6) { m.className = 'ad-msg err'; m.textContent = 'Enter the 6 digits from the email.'; return; }
+    const { error } = await sb.auth.verifyOtp({ email, token, type: 'email' });
+    if (error) { m.className = 'ad-msg err'; m.textContent = /expired|invalid/i.test(error.message) ? 'That code is not valid any more. Send a new link and use the fresh code.' : error.message; return; }
+    m.hidden = true;
   });
   document.addEventListener('click', (e) => { if (e.target.closest('[data-signout]')) sb.auth.signOut().then(() => location.reload()); });
   sb.auth.onAuthStateChange((_ev, session) => { render(session); });

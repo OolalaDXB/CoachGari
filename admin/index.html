@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>Coach Gari — Back-office</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -10,6 +10,14 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/assets/coach-gari.css">
 <link rel="stylesheet" href="/admin/admin.css">
+<!-- installable back-office (PWA), scoped to /admin/ — the public site has no manifest and no service worker -->
+<link rel="manifest" href="/admin/manifest.webmanifest">
+<meta name="theme-color" content="#0A0A0B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Coach Gari">
+<link rel="apple-touch-icon" href="/admin/icons/apple-touch-icon.png">
+<link rel="icon" href="/admin/icons/icon-192.png" type="image/png">
 </head>
 <body class="admin">
 
@@ -41,6 +49,11 @@
           <button class="btn btn-accent" type="submit">Send me a sign-in link</button>
         </form>
         <p id="login-msg" class="ad-msg" hidden></p>
+        <!-- the installed app (home-screen) cannot receive the link: the code from the same email signs it in -->
+        <form id="code-form" class="ad-form" hidden>
+          <label>Or enter the 6-digit code from that email <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456"></label>
+          <button class="btn btn-line" type="submit">Sign in with the code</button>
+        </form>
       </section>
 
       <section id="noaccess" class="ad-card" hidden>

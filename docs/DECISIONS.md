@@ -23,6 +23,32 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Back-office as an installable app (PWA, /admin only) (2026-09-09)
+
+`admin/manifest.webmanifest` (scope and start_url `/admin/`, standalone,
+icons 192 / 512 / maskable, generated from a black "CG." tile) and
+`admin/sw.js`, registered from admin.js with scope `/admin/`. The public site
+has no manifest and no service worker (asserted by the suite). The worker
+caches the SHELL only — HTML, styles, scripts, config, manifest, icons, the
+supabase-js UMD build and the web fonts — stale-while-revalidate, versioned;
+every request to `*.supabase.co` (data, auth, functions) is left to the
+network and never stored, so nothing from the CRM, calendar, finance or
+emails lives on the device outside the running page. Offline, the shell opens
+and data calls fail with the app's own errors.
+
+Sign-in from the installed app: on iOS the home-screen app has its own
+storage, so a magic link opened in Safari cannot sign it in. The sign-in form
+now also accepts the 6-digit code from the same email (`verifyOtp`, type
+`email`). Owner action: the Supabase "Magic Link" email template must include
+`{{ .Token }}` next to the link, otherwise the email carries no code.
+
+Headers: `Cache-Control: no-cache` + `Service-Worker-Allowed: /admin/` on the
+worker, manifest content type, `worker-src` / `manifest-src 'self'` and the
+CDN / font hosts in `connect-src` for the admin CSP (the worker fetches them).
+Safe-area padding in standalone mode. `scripts/test-admin-pwa.mjs` (18).
+
+---
+
 ## Legal pages + editorial footer (2026-09-09)
 
 `/legal` (terms & legal notice: operator, what is sold, booking, prices and

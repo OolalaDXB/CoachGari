@@ -388,3 +388,9 @@ tr.ph-dim td{color:#aeb2ba;}
 .cs-list li.active,.cs-list li:hover{background:var(--accent-pale,#F3F5FE);}
 .cs-list li.on{color:var(--accent);font-weight:700;}
 .cs-list li.cs-empty{color:var(--grey-text);cursor:default;}
+
+/* installed app: no browser chrome, so respect the phone's safe areas and keep the top bar sticky */
+.standalone body,html.standalone{-webkit-user-select:none;}
+html.standalone .ad-top{padding-top:calc(10px + env(safe-area-inset-top));}
+html.standalone .ad-main{padding-bottom:calc(24px + env(safe-area-inset-bottom));}
+html.standalone .ad-side{padding-top:env(safe-area-inset-top);}

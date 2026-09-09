@@ -240,6 +240,7 @@ REPORT_TOKEN=<64-hex> node scripts/e2e-runtime.mjs [--pay] [--wait]    # laptop:
 psql "$DATABASE_URL" -f supabase/tests/cg003_payments.sql              # ledger / idempotency, rolls back
 node scripts/test-checkout.mjs --wait                                  # real Stripe round trip
 node scripts/test-admin-workspace.mjs                                  # offline (Playwright, mocked Supabase): Finance / BEAU PH workspace lazy loading, 34 checks
+node scripts/test-admin-pwa.mjs                                        # offline (Playwright): back-office PWA — manifest, icons, /admin/-scoped worker, shell cache, no data cached, offline shell, code sign-in, 18 checks
 node scripts/test-booking-picker.mjs                                   # offline (Playwright, mocked booking API): picker hierarchy, availability timing, error/retry, 390 px, 40 checks
 psql "$DATABASE_URL" -f supabase/tests/beau_ph_contract.sql            # BEAU PH contract incl. rail configuration + FX, rolls back
 psql "$DATABASE_URL" -f supabase/tests/cg013_support.sql               # Support Coach Gari: server-side amount / rail authority, webhook-only paid, no side effects
