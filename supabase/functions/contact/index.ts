@@ -12,6 +12,12 @@
    the notification is skipped with a log line.
 
    Logs never contain the message, the contact or the raw IP.
+
+   Rate-limit identity (see clientIp): derived from the hop the platform sets,
+   never from the client-supplied left-most X-Forwarded-For value. Because
+   Supabase does not document a guaranteed client-IP header, the per-IP limiter
+   is best-effort, and a GLOBAL back-stop (all callers, short window) caps the
+   insert rate whatever identity a caller presents.
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
@@ -23,6 +29,8 @@ const env = (name: string) => Deno.env.get(name);
 
 const RATE_WINDOW_MIN = 10;   // per IP hash
 const RATE_MAX        = 5;    // submissions per window
+const GLOBAL_WINDOW_MIN = 10; // back-stop, all callers together (identity-independent)
+const GLOBAL_MAX        = 40; // legitimate traffic is a few enquiries a day; 40 in 10 min is a flood
 const DUP_WINDOW_MIN  = 2;    // same contact + message from same IP → duplicate
 const MIN_FILL_MS     = 2000; // faster than this from page load = bot
 const MAX_BODY_BYTES  = 16 * 1024;
@@ -75,10 +83,30 @@ async function sha256hex(s: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/* Which IP can be trusted here — verified, not assumed (2026-09-09):
+   - Supabase Edge Functions sit behind Cloudflare and the Supabase gateway. Supabase staff
+     confirmed the platform populates X-Forwarded-For with the client IP
+     (github.com/orgs/supabase/discussions/7884, laktek). Nothing in the Supabase docs
+     promises a header the client cannot influence.
+   - A client-sent X-Forwarded-For is NOT replaced: the platform APPENDS the connecting IP,
+     so the value becomes "<spoofed>, <real>" (observed in discussions/34647, and the standard
+     Cloudflare behaviour). The LEFT-most hop is therefore attacker-controlled; the RIGHT-most
+     hop is the one the trusted edge added.
+   - cf-connecting-ip is set by Cloudflare from the TCP connection and cannot be supplied by
+     the caller: a probe against this function that carried its own CF-Connecting-IP header was
+     refused at the edge with Cloudflare error 1000 before reaching the function.
+   Order of trust: cf-connecting-ip → right-most X-Forwarded-For hop → x-real-ip → "unknown".
+   The original left-most XFF value is kept only as a diagnostic hash, never as identity.
+   This stays best-effort (no documented guarantee), hence the global back-stop below. */
 function clientIp(req: Request): string {
+  const cf = req.headers.get("cf-connecting-ip")?.trim();
+  if (cf) return cf;
   const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "unknown";
+  if (xff) {
+    const hops = xff.split(",").map((h) => h.trim()).filter(Boolean);
+    if (hops.length) return hops[hops.length - 1];              // the hop appended by the trusted edge, not the client's
+  }
+  return req.headers.get("x-real-ip")?.trim() || "unknown";
 }
 
 function log(event: string, data: Record<string, unknown> = {}): void {
@@ -130,6 +158,8 @@ Deno.serve(async (req: Request) => {
     ? new Date(attr.first_visit_at).toISOString() : null;
   const { city, country } = splitLocation(location);
   const ipHash = await sha256hex(IP_SALT + clientIp(req));
+  // diagnostic only: whether the caller supplied its own X-Forwarded-For chain (never the value, never an identity)
+  const xffHops = (req.headers.get("x-forwarded-for") ?? "").split(",").filter((h) => h.trim()).length;
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -144,7 +174,18 @@ Deno.serve(async (req: Request) => {
     .eq("ip_hash", ipHash).gte("created_at", since);
   if (rlErr) log("rate_limit_query_failed", { code: rlErr.code });
   if ((recent ?? 0) >= RATE_MAX) {
-    log("rate_limited", { submission_id: submissionId });
+    log("rate_limited", { submission_id: submissionId, xff_hops: xffHops });
+    return json(429, { ok: false, error: "rate_limited" }, origin, allowed);
+  }
+  // Global back-stop, independent of any identity the caller presents: total inserts in a short window, all callers.
+  // Far above legitimate traffic; a flood that rotates identities still hits this wall. Honeypot, timing and the
+  // submission_id / content dedup above and below stay unchanged.
+  const gSince = new Date(Date.now() - GLOBAL_WINDOW_MIN * 60_000).toISOString();
+  const { count: globalRecent, error: gErr } = await supabase
+    .from("contacts").select("id", { count: "exact", head: true }).gte("created_at", gSince);
+  if (gErr) log("global_limit_query_failed", { code: gErr.code });
+  if ((globalRecent ?? 0) >= GLOBAL_MAX) {
+    log("rate_limited_global", { submission_id: submissionId, window_min: GLOBAL_WINDOW_MIN, xff_hops: xffHops });
     return json(429, { ok: false, error: "rate_limited" }, origin, allowed);
   }
 
