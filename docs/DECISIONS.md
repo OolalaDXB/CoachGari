@@ -23,6 +23,45 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Coach Gari — Finance list was blind to session-pack orders (2026-09-09)
+
+**Found by the first live payment.** `public.finance_orders()` joined orders
+to bookings with an INNER join. A session-pack order carries
+`session_pack_id` and no `booking_id`, so every pack payment was dropped
+from the Finance tab. The AED 10 live payment was in the ledger, had its
+Oolala earning, and showed nothing on screen. The same inner assumption hid
+pack orders from a client's Payments section in the profile, which matched
+rows by booking reference.
+
+Settlements were never affected: `create_settlement()` reads
+`partner_earnings` joined to `orders` and already included pack orders, so
+Gari's payable was correct throughout. This was a reporting defect only.
+
+**Fix** (`20260924_finance_orders_pack_orders.sql`, forward only): the join
+becomes a LEFT join, and three columns are added so the surfaces can tell
+the two apart without guessing — `order_reason` (`booking` |
+`session_pack`), `pack_reference` (the CG-#### public reference) and
+`crm_contact_id` (from the booking or the pack). The Finance table labels a
+pack row and omits the session date it does not have; the profile matches a
+client's payments by contact as well as by booking reference. No amount,
+earning or settlement logic changed.
+
+Changing the return type meant dropping the function, which clears its
+grants and re-grants EXECUTE to PUBLIC by default. The migration therefore
+revokes PUBLIC and anon explicitly and re-grants `authenticated` and
+`service_role` — the surface it had before. Advisors are back to baseline.
+
+**Carried, not changed:** the Stripe fee arrived as null on the live
+payment (the balance transaction did not exist yet when
+`checkout.session.completed` fired), so the ledger recorded a zero fee. It
+did not matter under a full refund, but on a payment that is kept it would
+overstate net collected and the commission basis. Reading the fee later is
+a separate task. And a refunded pack returns to `unpaid` while keeping its
+`paid_at` and `payment_source`, which is an entitlement policy question for
+the owner, not a bug.
+
+---
+
 ## Coach Gari / BEAU PH — Stripe V0 with EMBEDDED Checkout (2026-09-09)
 
 **Decision.** The card rail keeps Stripe Checkout but in its embedded mode:

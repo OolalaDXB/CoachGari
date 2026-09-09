@@ -135,6 +135,19 @@ begin
   select id into ordid from public.orders where session_pack_id=p3 order by created_at desc limit 1;
   if not exists (select 1 from public.partner_earnings where order_id=ordid) then ok:=ok+1; else fail:=fail+1; log:=log||' [bank earning]'; end if;
 
+  /* ---- 5c. the Finance list shows session-pack orders, not only booking orders ---- */
+  perform set_config('request.jwt.claims','{"role":"authenticated","email":"fin@test.local"}',true);
+  execute 'set local role authenticated';
+  -- oref is the Stripe-paid pack order from section 3: it must appear, labelled as a pack, with its money
+  if (select count(*) from public.finance_orders() f
+       where f.reference = oref and f.order_reason = 'session_pack' and f.pack_reference ~ '^CG-[0-9]{4,}$'
+         and f.booking_reference is null and f.gross_amount = 312000 and f.crm_contact_id = cA) = 1
+     then ok:=ok+1; else fail:=fail+1; log:=log||' [finance list omits pack orders]'; end if;
+  -- every pack order created by this suite is listed (none is silently dropped by a join)
+  if (select count(*) from public.finance_orders()) = (select count(*) from public.orders)
+     then ok:=ok+1; else fail:=fail+1; log:=log||' [finance list drops orders]'; end if;
+  execute 'reset role';
+
   /* ---- 6. permissions ---- */
   perform set_config('request.jwt.claims','{"role":"authenticated","email":"coachonly@test.local"}',true);
   execute 'set local role authenticated';

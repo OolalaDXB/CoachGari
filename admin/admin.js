@@ -1069,9 +1069,11 @@ async function finance() {
       ${manage ? `<form id="settle-form" class="ad-form" style="margin-top:16px"><div class="row"><label>Period from <input type="date" name="from" required value="${isoDate(monthStart)}"></label><label>to <input type="date" name="to" required value="${isoDate(today)}"></label><label>Currency <input name="currency" value="USD" pattern="[A-Z]{3}"></label></div>
         <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Create settlement for open earnings</button></div></form><p class="ad-note">Creates a settlement from every open earning whose payment date falls in the period, then freezes those earnings. Pay Gari by bank transfer and record the reference with "Mark paid".</p>` : '<p class="ad-note">View only. Settlement actions need the finance:manage permission.</p>'}</div>
     <div class="ad-panel"><h2>Orders</h2>
-      ${table(['Created', 'Order', 'Booking', 'Session', 'Customer hint', 'Gross', 'Fee', 'Refunds', 'CB', 'Net', 'Commission', 'Payable', 'Status'], orders.map((o) => `<tr>
-        <td>${fmt(o.created_at, 'Asia/Dubai')}</td><td>${esc(o.reference)}<br>${st(o.status)}</td><td>${esc(o.booking_reference)}<br>${st(o.booking_status)}</td>
-        <td>${esc(o.service_title)}<br><span class="ad-muted" style="font-size:12px">${fmt(o.session_start_at, o.session_timezone)} · ${esc(o.delivery_mode)}</span></td>
+      ${table(['Created', 'Order', 'Booking or package', 'Item', 'Customer hint', 'Gross', 'Fee', 'Refunds', 'CB', 'Net', 'Commission', 'Payable', 'Status'], orders.map((o) => `<tr>
+        <td>${fmt(o.created_at, 'Asia/Dubai')}</td><td>${esc(o.reference)}<br>${st(o.status)}</td>
+        <td>${o.booking_reference ? esc(o.booking_reference) + '<br>' + st(o.booking_status)
+              : o.pack_reference ? esc(o.pack_reference) + '<br><span class="ad-muted" style="font-size:12px">Package</span>' : '—'}</td>
+        <td>${esc(o.service_title || '—')}${o.session_start_at ? `<br><span class="ad-muted" style="font-size:12px">${fmt(o.session_start_at, o.session_timezone)} · ${esc(o.delivery_mode)}</span>` : ''}</td>
         <td class="ad-muted" style="font-size:12px">${esc(o.customer_hint || '—')}</td>
         <td class="num">${money(o.gross_amount, o.currency)}</td><td class="num">${money(o.stripe_fee, o.currency)}</td><td class="num">${money(o.refund_amount, o.currency)}</td><td class="num">${money(o.chargeback_amount, o.currency)}</td>
         <td class="num">${money(o.net_collected, o.currency)}</td><td class="num">${money(o.oolala_commission, o.currency)}</td><td class="num"><b>${money(o.gari_payable, o.currency)}</b></td>
@@ -1717,8 +1719,9 @@ async function pfPayments() {
   if (!pf._bookingRefs) { const { data } = await sb.from('bookings').select('reference').eq('crm_contact_id', pf.crmId); pf._bookingRefs = (data || []).map((b) => b.reference); }
   const refs = new Set(pf._bookingRefs);
   const { data, error } = await sb.rpc('finance_orders'); if (error) throw error;
-  const rows = (data || []).filter((o) => refs.has(o.booking_reference));
-  $('#pf-body').innerHTML = rows.length ? `<div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>Order</th><th>Session</th><th class="num">Gross</th><th class="num">Net</th><th class="num">Commission</th><th class="num">Payable</th><th>Status</th></tr></thead><tbody>
+  // a client's money is their booking orders plus their session-pack orders (no booking reference)
+  const rows = (data || []).filter((o) => (o.booking_reference && refs.has(o.booking_reference)) || (pf.crmId && o.crm_contact_id === pf.crmId));
+  $('#pf-body').innerHTML = rows.length ? `<div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>Order</th><th>Item</th><th class="num">Gross</th><th class="num">Net</th><th class="num">Commission</th><th class="num">Payable</th><th>Status</th></tr></thead><tbody>
     ${rows.map((o) => `<tr><td>${esc(o.reference)}<br>${st(o.status)}</td><td>${esc(o.service_title)}</td><td class="num">${money(o.gross_amount, o.currency)}</td><td class="num">${money(o.net_collected, o.currency)}</td><td class="num">${money(o.oolala_commission, o.currency)}</td><td class="num"><b>${money(o.gari_payable, o.currency)}</b></td><td>${o.earning_status ? st(o.earning_status) : '—'}</td></tr>`).join('')}
     </tbody></table></div>` : '<p class="pf-sec-empty">No payments for this client.</p>';
 }
