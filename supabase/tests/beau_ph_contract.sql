@@ -18,12 +18,14 @@ declare
   j jsonb; e1 jsonb; e2 jsonb; r1 uuid; r2 uuid; r3 uuid; txt text;
   cA uuid; p1 uuid; p2 uuid; p3 uuid; oref text; oref2 text; ph_ev uuid; ordid uuid; tok text; ev jsonb;
   p4 uuid; oref4 text; rA uuid; rB uuid; jB jsonb; nB int;
+  q1 jsonb; q2 jsonb; qid uuid; mid uuid; nA int; p5 uuid; tok5 text; j5 jsonb;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
   insert into beau_ph.merchants (key, name, country, default_currency, mode) values (mk, 'Contract Test', 'ZW', 'USD', 'test');
-  perform beau_ph.merchant_method_set(mk, 'stripe', true, null, '{}'::jsonb, '{}'::jsonb, null, 't');
+  -- merchant configuration is explicit (countries + currencies persisted); a provider's open coverage is never read as "any"
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"enabled":true,"countries":["AE","ZW"],"currencies":["AED","USD"]}'::jsonb, 't');
   perform beau_ph.merchant_method_set(mk, 'aani', true, 'AED', '{"display_value":"+971 50 000 0000"}'::jsonb, '{}'::jsonb, null, 't');
-  perform beau_ph.merchant_method_set(mk, 'bank_transfer', true, 'USD', '{"account_holder":"Test Co","iban":"ZW00TEST","bic":"TESTZWHX"}'::jsonb, '{}'::jsonb, null, 't');
+  perform beau_ph.merchant_method_configure(mk, 'bank_transfer', '{"enabled":true,"currency":"USD","countries":["AE","ZW"],"currencies":["AED","USD"],"instructions":{"account_holder":"Test Co","iban":"ZW00TEST","bic":"TESTZWHX"}}'::jsonb, 't');
   -- the merchant may "enable" rails that are not onboarded; readiness still wins
   perform beau_ph.merchant_method_set(mk, 'paynow', true, 'USD', '{}'::jsonb, '{}'::jsonb, null, 't');
   perform beau_ph.merchant_method_set(mk, 'mpesa', true, 'KES', '{}'::jsonb, '{}'::jsonb, null, 't');
@@ -116,8 +118,8 @@ begin
   begin perform beau_ph.confirm_manual(r2, 'op@test', 7000, 'USD'); fail := fail + 1; log := log || ' [confirmed twice]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
 
   /* ---- 9. provider secrets never appear in public output ---- */
-  begin perform beau_ph.merchant_method_set(mk, 'stripe', true, null, '{"webhook_secret":"whsec_abcdefghijklmnop"}'::jsonb, '{}'::jsonb, null, 't'); fail := fail + 1; log := log || ' [secret accepted in instructions]'; exception when check_violation then ok := ok + 1; end;
-  begin perform beau_ph.merchant_method_set(mk, 'stripe', true, null, '{}'::jsonb, '{"api_key":"sk_test_abcdefghijklmnop"}'::jsonb, null, 't'); fail := fail + 1; log := log || ' [secret accepted in settings]'; exception when check_violation then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_set(mk, 'stripe', true, null, '{"webhook_secret":"whsec_abcdefghijklmnop"}'::jsonb, '{}'::jsonb, null, 't'); fail := fail + 1; log := log || ' [secret accepted in instructions]'; exception when check_violation or sqlstate '22023' then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_set(mk, 'stripe', true, null, '{}'::jsonb, '{"api_key":"sk_test_abcdefghijklmnop"}'::jsonb, null, 't'); fail := fail + 1; log := log || ' [secret accepted in settings]'; exception when check_violation or sqlstate '22023' then ok := ok + 1; end;
   txt := beau_ph.eligible_methods(mk, 'AE', 'AED', rt)::text || beau_ph.method_matrix(mk, 'AE', 'AED', rt)::text || beau_ph.get_request(r1)::text || beau_ph.request_events(r1)::text;
   if txt !~ '(sk|rk)_(live|test)_|whsec_' and txt !~* '"(secret|api_?key|private_?key|password)"' then ok := ok + 1; else fail := fail + 1; log := log || ' [secret in output]'; end if;
 
@@ -149,7 +151,8 @@ begin
     values (cA, '5-session pack', 5, 150000, 'AED', 'unpaid', 'seed') returning id into p1;
   perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
   execute 'set local role authenticated';
-  perform public.payment_method_set(jsonb_build_object('method', 'bank_transfer', 'enabled', true, 'account_holder', 'Coach Gari', 'iban', 'AE00TEST', 'bic', 'TESTAEAD', 'currency', 'AED'));
+  perform public.payment_method_set(jsonb_build_object('method', 'bank_transfer', 'enabled', true, 'account_holder', 'Coach Gari', 'iban', 'AE00TEST', 'bic', 'TESTAEAD', 'currency', 'AED',
+                                                        'countries', jsonb_build_array('AE', 'ZW'), 'currencies', jsonb_build_array('AED')));
   tok := public.report_issue_link(p1) ->> 'token';
   execute 'reset role';
   -- the report page consumes the SERVER-SIDE list: a Zimbabwean client is offered card + bank, not Aani (country) — decided here, not in JS
@@ -363,7 +366,7 @@ begin
 
   /* ---- 19. MULTI-TENANT ISOLATION: merchant B vs merchant A (and vs the Coach Gari host) ---- */
   insert into beau_ph.merchants (key, name, country, default_currency, mode) values ('ph_other', 'Other Host', 'ZW', 'USD', 'test');
-  perform beau_ph.merchant_method_set('ph_other', 'stripe', true, null, '{}'::jsonb, '{}'::jsonb, null, 't');
+  perform beau_ph.merchant_method_configure('ph_other', 'stripe', '{"enabled":true,"countries":["ZW"],"currencies":["USD"]}'::jsonb, 't');
   perform beau_ph.merchant_method_set('ph_other', 'bank_transfer', true, 'USD', '{"account_holder":"Other Co","iban":"ZZ99OTHER","bic":"OTHRZWHX"}'::jsonb, '{}'::jsonb, null, 't');
   -- (a) provider configuration never leaks across merchants
   if beau_ph.eligible_methods(mk, 'ZW', 'USD', rt)::text not like '%ZZ99OTHER%'
@@ -511,6 +514,189 @@ begin
   -- a paid request cannot be re-initialised by the embedded client
   begin perform public.attach_checkout(oref4, 'cs_live_emb3', null, now() + interval '30 min'); fail := fail + 1; log := log || ' [emb: attach after paid]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
+
+
+  /* ---- 22. RAIL CONFIGURATION: persisted, bounded by provider capability, explicit or not eligible ---- */
+  j := beau_ph.merchant_method_configure(mk, 'stripe', '{"countries":["AE","ZW","KE"],"currencies":["AED","USD","KES"]}'::jsonb, 'cfg@test');
+  if (j -> 'countries')::text = '["AE", "KE", "ZW"]' and (j -> 'currencies')::text = '["AED", "KES", "USD"]'
+     and (beau_ph.merchant_method_get(mk, 'stripe') -> 'method' -> 'currencies')::text = '["AED", "KES", "USD"]' then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: countries/currencies persist ' || j::text || ']'; end if;
+  -- a merchant can never broaden a provider (Aani = AE / AED only)
+  begin perform beau_ph.merchant_method_configure(mk, 'aani', '{"countries":["AE","ZW"]}'::jsonb, 't'); fail := fail + 1; log := log || ' [cfg: broadened countries]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_configure(mk, 'aani', '{"currencies":["USD"]}'::jsonb, 't'); fail := fail + 1; log := log || ' [cfg: broadened currencies]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  begin perform beau_ph.merchant_method_configure(mk, 'aani', '{"capabilities":["online_checkout"]}'::jsonb, 't'); fail := fail + 1; log := log || ' [cfg: capability not offered]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  -- unsupported country / currency → ineligible with the reason; a disabled rail → ineligible
+  if (select e ->> 'reason' from jsonb_array_elements(beau_ph.method_matrix(mk, 'FR', 'USD', rt)) e where e ->> 'provider' = 'stripe') = 'country'
+     and (select e ->> 'reason' from jsonb_array_elements(beau_ph.method_matrix(mk, 'AE', 'GBP', rt)) e where e ->> 'provider' = 'stripe') = 'currency'
+     and beau_ph.eligible_methods(mk, 'KE', 'KES', rt)::text like '%"stripe"%' then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: country/currency reasons]'; end if;
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"enabled":false}'::jsonb, 't');
+  if beau_ph.eligible_methods(mk, 'AE', 'AED', rt)::text not like '%"stripe"%'
+     and (select e ->> 'reason' from jsonb_array_elements(beau_ph.method_matrix(mk, 'AE', 'AED', rt)) e where e ->> 'provider' = 'stripe') = 'disabled' then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: disabled rail eligible]'; end if;
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"enabled":true}'::jsonb, 't');
+  -- no countries = needs configuration, never "everywhere"
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"countries":null}'::jsonb, 't');
+  if (select e ->> 'reason' from jsonb_array_elements(beau_ph.method_matrix(mk, 'AE', 'AED', rt)) e where e ->> 'provider' = 'stripe') = 'needs_configuration'
+     and (select e ->> 'health' from jsonb_array_elements(beau_ph.method_matrix(mk, 'AE', 'AED', rt)) e where e ->> 'provider' = 'stripe') = 'needs_configuration'
+     and beau_ph.eligible_methods(mk, 'AE', 'AED', rt)::text not like '%"stripe"%' then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: null countries read as any]'; end if;
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"countries":["AE","ZW","KE"]}'::jsonb, 't');
+  -- intents: a rail may support or block a payment type
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"intents":["service","package"]}'::jsonb, 't');
+  if (select e ->> 'reason' from jsonb_array_elements(beau_ph.method_matrix(mk, 'AE', 'AED', rt, null, 'customer', 'support')) e where e ->> 'provider' = 'stripe') = 'intent'
+     and beau_ph.eligible_methods(mk, 'AE', 'AED', rt, null, 'customer', 'package')::text like '%"stripe"%' then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: intent dimension]'; end if;
+  begin perform beau_ph.create_request(mk, 'stripe', 'ORD-INT', 'REF-INT', 1000, 'USD', 'ZW', null, '{}'::jsonb, rt, null, null, null, 'support'); fail := fail + 1; log := log || ' [cfg: blocked intent request]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"intents":null}'::jsonb, 't');
+  -- limits per currency
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"limits":{"USD":{"min":1000,"max":500000}}}'::jsonb, 't');
+  begin perform beau_ph.create_request(mk, 'stripe', 'ORD-LIM', 'REF-LIM', 500, 'USD', 'ZW', null, '{}'::jsonb, rt); fail := fail + 1; log := log || ' [cfg: below minimum]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  begin perform beau_ph.create_request(mk, 'stripe', 'ORD-LIM', 'REF-LIM', 900000, 'USD', 'ZW', null, '{}'::jsonb, rt); fail := fail + 1; log := log || ' [cfg: above maximum]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"limits":{}}'::jsonb, 't');
+  -- "Remove" keeps history: a rail with requests is deactivated + unlisted, its requests untouched; an unused one is deleted
+  select count(*) into nA from beau_ph.payment_requests r join beau_ph.merchants m on m.id = r.merchant_id where m.key = mk and r.provider_key = 'stripe';
+  j := beau_ph.merchant_method_remove(mk, 'stripe', 'rm@test');
+  if j ->> 'removed' = 'unlisted' and (j ->> 'history')::int = nA and nA > 0
+     and (select count(*) from beau_ph.payment_requests r join beau_ph.merchants m on m.id = r.merchant_id where m.key = mk and r.provider_key = 'stripe') = nA
+     and exists (select 1 from beau_ph.merchant_methods mm join beau_ph.merchants m on m.id = mm.merchant_id where m.key = mk and mm.provider_key = 'stripe' and not mm.enabled and not mm.listed)
+     and beau_ph.merchant_methods_summary(mk)::text not like '%"stripe"%' and beau_ph.eligible_methods(mk, 'AE', 'AED', rt)::text not like '%"stripe"%'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: remove with history ' || j::text || ']'; end if;
+  perform beau_ph.merchant_method_configure(mk, 'stripe', '{"enabled":true,"listed":true}'::jsonb, 't');
+  j := beau_ph.merchant_method_remove(mk, 'ozow', 'rm@test');
+  if j ->> 'removed' = 'deleted' and not exists (select 1 from beau_ph.merchant_methods mm join beau_ph.merchants m on m.id = mm.merchant_id where m.key = mk and mm.provider_key = 'ozow') then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: delete unused]'; end if;
+  -- settlement destinations are distinct from methods; a rail maps a currency to one destination of that currency
+  j := beau_ph.settlement_destination_set(mk, '{"key":"usd_main","label":"USD account","kind":"bank_account","currency":"USD","details":{"bank":"Test Bank","account_hint":"•••• 1234"}}'::jsonb, 'dest@test');
+  perform beau_ph.merchant_method_configure(mk, 'bank_transfer', '{"settlement":{"USD":"usd_main"}}'::jsonb, 't');
+  if (beau_ph.merchant_method_get(mk, 'bank_transfer') -> 'method' -> 'settlement' ->> 'USD') = 'usd_main'
+     and (beau_ph.settlement_destinations_list(mk) -> 0 -> 'used_by')::text like '%bank_transfer%' then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: settlement mapping]'; end if;
+  begin perform beau_ph.merchant_method_configure(mk, 'bank_transfer', '{"settlement":{"AED":"usd_main"}}'::jsonb, 't'); fail := fail + 1; log := log || ' [cfg: settlement currency mismatch]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  j := beau_ph.settlement_destination_remove(mk, 'usd_main', 't');
+  if j ->> 'removed' = 'deactivated' and exists (select 1 from beau_ph.settlement_destinations d join beau_ph.merchants m on m.id = d.merchant_id where m.key = mk and d.key = 'usd_main' and not d.active) then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: mapped destination deleted]'; end if;
+  begin perform beau_ph.settlement_destination_set(mk, '{"key":"bad","label":"x","currency":"USD","details":{"api_key":"sk_test_abcdefghijklmnop"}}'::jsonb, 't'); fail := fail + 1; log := log || ' [cfg: secret in destination]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  -- audit: field-level rows with actor, before and after; nothing secret-shaped in the audit output
+  j := beau_ph.config_audit_list(mk, 200);
+  if exists (select 1 from jsonb_array_elements(j) a where a ->> 'area' = 'merchant_method' and a ->> 'entity' = 'stripe' and a ->> 'field' = 'currencies' and a ->> 'actor' = 'cfg@test' and (a -> 'new_value')::text like '%KES%')
+     and exists (select 1 from jsonb_array_elements(j) a where a ->> 'field' = 'enabled' and a ->> 'actor' = 'rm@test')
+     and exists (select 1 from jsonb_array_elements(j) a where a ->> 'area' = 'settlement_destination' and a ->> 'entity' = 'usd_main')
+     and beau_ph.no_secret_keys(j) and beau_ph.no_secret_keys(beau_ph.rails_overview(mk)) and beau_ph.no_secret_keys(beau_ph.merchant_method_get(mk, 'stripe'))
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: audit trail]'; end if;
+  -- the rails overview derives everything from persisted state (no literal "any")
+  j := beau_ph.rails_overview(mk);
+  if jsonb_array_length(j -> 'rails') >= 11
+     and (select r -> 'merchant' ->> 'health' from jsonb_array_elements(j -> 'rails') r where r ->> 'provider' = 'stripe') = 'configured'
+     and (select r -> 'merchant' -> 'currencies' from jsonb_array_elements(j -> 'rails') r where r ->> 'provider' = 'stripe')::text like '%KES%'
+     and (select r -> 'merchant' from jsonb_array_elements(j -> 'rails') r where r ->> 'provider' = 'ozow') = 'null'::jsonb
+     and (select jsonb_array_length(r -> 'secrets') from jsonb_array_elements(j -> 'rails') r where r ->> 'provider' = 'stripe') = 3
+     and j::text not like '%"countries": "any"%' and j::text not like '%"currencies": "any"%' then ok := ok + 1; else fail := fail + 1; log := log || ' [cfg: rails overview]'; end if;
+
+  /* ---- 23. BEAU FX: source recorded, freshness, fail closed, immutable expiring quotes, server-side amounts, isolation ---- */
+  select id into mid from beau_ph.merchants where key = mk;
+  delete from beau_ph.fx_quotes where merchant_id = mid;   -- suite hygiene inside the rolled-back transaction
+  j := beau_ph.fx_ingest_rate('USD', 1.10, current_date, 'test_src');
+  perform beau_ph.fx_ingest_rate('AED', 1.10 * 3.6725, current_date, 'test_src(USD)');
+  perform beau_ph.fx_ingest_rate('GBP', 0.85, current_date, 'test_src');
+  if (j ->> 'accepted')::boolean and (select source from beau_ph.fx_rate_on('USD', current_date)) = 'test_src'
+     and (beau_ph.fx_currency_status('USD') ->> 'freshness') = 'fresh' and (beau_ph.fx_currency_status('USD') ->> 'source') = 'frankfurter' then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: source + fresh ' || beau_ph.fx_currency_status('USD')::text || ']'; end if;
+  -- anomaly rejection keeps the last valid rate
+  j := beau_ph.fx_ingest_rate('USD', 1.60, current_date, 'test_src');
+  if not (j ->> 'accepted')::boolean and (j ->> 'reason') like 'variation_%' and (select rate from beau_ph.fx_rate_on('USD', current_date)) = 1.10
+     and beau_ph.fx_validate_rate(-1, null) = 'non_positive' and beau_ph.fx_validate_rate(null, 1) = 'not_numeric' and beau_ph.fx_validate_rate(1.15, 1.10) is null then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: anomaly ' || j::text || ']'; end if;
+  -- freshness categories from the last successful fetch
+  update beau_ph.fx_rates set fetched_at = now() - interval '50 hours' where quote_currency = 'GBP';
+  if (beau_ph.fx_currency_status('GBP') ->> 'freshness') = 'acceptable' and beau_ph.fx_freshness(80) = 'stale' and beau_ph.fx_freshness(null) = 'missing' and beau_ph.fx_freshness(36) = 'fresh' then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: freshness]'; end if;
+  -- FX off for the merchant → no conversion at all
+  begin perform beau_ph.fx_quote(mk, 10000, 'USD', 'AED', true); fail := fail + 1; log := log || ' [fx: disabled merchant quoted]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  perform beau_ph.merchant_fx_set(mk, '{"enabled":true,"adjustment_bps":0,"quote_ttl_minutes":15}'::jsonb, 'fx@test');
+  -- the amount is derived server-side through the EUR pivot: USD 100.00 → AED 367.25
+  j := beau_ph.fx_quote(mk, 10000, 'USD', 'AED', true);
+  if (j ->> 'payment_amount')::int = 36725 and (j ->> 'preview')::boolean and round((j ->> 'reference_rate')::numeric, 4) = 3.6725 and j ->> 'freshness' = 'fresh' then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: preview ' || j::text || ']'; end if;
+  if (beau_ph.fx_quote(mk, 10000, 'USD', 'USD', true) ->> 'same_currency')::boolean then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: same currency]'; end if;
+  -- a merchant adjustment is a separate component, never hidden in the reference rate
+  perform beau_ph.merchant_fx_set(mk, '{"adjustment_bps":100}'::jsonb, 'fx@test');
+  j := beau_ph.fx_quote(mk, 10000, 'USD', 'AED', true);
+  if (j ->> 'payment_amount')::int = 37092 and round((j ->> 'reference_rate')::numeric, 4) = 3.6725 and round((j ->> 'customer_rate')::numeric, 4) = 3.7092 and (j ->> 'merchant_adjustment_bps')::int = 100 then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: adjustment ' || j::text || ']'; end if;
+  perform beau_ph.merchant_fx_set(mk, '{"adjustment_bps":0}'::jsonb, 'fx@test');
+  -- stale or missing rate: fail closed
+  update beau_ph.fx_rates set fetched_at = now() - interval '80 hours' where quote_currency = 'AED';
+  begin perform beau_ph.fx_quote(mk, 10000, 'USD', 'AED', true); fail := fail + 1; log := log || ' [fx: stale converted]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  update beau_ph.fx_rates set fetched_at = now() where quote_currency = 'AED';
+  begin perform beau_ph.fx_quote(mk, 10000, 'USD', 'KES', true); fail := fail + 1; log := log || ' [fx: missing converted]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  perform beau_ph.fx_currency_set('CHF', '{"enabled":true}'::jsonb, 'fx@test');
+  begin perform beau_ph.fx_quote(mk, 10000, 'USD', 'CHF', true); fail := fail + 1; log := log || ' [fx: no rate converted]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  -- a real quote is an immutable row with an expiry
+  q1 := beau_ph.fx_quote(mk, 10000, 'USD', 'AED', false); qid := (q1 ->> 'id')::uuid;
+  if q1 ->> 'status' = 'active' and (q1 ->> 'expires_at')::timestamptz between now() + interval '14 minutes' and now() + interval '16 minutes' and (q1 ->> 'payment_amount')::int = 36725 then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: quote row ' || q1::text || ']'; end if;
+  begin update beau_ph.fx_quotes set payment_amount = 1 where id = qid; fail := fail + 1; log := log || ' [fx: quote amount mutated]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  begin update beau_ph.fx_quotes set expires_at = now() + interval '1 day' where id = qid; fail := fail + 1; log := log || ' [fx: quote expiry mutated]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  begin delete from beau_ph.fx_quotes where id = qid; fail := fail + 1; log := log || ' [fx: quote deleted]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  -- the browser cannot override the rate or the amount: the request must match the quote exactly, and another currency needs a quote
+  begin perform beau_ph.create_request(mk, 'stripe', 'ORD-FX', 'REF-FX', 36726, 'AED', 'AE', null, '{}'::jsonb, rt, null, null, null, 'package', 10000, 'USD', qid); fail := fail + 1; log := log || ' [fx: amount override]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  begin perform beau_ph.create_request(mk, 'stripe', 'ORD-FX', 'REF-FX', 36725, 'AED', 'AE', null, '{}'::jsonb, rt, null, null, null, 'package', 10000, 'USD', null); fail := fail + 1; log := log || ' [fx: conversion without quote]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  j := beau_ph.create_request(mk, 'stripe', 'ORD-FX', 'REF-FX', 36725, 'AED', 'AE', null, '{}'::jsonb, rt, null, null, null, 'package', 10000, 'USD', qid);
+  if j ->> 'currency' = 'AED' and (j ->> 'amount')::int = 36725 and j ->> 'pricing_currency' = 'USD' and (j ->> 'pricing_amount')::int = 10000 and (j ->> 'fx_quote_id')::uuid = qid and j ->> 'intent' = 'package'
+     and (select status from beau_ph.fx_quotes where id = qid) = 'consumed' and (select request_id from beau_ph.fx_quotes where id = qid) = (j ->> 'id')::uuid then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: request carries the quote ' || j::text || ']'; end if;
+  -- a quote is consumed exactly once; an expired quote must be replaced by a new one
+  begin perform beau_ph.fx_quote_consume(qid, mid, gen_random_uuid(), 36725, 'AED', 10000, 'USD'); fail := fail + 1; log := log || ' [fx: quote consumed twice]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  q2 := beau_ph.fx_quote(mk, 10000, 'USD', 'AED', false);
+  update beau_ph.fx_quotes set status = 'expired' where id = (q2 ->> 'id')::uuid;
+  begin perform beau_ph.fx_quote_consume((q2 ->> 'id')::uuid, mid, gen_random_uuid(), 36725, 'AED', 10000, 'USD'); fail := fail + 1; log := log || ' [fx: expired quote consumed]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  q2 := beau_ph.fx_quote(mk, 10000, 'USD', 'AED', false);
+  if (q2 ->> 'id')::uuid <> qid and q2 ->> 'status' = 'active' then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: replacement quote]'; end if;
+  -- merchant isolation: another merchant cannot consume this merchant's quote
+  begin perform beau_ph.fx_quote_consume((q2 ->> 'id')::uuid, (select id from beau_ph.merchants where key = 'coach_gari'), gen_random_uuid(), 36725, 'AED', 10000, 'USD'); fail := fail + 1; log := log || ' [fx: foreign merchant consumed]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  -- settings and currency configuration are audited
+  j := beau_ph.config_audit_list(mk, 200);
+  if exists (select 1 from jsonb_array_elements(j) a where a ->> 'area' = 'merchant_fx' and a ->> 'field' = 'enabled' and a ->> 'actor' = 'fx@test')
+     and exists (select 1 from jsonb_array_elements(j) a where a ->> 'area' = 'fx_currency' and a ->> 'entity' = 'CHF' and a ->> 'field' = 'enabled') then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: audit]'; end if;
+  -- a refresh is observable: the run row exists and waits for the collector (no response inside this transaction)
+  perform beau_ph.fx_refresh_start('fx@test');
+  perform beau_ph.fx_refresh_collect();
+  if exists (select 1 from beau_ph.fx_refresh_runs where requested_by = 'fx@test' and status = 'requested' and http ? 'frankfurter') then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: refresh run]'; end if;
+  j := beau_ph.fx_overview(mk);
+  if (j -> 'health' ->> 'in_progress')::boolean and (j -> 'settings' ->> 'enabled')::boolean and jsonb_array_length(j -> 'currencies') >= 10 and beau_ph.no_secret_keys(j) then ok := ok + 1; else fail := fail + 1; log := log || ' [fx: overview]'; end if;
+
+  /* ---- 24. HOST: a client pays a USD package in AED — quote, request, webhook, ledger in the collected currency ---- */
+  update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
+  perform beau_ph.merchant_fx_set('coach_gari', '{"enabled":true,"adjustment_bps":0}'::jsonb, 'fx@test');
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, 'USD pack paid in AED', 5, 10000, 'USD', 'unpaid', 'seed') returning id into p5;
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  tok5 := public.report_issue_link(p5) ->> 'token';
+  execute 'reset role';
+  j5 := public.report_view(tok5, rt, 'AED');
+  if j5 -> 'payment' ->> 'currency' = 'AED' and (j5 -> 'payment' ->> 'amount')::int = 36725 and j5 -> 'payment' ->> 'pricing_currency' = 'USD'
+     and (select count(*) from jsonb_array_elements(j5 -> 'payment' -> 'options') o where o ->> 'currency' in ('USD','AED')) = 2
+     and j5 -> 'payment' -> 'fx' ->> 'freshness' = 'fresh' and j5::text like '%"stripe"%' then ok := ok + 1; else fail := fail + 1; log := log || ' [host fx: report options ' || (j5 -> 'payment')::text || ']'; end if;
+  j5 := public.report_view(tok5, rt, 'XXX');
+  if j5 -> 'payment' ->> 'currency' = 'USD' and (j5 -> 'payment' ->> 'amount')::int = 10000 and (j5 -> 'payment' -> 'fx') = 'null'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || ' [host fx: unknown currency falls back]'; end if;
+  j5 := public.cg_ph_request_for_pack(p5, 'stripe', rt, 'AED');
+  if j5 -> 'request' ->> 'currency' = 'AED' and (j5 -> 'request' ->> 'amount')::int = 36725 and j5 -> 'request' ->> 'pricing_currency' = 'USD' and (j5 -> 'request' ->> 'fx_quote_id') is not null
+     and j5 -> 'order' ->> 'currency' = 'USD' then ok := ok + 1; else fail := fail + 1; log := log || ' [host fx: request ' || (j5 -> 'request')::text || ']'; end if;
+  oref4 := j5 -> 'order' ->> 'reference';
+  -- switching currency supersedes the live request; the same currency reuses it (locked amount)
+  jB := public.cg_ph_request_for_pack(p5, 'stripe', rt, 'AED');
+  if jB -> 'request' ->> 'id' = j5 -> 'request' ->> 'id' then ok := ok + 1; else fail := fail + 1; log := log || ' [host fx: same currency reused]'; end if;
+  jB := public.cg_ph_request_for_pack(p5, 'stripe', rt, null);
+  if jB -> 'request' ->> 'currency' = 'USD' and (jB -> 'request' ->> 'amount')::int = 10000 and (select status from beau_ph.payment_requests where id = (j5 -> 'request' ->> 'id')::uuid) = 'cancelled' then ok := ok + 1; else fail := fail + 1; log := log || ' [host fx: currency switch supersedes]'; end if;
+  j5 := public.cg_ph_request_for_pack(p5, 'stripe', rt, 'AED');
+  perform public.attach_checkout(oref4, 'cs_fx_1', null, now() + interval '30 min');
+  e1 := public.process_stripe_event(jsonb_build_object('id', 'evt_fx_1', 'type', 'checkout.session.completed', 'livemode', false,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_fx_1', 'payment_status', 'paid', 'amount_total', 36725, 'currency', 'aed', 'payment_intent', 'pi_fx1', 'client_reference_id', oref4)),
+          '_enrich', jsonb_build_object('charge_id', 'ch_fx', 'balance_transaction_id', 'txn_fx', 'fee_amount', 1200)));
+  if (e1 ->> 'status') = 'processed' and (select payment_status from public.session_packs where id = p5) = 'paid'
+     and (select p.currency from public.payments p join public.orders o on o.id = p.order_id where o.reference = oref4) = 'AED'
+     and (select pe.currency from public.partner_earnings pe join public.orders o on o.id = pe.order_id where o.reference = oref4) = 'AED'
+     and (select pe.gross_amount from public.partner_earnings pe join public.orders o on o.id = pe.order_id where o.reference = oref4) = 36725
+     and (select status from beau_ph.fx_quotes where id = (j5 -> 'request' ->> 'fx_quote_id')::uuid) = 'consumed' then ok := ok + 1; else fail := fail + 1; log := log || ' [host fx: paid in AED, ledger in AED ' || e1::text || ']'; end if;
+  -- a wrong amount (the pricing amount, or anything else) is refused by BEAU PH: the request is the authority
+  e2 := public.process_stripe_event(jsonb_build_object('id', 'evt_fx_2', 'type', 'checkout.session.completed', 'livemode', false,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_fx_1', 'payment_status', 'paid', 'amount_total', 10000, 'currency', 'usd', 'payment_intent', 'pi_fx2', 'client_reference_id', oref4))));
+  if (e2 ->> 'status') in ('ignored','processed') and (select count(*) from public.payments p join public.orders o on o.id = p.order_id where o.reference = oref4) = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [host fx: second amount accepted ' || e2::text || ']'; end if;
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  j5 := public.finance_transactions(50);
+  if exists (select 1 from jsonb_array_elements(j5) t where t ->> 'reference' = oref4 and t ->> 'currency' = 'AED' and (t ->> 'amount')::int = 36725 and (t ->> 'fx')::boolean and t ->> 'pricing_currency' = 'USD' and t ->> 'type' = 'package' and t ->> 'status' = 'paid')
+     and (public.finance_transaction_detail(oref4) -> 'requests' -> 0 -> 'fx_quote' ->> 'status') = 'consumed'
+     and public.finance_transaction_detail(oref4)::text not like '%SECRET-NOTE%' then ok := ok + 1; else fail := fail + 1; log := log || ' [host fx: transactions list]'; end if;
+  execute 'reset role';
+  perform beau_ph.merchant_fx_set('coach_gari', '{"enabled":false}'::jsonb, 'fx@test');
 
   raise exception 'BEAU_PH_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

@@ -1,15 +1,18 @@
 /* =============================================================
    CG-012 — report  (on BEAU PH since the productisation step)
    Serves the secure client session-recap / payment page (/r/<token>).
-     POST {action:"view",     token}
-          → {ok, recap, pay_ref, currency, methods[], card_enabled, aani, bank}
+     POST {action:"view",     token, currency?}
+          → {ok, recap, pay_ref, currency, methods[], card_enabled, aani, bank,
+             payment:{pricing_amount, pricing_currency, currency, amount, fx, options[]}}
+            currency = an optional payment currency; the options list is what
+                      BEAU FX can quote right now (fresh rate, eligible rail).
             recap   = authoritative pack recap (NEVER any body metric, BMI,
                       health or private note)
             methods = the AUTHORITATIVE eligible-method list computed
                       server-side by BEAU PH (merchant config × customer
                       country × currency × adapter readiness). The page
                       renders exactly this list — no country logic in JS.
-     POST {action:"pay_card", token}
+     POST {action:"pay_card", token, currency?}
           → {ok, ui:"embedded", client_secret, publishable_key, expires_at}
                         BEAU PH request (amount from the DB order) → EMBEDDED
                         Stripe Checkout Session via the Stripe adapter (mode =
@@ -59,13 +62,16 @@ Deno.serve(async (req: Request) => {
   // the only card surface on this page is the embedded one: without its public configuration, card is not offered at all
   if (runtime.stripe && !runtime.stripe.embedded) runtime.stripe = { configured: false, mode: runtime.stripe.mode, reason: runtime.stripe.reason ?? "embedded checkout not configured" };
 
+  // optional payment currency (ISO 4217); the server decides whether it can be offered — an unknown choice falls back to the pricing currency
+  const currency = typeof body.currency === "string" && /^[A-Za-z]{3}$/.test(body.currency) ? body.currency.toUpperCase() : null;
+
   if (body.action === "view") {
-    const { data, error } = await reportView(supabase, token, runtime);
+    const { data, error } = await reportView(supabase, token, runtime, currency);
     if (error) return rpcError(error, origin, allowed);
     const methods: Array<{ provider: string }> = data.methods ?? [];
     const out = { ok: true, recap: data.recap, pay_ref: data.pay_ref, currency: data.currency, methods,
-                  card_enabled: methods.some((m) => m.provider === "stripe"), aani: data.aani, bank: data.bank };
-    try { assertPublic({ methods: out.methods, aani: out.aani, bank: out.bank }); }
+                  card_enabled: methods.some((m) => m.provider === "stripe"), aani: data.aani, bank: data.bank, payment: data.payment ?? null };
+    try { assertPublic({ methods: out.methods, aani: out.aani, bank: out.bank, payment: out.payment }); }
     catch (e) { log("public_guard_tripped", { reason: (e as Error).message }); return json(500, { ok: false, error: "server_error" }, origin, allowed); }
     log("viewed", { status: "ok", methods: methods.map((m) => m.provider) });
     return json(200, out, origin, allowed);
@@ -81,8 +87,8 @@ Deno.serve(async (req: Request) => {
     // the token scopes everything: it resolves to exactly one pack, whose order carries the authoritative amount
     const { data: packId, error: rErr } = await packIdForToken(supabase, token);
     if (rErr) return rpcError(rErr, origin, allowed);
-    // BEAU PH request for the pack's order: amount/currency from the DB; eligibility enforced server-side
-    const { data: rp, error: oErr } = await requestForPack(supabase, packId, "stripe", runtime);
+    // BEAU PH request for the pack's order (amount from the DB, eligibility enforced server-side) in the chosen payment currency: another currency than the pack's needs a BEAU FX quote (server-side, expiring)
+    const { data: rp, error: oErr } = await requestForPack(supabase, packId, "stripe", runtime, currency);
     if (oErr || !rp) return rpcError(oErr ?? { code: "P0003", message: "unavailable" }, origin, allowed, 409);
     const { request, order } = rp;
     const reply = (c: Extract<CreateRequestResult, { kind: "embedded" }>, reused: boolean) =>

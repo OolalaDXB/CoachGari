@@ -32,6 +32,11 @@
   .paybtn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;font:inherit;font-size:16px;font-weight:700;border-radius:12px;padding:15px;border:1px solid transparent;cursor:pointer;text-decoration:none;}
   .paybtn.card{background:var(--accent);color:#fff;} .paybtn.card:hover{background:var(--accent-ink);}
   .paybtn:disabled{opacity:.5;cursor:not-allowed;}
+  .ccy{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px;}
+  .ccy .k{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--grey);margin-right:4px;}
+  .ccy .chip{font:inherit;font-size:13px;font-weight:700;padding:6px 12px;border-radius:999px;border:1px solid var(--line);background:#fff;cursor:pointer;color:var(--grey);transition:color .18s ease,border-color .18s ease,background .18s ease;}
+  .ccy .chip:hover{color:var(--black);}
+  .ccy .chip.on{background:var(--black);border-color:var(--black);color:#fff;}
   .aani{border:1px solid var(--line);border-radius:14px;padding:16px;}
   .aani-h{font-weight:800;font-size:15px;margin-bottom:2px;}
   .aani-line{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line);}
@@ -81,6 +86,8 @@
     <div id="pay-card" class="card" hidden>
       <h1 style="font-size:18px">Payment</h1>
       <div class="due" id="r-due"><span class="lbl">Amount due</span><span class="amt" id="r-due-amt"></span></div>
+      <div class="ccy" id="pay-ccy" hidden></div>
+      <p class="note" id="fx-note" hidden></p>
       <div class="pay">
         <button class="paybtn card" id="btn-card" hidden>Pay securely by card</button>
         <div class="aani" id="card-panel" hidden>

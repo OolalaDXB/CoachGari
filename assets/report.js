@@ -18,13 +18,15 @@ const endpoint = CONFIG.REPORT_ENDPOINT;
 // token is the last path segment: /r/<token>
 const token = (location.pathname.split('/').filter(Boolean).pop() || '').trim();
 const qs = new URLSearchParams(location.search);
+// the payment currency the client chose on this page (null = the package's pricing currency); the server decides what can be offered
+let payCurrency = null;
 
 function fail(title, msg) { $('err-title').textContent = title; $('err-msg').textContent = msg || ''; show('error'); }
 function money(minor, cur) { if (minor == null) return ''; try { return new Intl.NumberFormat('en-AE', { style: 'currency', currency: cur || 'USD' }).format(minor / 100); } catch { return (cur || '') + ' ' + (minor / 100).toLocaleString(); } }
 function dt(iso) { try { return new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso)) + ', ' + new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Dubai' }).format(new Date(iso)); } catch { return iso; } }
 
 async function api(action, extra) {
-  const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, token, ...extra }) });
+  const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, token, currency: payCurrency, ...extra }) });
   let data = {}; try { data = await res.json(); } catch {}
   return { res, data };
 }
@@ -52,7 +54,16 @@ function render(d) {
   $('pay-card').hidden = true;
   if (r.payment_status !== 'paid' && due && due > 0) {
     $('pay-card').hidden = false;
-    $('r-due-amt').textContent = money(due, r.currency);
+    // BEAU FX: the server offers the pricing currency plus any currency it can quote right now; the page only shows the choice
+    const pay = d.payment || { amount: due, currency: r.currency, pricing_amount: due, pricing_currency: r.currency, fx: null, options: [] };
+    const payAmt = pay.amount != null ? pay.amount : due, payCur = pay.currency || r.currency;
+    payCurrency = payCur === pay.pricing_currency ? null : payCur;
+    $('r-due-amt').textContent = money(payAmt, payCur);
+    const opts = Array.isArray(pay.options) ? pay.options : [];
+    $('pay-ccy').hidden = opts.length < 2;
+    $('pay-ccy').innerHTML = opts.length < 2 ? '' : '<span class="k">Pay in</span>' + opts.map((o) => `<button type="button" class="chip${o.currency === payCur ? ' on' : ''}" data-ccy="${o.currency}">${o.currency}</button>`).join('');
+    $('fx-note').hidden = !pay.fx;
+    if (pay.fx) $('fx-note').textContent = `Priced at ${money(pay.pricing_amount, pay.pricing_currency)}. You pay ${money(payAmt, payCur)} at an indicative rate of ${Number(pay.fx.rate).toFixed(4)}. The rate is locked for ${pay.fx.quote_ttl_minutes || 15} minutes when you start paying.`;
     // The payment options are exactly the AUTHORITATIVE list BEAU PH computed
     // server-side (merchant config × country × currency × provider readiness).
     // This page never decides eligibility itself.
@@ -67,8 +78,8 @@ function render(d) {
       $('aani-ref').textContent = aani.reference || d.pay_ref || '';
       // the amount is quoted only in the request's own currency — never converted
       const settle = aani.settlement_currency || 'AED';
-      if (settle === r.currency) {
-        $('aani-amt').textContent = money(due, r.currency);
+      if (settle === payCur) {
+        $('aani-amt').textContent = money(payAmt, payCur);
         $('aani-note').textContent = ins.instructions || '';
       } else {
         $('aani-amt-line').hidden = true;
@@ -84,7 +95,7 @@ function render(d) {
       $('bank-iban').textContent = ins.iban || '';
       $('bank-bic').textContent = ins.bic || '';
       if (ins.bank_name) $('bank-name').textContent = ins.bank_name; else $('bank-name-line').hidden = true;
-      $('bank-amt').textContent = money(due, r.currency);   // the invoiced amount, in the pack's currency
+      $('bank-amt').textContent = money(payAmt, payCur);   // the amount in the currency chosen on this page
       $('bank-ref').textContent = bank.reference || d.pay_ref || '';
       $('bank-note').textContent = ins.instructions || '';
     }
@@ -150,6 +161,15 @@ $('btn-card').addEventListener('click', async () => {
   }
 });
 $('btn-card-close').addEventListener('click', closeCard);
+// choosing another payment currency re-reads the page in that currency; nothing is converted in the browser
+$('pay-ccy').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ccy]'); if (!b || b.classList.contains('on')) return;
+  payCurrency = b.dataset.ccy; closeCard();
+  for (const id of ['btn-card', 'aani-panel', 'bank-panel', 'pay-none']) $(id).hidden = true;
+  $('aani-amt-line').hidden = false; $('bank-name-line').hidden = false;
+  const { res, data } = await api('view', {});
+  if (res.ok && data.ok) render(data);
+});
 document.querySelectorAll('.copy').forEach((b) => b.addEventListener('click', async () => {
   const el = document.querySelector(b.dataset.copy); const v = el ? el.textContent.trim() : '';
   if (!v) return;

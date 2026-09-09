@@ -23,6 +23,120 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Coach Gari / BEAU PH — Finance workspace, rails configuration, BEAU FX (2026-09-09)
+
+**What changed.** The Finance tab is now two sub-tabs — **Transactions**
+(default) and **Payment methods** — and a new **BEAU PH** tab holds the
+operator workspace: **Rails** (every provider BEAU PH knows, with the
+merchant's real state) and **FX**. BEAU PH stays embedded in Coach Gari for
+V0; every screen calls a host RPC in `public` that wraps `beau_ph.*` with
+the merchant key fixed to `coach_gari`. Nothing was extracted.
+
+### Decisions
+
+- **Access is the finance pair, never `platform:admin`.** Every workspace
+  RPC checks `finance:view` (read) or `finance:manage` (write) inside a
+  SECURITY DEFINER function. Gari (`grej28roux@gmail.com`) is provisioned
+  with the launch set (`20260928`, audited under `permission/provision`);
+  Mickaël already held it. Proven for both persona shapes in `cg0025` §10.
+- **Transactions are one list across every rail.** `finance_transactions()`
+  joins the host order to its most relevant BEAU PH request and the host
+  payment: type (`service` / `package` / `support` / `other`, from the
+  order reason), method, the amount **in the currency actually collected**,
+  BEAU PH status normalised to the host vocabulary, and a pending action
+  (`confirm_receipt`, `fee_pending`, `partial_refund`). The drawer
+  (`finance_transaction_detail`) is lazy and carries requests, events,
+  payments, earning, refunds and chargebacks — no CRM note, no health data,
+  no enquiry body, no provider secret, no raw webhook payload.
+- **Payment methods list only what the merchant configured**
+  (`merchant_methods.listed`); the provider catalogue appears only behind
+  "+ Add payment method". Rows are compact; Edit / Remove reveal on hover
+  (and behind `•••` on touch); the editor is inline, lazy, schema-driven
+  (`providers.config_schema`) and asks for **one** confirmation on Save
+  with a change summary. **Remove** deactivates and unlists when history
+  exists (the rail's requests, events and audit stay); it deletes only an
+  unused configuration.
+- **Merchant configuration is the intersection with provider capability.**
+  `merchant_methods` now persists ISO `countries[]`, `currencies[]`,
+  `intents[]` and per-currency `limits`; `null` is "needs configuration",
+  never "any" — a rail without a market is not eligible anywhere. A brand
+  new rail starts in **one** explicit market: the provider's own coverage
+  or the merchant's home country (`20260929`). Structural reasons
+  (`coming_soon`, `not_configured`) come before merchant reasons in
+  `method_matrix` (`20261001`). The single write path is
+  `merchant_method_configure`, which refuses a country, currency, intent or
+  capability the provider does not support and writes a **field-level**
+  audit row (`beau_ph.config_audit`: actor, field, old, new — CHECKed free
+  of secrets).
+- **Secrets never leave the server.** The catalogue stores secret **names**;
+  the `ph-admin` Edge Function answers presence and mode per name for a
+  signed-in user holding `finance:view`, and trips a guard if anything
+  secret-shaped would be returned. No value, prefix or length travels.
+- **Settlement destinations are distinct from methods**
+  (`settlement_destinations`, `method_settlements`); removal deactivates
+  when a method still maps to it.
+- **BEAU FX is server-side and fails closed.** Modelled on the Maisons FX
+  subsystem: EUR-base daily rates from Frankfurter (ECB), USD pegs derived
+  from the same day's USD rate (AED 3.6725, SAR, QAR), NBG defined but
+  disabled; rate-on-or-before lookup; ±20 % day-on-day anomaly rejection;
+  per-source isolation (one source failing never blocks another); freshness
+  ≤36 h fresh · 36–72 h acceptable · >72 h stale; refresh through `pg_net`
+  (06:05 UTC daily, collected every minute) with run observability and a
+  manual refresh from the workspace. A stale or missing rate means **no
+  quote** — the currency is simply not offered. Quotes are immutable
+  snapshots (trigger-guarded; only lifecycle fields change), expire after
+  15 minutes by default, and separate the reference rate, an optional
+  provider rate, the merchant adjustment (bps) and the customer rate. The
+  order keeps its **pricing** amount and currency; the request carries the
+  quoted **payment** amount and currency plus the quote id; the ledger
+  stamps the earning in the currency actually collected. `report_view`
+  offers the pricing currency first and every currency FX can quote right
+  now; the payer's choice is a request parameter that the server validates
+  against those options — the browser can never set an amount or a rate.
+- **Merchant FX is disabled by default.** `merchant_fx.enabled = false` for
+  Coach Gari until the owner switches it on in BEAU PH › FX. With it off,
+  the report page offers the pricing currency only (proven in `cg012`).
+- **Support intent exists as vocabulary only.** `intent = support` is a
+  first-class value in the eligibility and request model (rails may be
+  scoped to it), but the public "Support Coach Gari" flow is **not built**
+  in this sprint.
+
+### Found by the new tests
+
+- `attach_checkout()` re-derived the BEAU PH request without a payment
+  currency, so a Checkout Session created for an AED payment of a USD
+  package was attached to a fresh USD request and the AED webhook was
+  refused as an amount mismatch. It now attaches to the order's **live**
+  Stripe request whatever its currency (`20261002`). No client had used
+  the currency choice yet.
+- Switching the payment currency **back** to the pricing currency hit the
+  "live request with another amount" guard; the rule is now symmetric —
+  one live request per rail and order, in the currency last chosen
+  (`20260930`).
+
+### Tests
+
+`BEAU_PH_TESTS ok=142` (rail configuration §22, FX §23, host FX payment
+§24), `CG0025_TESTS ok=288` (§10 workspace personas: both launch-user
+shapes reach every workspace RPC, coach-only / platform:admin-only / anon
+refused, outputs free of secret-shaped values, every change audited with
+its actor, production rows for both launch users hold the finance pair),
+`CG012_TESTS ok=31`, `CG003_TESTS ok=24` (count assertions are now deltas
+over the live ledger), `CG002 28`, `CG009 43`, `CG010 48`, `CG011 31`,
+`ADMIN_WORKSPACE_TESTS ok=34` (Playwright, lazy loading and no secret ever
+requested).
+
+### Owner actions
+
+- Gari's auth invite exists but is unconfirmed; the first magic-link sign-in
+  completes it. No permission change is needed.
+- Enable BEAU FX (BEAU PH › FX › Settings) only when a second payment
+  currency should be offered on the report page.
+- Bank transfer stays unconfigured until real account details are entered
+  in Finance › Payment methods (nothing is seeded).
+
+---
+
 ## Coach Gari / BEAU PH — the Stripe fee was recorded as zero (2026-09-09)
 
 **Root cause.** The Stripe adapter's `enrich()` asked for the payment intent

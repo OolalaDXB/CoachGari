@@ -32,20 +32,23 @@ export interface HostOrder {
   booking?: { reference: string; service_title?: string } | null;
 }
 
+export interface PaymentOption { currency: string; amount: number; pricing: boolean; rate?: number; freshness?: string; quote_ttl_minutes?: number }
 export interface ReportView {
   ok: true; recap: Record<string, unknown>; pay_ref: string; currency: string; customer_country: string | null;
   methods: EligibleMethod[];
+  /** pricing origin, the payment currency selected, the amount in it, the FX disclosure (null when same currency) and the options offered */
+  payment: { pricing_amount: number; pricing_currency: string; currency: string; amount: number; fx: PaymentOption | null; options: PaymentOption[] };
   aani: Record<string, unknown>; bank: Record<string, unknown>;   // legacy blocks, derived from `methods`
 }
 
 /** Client recap + authoritative eligible-method list for a report token. */
-export async function reportView(sb: Rpc, token: string, runtime: RuntimeMap) {
-  return await sb.rpc("report_view", { p_token: token, p_runtime: runtime });
+export async function reportView(sb: Rpc, token: string, runtime: RuntimeMap, currency: string | null = null) {
+  return await sb.rpc("report_view", { p_token: token, p_runtime: runtime, p_currency: currency });
 }
 
 /** Pack → order (amount from the pack snapshot) → BEAU PH request for the chosen rail. */
-export async function requestForPack(sb: Rpc, packId: string, provider: ProviderKey, runtime: RuntimeMap) {
-  return await sb.rpc("cg_ph_request_for_pack", { p_pack_id: packId, p_provider: provider, p_runtime: runtime }) as
+export async function requestForPack(sb: Rpc, packId: string, provider: ProviderKey, runtime: RuntimeMap, currency: string | null = null) {
+  return await sb.rpc("cg_ph_request_for_pack", { p_pack_id: packId, p_provider: provider, p_runtime: runtime, p_currency: currency }) as
     { data: { request: PaymentRequest; order: HostOrder } | null; error: { code?: string; message?: string } | null };
 }
 

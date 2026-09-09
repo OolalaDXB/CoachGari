@@ -7,14 +7,18 @@
    permission:
      coach:operations → Leads, Calendar, Bookings, Availability, Exceptions, Tour stops
      catalog:view     → Services (the commercial catalogue)
-     finance:view     → Finance (orders, ledger, settlements)
+     finance:view     → Finance (Transactions, Payment methods) and the
+                        embedded BEAU PH workspace (Rails, FX) — both users
+                        of the launch pair; never gated on platform:admin
      analytics:view   → Analytics
      platform:admin   → Access
    Finance is a tab here, not a separate app — /finance is kept only as a
    deep link that redirects to #finance. Merging the UI does NOT merge the
    permissions: finance:view / finance:manage stay independent in the
    database, and the Finance tab (and its RPCs, under RLS) disappear the
-   moment the permission is removed.
+   moment the permission is removed. The Finance / BEAU PH screens live in
+   /admin/finance.js and load lazily: Transactions only on open, method
+   summaries on the Payment methods tab, one method's configuration on Edit.
    Magic-link sign-in (Supabase Auth) with shouldCreateUser:false — an email
    that was not provisioned by the owner cannot even create an auth user.
    What a signed-in person can see and do is decided entirely by the
@@ -24,6 +28,7 @@
    tables, so `select *` would be refused.
    ============================================================= */
 import { CONFIG } from '/config.js';
+import { initFinance, financeTransactions, financePaymentMethods, phRails, phFx } from '/admin/finance.js';
 
 const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUBLISHABLE_KEY, { auth: { flowType: 'pkce', persistSession: true } });
 
@@ -106,7 +111,14 @@ function navModel() {
               { key: 'tours', label: 'Tour stops', show: () => true, run: tours } ] },
     { key: 'bookings', label: 'Bookings', icon: '▤', show: () => has('coach:operations'), run: bookings },
     { key: 'services', label: 'Services', icon: '❖', show: () => has('catalog:view'), run: catalogue },
-    { key: 'finance', label: 'Finance', icon: '$', show: () => has('finance:view'), run: finance },
+    // Finance = the daily business surface (Transactions first, never the infrastructure). BEAU PH = the temporary embedded
+    // payment-infrastructure workspace (Rails, FX); both gated on the finance permissions, never on platform:admin.
+    { key: 'finance', label: 'Finance', icon: '$', show: () => has('finance:view'),
+      subs: [ { key: 'transactions', label: 'Transactions', show: () => true, run: financeTransactions },
+              { key: 'methods', label: 'Payment methods', show: () => true, run: financePaymentMethods } ] },
+    { key: 'beauph', label: 'BEAU PH', icon: '⌁', show: () => has('finance:view'),
+      subs: [ { key: 'rails', label: 'Rails', show: () => true, run: phRails },
+              { key: 'fx', label: 'FX', show: () => true, run: phFx } ] },
     { key: 'analytics', label: 'Analytics', icon: '◔', show: () => has('analytics:view'), run: analytics },
     { key: 'access', label: 'Access', icon: '⚿', show: () => has('platform:admin'), run: access },
   ];
@@ -122,6 +134,7 @@ async function render(session) {
   try {
     const { data, error } = await sb.rpc('my_permissions'); if (error) throw error;
     me = data;
+    initFinance({ sb, $, esc, money, st, fmt, table, toast, fail, has, view, config: CONFIG, openProfile });
     const model = navModel();
     const others = model.filter((s) => s.key !== 'overview' && s.show());
     NAV = model.filter((s) => s.key === 'overview' ? others.length > 0 : s.show())
@@ -983,136 +996,7 @@ async function catalogue() {
   });
 }
 
-/* =============================== FINANCE =============================== */
-async function finance() {
-  const manage = has('finance:manage');
-  const [{ data: orders, error }, { data: settlements }, { data: events }] = await Promise.all([
-    sb.rpc('finance_orders').limit(300),
-    sb.from('partner_settlements').select('*').order('created_at', { ascending: false }),
-    sb.rpc('finance_webhook_log').limit(30),
-  ]); if (error) throw error;
-  // Payment methods + rails live in BEAU PH (BEAU Payment Hub); the Finance screen reads them through host RPCs.
-  const [{ data: pms }, { data: rails }] = await Promise.all([sb.rpc('payment_methods_list'), sb.rpc('payment_rails')]);
-  const aani = (pms || []).find((m) => m.method === 'aani');
-  const bank = (pms || []).find((m) => m.method === 'bank_transfer');
-  const READY = { available: 'Available', not_configured: 'Not onboarded', placeholder: 'Coming soon' };
-  const capChip = (c) => `<span class="st st-${esc(c.readiness)}" title="${esc(c.notes || '')}">${esc(String(c.capability).replace(/_/g, ' '))}${c.handoff ? ' · app handoff' : ''}${c.readiness === 'placeholder' ? ' · soon' : c.readiness === 'not_configured' ? ' · not onboarded' : ''}</span>`;
-  const railsPanel = `<div class="ad-panel"><h2>Payment rails — BEAU Payment Hub</h2>
-      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Every rail BEAU PH knows, its capabilities, whether it is onboarded, and whether it is enabled for Coach Gari. What a given client or device is actually offered is decided server-side per country, currency, platform and readiness — never in a page. Card payments run in the mode the deployment declares (<b>PAYMENTS_MODE</b>: test or live); a key of another mode, or no declared mode, is refused server-side.</p>
-      ${table(['Rail', 'Capabilities', 'Readiness (API)', 'Countries', 'Currencies', 'For Coach Gari'], (rails || []).map((r) => `<tr>
-        <td><b>${esc(r.display_name)}</b><br><span class="ad-muted" style="font-size:12px">${esc(r.notes || '')}</span></td>
-        <td style="max-width:260px;line-height:1.9">${(r.capabilities || []).map(capChip).join(' ') || '—'}</td>
-        <td>${st(r.readiness)}<div class="msg">${esc(READY[r.readiness] || r.readiness)}</div></td>
-        <td>${esc((r.countries || ['any']).join(', '))}</td><td>${esc((r.currencies || ['any']).join(', '))}</td>
-        <td>${(r.capabilities || []).some((c) => c.readiness === 'available') ? st(r.enabled ? 'enabled' : 'disabled') : '—'}</td></tr>`), 'No rails registered.')}</div>`;
-  // In-person acceptance (BEAU PH softpos, V0 = handoff to the PSP's certified Tap to Pay app)
-  const HANDOFF_DEFAULT = { network_international: 'N-Genius One', magnati: 'SwipeX' };
-  const handoffRails = (rails || []).filter((r) => (r.capabilities || []).some((c) => c.capability === 'softpos' && c.handoff && c.readiness === 'available'));
-  const pspPanel = `<div class="ad-panel"><h2>In-person acceptance — Tap to Pay on iPhone (PSP app handoff)</h2>
-      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Apple's Tap to Pay on iPhone is live in the UAE with Network International (<i>N-Genius One</i> app) and Magnati (<i>SwipeX</i> app). V0 = handoff: from a session or package you tap <b>Collect in person</b>, take the contactless payment in the PSP's app, then enter the app's receipt reference here — BEAU PH records an operator-attested receipt and the package/ledger update. Card data never touches Coach Gari or BEAU PH; nothing NFC runs in this app. Native Tap to Pay inside a BEAU PH Merchant iOS app is reserved for later. ${manage ? '' : 'View only — editing needs finance:manage.'}</p>
-      ${handoffRails.map((r) => { const cfg = (pms || []).find((m) => m.method === r.provider) || {}; return `
-      <form class="ad-form psp-form" data-psp="${esc(r.provider)}" ${manage ? '' : 'style="pointer-events:none;opacity:.7"'} style="margin-bottom:14px">
-        <div class="row">
-          <label style="flex-direction:row;align-items:center;gap:8px;font-weight:700"><input type="checkbox" name="enabled" ${cfg.enabled ? 'checked' : ''}> ${esc(r.display_name)}</label>
-          <label>App name <input name="handoff_app" value="${esc(cfg.handoff_app || HANDOFF_DEFAULT[r.provider] || '')}" placeholder="${esc(HANDOFF_DEFAULT[r.provider] || 'PSP app')}"></label>
-          <label>App link (optional) <input name="handoff_url" value="${esc(cfg.handoff_url || '')}" placeholder="app scheme or https:// link"></label></div>
-        ${manage ? `<div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save ${esc(r.display_name)}</button></div>` : ''}
-      </form>`; }).join('') || '<p class="ad-empty">No handoff-capable PSP registered.</p>'}
-      <p class="ad-note">Only the app name and an optional link are stored — never a merchant id, key or credential. Adyen is SDK-only (no standalone app) and stays reserved.</p></div>`;
-  const open = orders.filter((o) => o.earning_status === 'open');
-  const sum = (arr, k) => arr.reduce((a, o) => a + (o[k] || 0), 0);
-  const today = new Date(); const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-  view.innerHTML = `
-    <div class="ad-head"><div><h1>Finance</h1><p class="ad-muted">Stripe <b>test mode</b>. Orders, payments and the partner ledger. No names, no contacts, no enquiries — only a masked hint to match a Stripe receipt. Refunds are issued in the Stripe dashboard and land here through the webhook.</p></div></div>
-    <div class="ad-kpis">
-      <div class="ad-kpi"><b>${money(sum(orders.filter((o) => o.paid_at), 'gross_amount'))}</b><span>Gross collected</span></div>
-      <div class="ad-kpi"><b>${money(sum(orders, 'net_collected'))}</b><span>Net after fees, refunds, chargebacks</span></div>
-      <div class="ad-kpi"><b>${money(sum(orders, 'oolala_commission'))}</b><span>Oolala commission (${CONFIG.COMMISSION_RATE})</span></div>
-      <div class="ad-kpi"><b>${money(sum(open, 'gari_payable'))}</b><span>Payable to Gari — not yet settled</span></div>
-    </div>
-    ${railsPanel}
-    <div class="ad-panel"><h2>Payment methods — Aani</h2>
-      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">The UAE instant-payment (Aani) details shown on client recap/payment pages. Aani is settled manually: a client paying by Aani never marks anything paid — an operator records the received payment under a package. ${manage ? '' : 'View only — editing needs finance:manage.'}</p>
-      <form id="aani-form" class="ad-form" ${manage ? '' : 'style="pointer-events:none;opacity:.7"'}>
-        <div class="row">
-          <label style="flex-direction:row;align-items:center;gap:8px;font-weight:700"><input type="checkbox" name="enabled" ${aani?.enabled ? 'checked' : ''}> Enabled</label>
-          <label>Proxy type <select name="proxy_type"><option value="mobile" ${aani?.proxy_type === 'mobile' ? 'selected' : ''}>Mobile</option><option value="email" ${aani?.proxy_type === 'email' ? 'selected' : ''}>Email</option><option value="merchant" ${aani?.proxy_type === 'merchant' ? 'selected' : ''}>Merchant</option></select></label>
-          <label>Currency <input name="currency" value="${esc(aani?.currency || 'AED')}" maxlength="3"></label></div>
-        <div class="row">
-          <label>Aani value (machine) <input name="proxy_value" value="${esc(aani?.proxy_value || '')}" placeholder="+9715XXXXXXXX"></label>
-          <label>Display value <input name="display_value" value="${esc(aani?.display_value || '')}" placeholder="+971 5X XXX XXXX"></label></div>
-        <label>Instructions <input name="instructions" value="${esc(aani?.instructions || '')}" placeholder="Shown to the client on the payment page"></label>
-        ${manage ? '<div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save Aani settings</button></div>' : ''}
-      </form>
-      <h2 style="margin-top:20px">Payment methods — Bank transfer</h2>
-      <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Account details shown on client recap/payment pages for a bank transfer. Never shown on the public marketing site. Settled manually: record the received payment under the package. ${manage ? '' : 'View only — editing needs finance:manage.'}</p>
-      <form id="bank-form" class="ad-form" ${manage ? '' : 'style="pointer-events:none;opacity:.7"'}>
-        <div class="row">
-          <label style="flex-direction:row;align-items:center;gap:8px;font-weight:700"><input type="checkbox" name="enabled" ${bank?.enabled ? 'checked' : ''}> Enabled</label>
-          <label>Currency <input name="currency" value="${esc(bank?.currency || 'AED')}" maxlength="3"></label></div>
-        <label>Account holder <input name="account_holder" value="${esc(bank?.account_holder || '')}" placeholder="e.g. Coach Gari FZ-LLC"></label>
-        <div class="row">
-          <label>IBAN <input name="iban" value="${esc(bank?.iban || '')}" placeholder="AE.. / .."></label>
-          <label>BIC / SWIFT <input name="bic" value="${esc(bank?.bic || '')}" placeholder="e.g. EBILAEAD"></label></div>
-        <label>Bank name <input name="bank_name" value="${esc(bank?.bank_name || '')}" placeholder="e.g. Emirates NBD"></label>
-        <label>Instructions <input name="instructions" value="${esc(bank?.instructions || '')}" placeholder="Shown to the client on the payment page"></label>
-        ${manage ? '<div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save bank transfer settings</button></div>' : ''}
-      </form></div>
-    ${pspPanel}
-    <div class="ad-panel"><h2>Settlements</h2>
-      ${table(['Ref', 'Period', 'Items', 'Gross', 'Fees', 'Refunds/CB', 'Net', 'Commission', 'Payable', 'Status', ''], settlements.map((s) => `<tr>
-        <td>${esc(s.reference)}</td><td>${s.period_start} → ${s.period_end}</td><td class="num">${(orders.filter((o) => o.settlement_id === s.id)).length}</td>
-        <td class="num">${money(s.gross_amount, s.currency)}</td><td class="num">${money(s.fee_amount, s.currency)}</td><td class="num">${money(s.refund_amount + s.chargeback_amount, s.currency)}</td>
-        <td class="num">${money(s.net_collected, s.currency)}</td><td class="num">${money(s.oolala_commission, s.currency)}</td><td class="num"><b>${money(s.amount_payable, s.currency)}</b></td>
-        <td>${st(s.status)}${s.bank_transfer_reference ? `<div class="msg">${esc(s.bank_transfer_reference)}</div>` : ''}</td>
-        <td class="acts">${manage && s.status === 'ready' ? `<button class="btn btn-accent btn-xs" data-paid="${s.reference}">Mark paid</button>` : ''}${manage && s.status === 'paid' ? `<button class="btn btn-dark btn-xs" data-recon="${s.reference}">Reconciled</button>` : ''}</td></tr>`), 'No settlement yet.')}
-      ${manage ? `<form id="settle-form" class="ad-form" style="margin-top:16px"><div class="row"><label>Period from <input type="date" name="from" required value="${isoDate(monthStart)}"></label><label>to <input type="date" name="to" required value="${isoDate(today)}"></label><label>Currency <input name="currency" value="USD" pattern="[A-Z]{3}"></label></div>
-        <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Create settlement for open earnings</button></div></form><p class="ad-note">Creates a settlement from every open earning whose payment date falls in the period, then freezes those earnings. Pay Gari by bank transfer and record the reference with "Mark paid".</p>` : '<p class="ad-note">View only. Settlement actions need the finance:manage permission.</p>'}</div>
-    <div class="ad-panel"><h2>Orders</h2>
-      ${table(['Created', 'Order', 'Booking or package', 'Item', 'Customer hint', 'Gross', 'Fee', 'Refunds', 'CB', 'Net', 'Commission', 'Payable', 'Status'], orders.map((o) => `<tr>
-        <td>${fmt(o.created_at, 'Asia/Dubai')}</td><td>${esc(o.reference)}<br>${st(o.status)}</td>
-        <td>${o.booking_reference ? esc(o.booking_reference) + '<br>' + st(o.booking_status)
-              : o.pack_reference ? esc(o.pack_reference) + '<br><span class="ad-muted" style="font-size:12px">Package</span>' : '—'}</td>
-        <td>${esc(o.service_title || '—')}${o.session_start_at ? `<br><span class="ad-muted" style="font-size:12px">${fmt(o.session_start_at, o.session_timezone)} · ${esc(o.delivery_mode)}</span>` : ''}</td>
-        <td class="ad-muted" style="font-size:12px">${esc(o.customer_hint || '—')}</td>
-        <td class="num">${money(o.gross_amount, o.currency)}</td><td class="num">${o.earning_status && o.fee_known === false ? '<span class="ad-muted">pending</span>' : money(o.stripe_fee, o.currency)}</td><td class="num">${money(o.refund_amount, o.currency)}</td><td class="num">${money(o.chargeback_amount, o.currency)}</td>
-        <td class="num">${money(o.net_collected, o.currency)}</td><td class="num">${money(o.oolala_commission, o.currency)}</td><td class="num"><b>${money(o.gari_payable, o.currency)}</b></td>
-        <td>${o.earning_status ? st(o.earning_status) : '—'}${o.adjusted_at ? '<div class="msg">adjusted after settlement</div>' : ''}</td></tr>`), 'No orders yet.')}</div>
-    <div class="ad-panel"><h2>Webhook log</h2>${table(['Received', 'Event', 'Type', 'Status', 'Note'], events.map((e) => `<tr><td>${fmt(e.received_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'medium' })}</td><td class="ad-muted" style="font-size:12px">${esc(e.event_id)}</td><td>${esc(e.event_type)}</td><td>${st(e.status)}</td><td class="msg">${esc(e.note || '')}</td></tr>`), 'No Stripe events received yet.')}</div>`;
-  view.querySelectorAll('[data-paid]').forEach((b) => b.onclick = async () => {
-    const ref = window.prompt(`Bank transfer reference for ${b.dataset.paid}:`); if (!ref) return;
-    const { error } = await sb.rpc('finance_mark_settlement_paid', { p_reference: b.dataset.paid, p_bank_transfer_reference: ref }); if (error) return fail(error); toast('Marked paid'); finance().catch(fail);
-  });
-  view.querySelectorAll('[data-recon]').forEach((b) => b.onclick = async () => {
-    if (!(await confirmAct(`Mark ${b.dataset.recon} as reconciled with the bank statement?`))) return;
-    const { error } = await sb.rpc('finance_mark_settlement_reconciled', { p_reference: b.dataset.recon }); if (error) return fail(error); toast('Reconciled'); finance().catch(fail);
-  });
-  $('#settle-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault(); const f = new FormData(e.target);
-    const { data, error } = await sb.rpc('finance_create_settlement', { p_period_start: f.get('from'), p_period_end: f.get('to'), p_currency: f.get('currency') || 'USD' }); if (error) return fail(error);
-    toast(`${data.reference}: ${data.items} item(s), payable ${money(data.amount_payable, data.currency)}`); finance().catch(fail);
-  });
-  $('#aani-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault(); const f = new FormData(e.target);
-    const { error } = await sb.rpc('payment_method_set', { p: { method: 'aani', enabled: !!f.get('enabled'),
-      proxy_type: f.get('proxy_type'), proxy_value: f.get('proxy_value'), display_value: f.get('display_value'),
-      currency: (f.get('currency') || 'AED').toUpperCase(), instructions: f.get('instructions') } });
-    if (error) return fail(error); toast('Aani settings saved'); finance().catch(fail);
-  });
-  $('#bank-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault(); const f = new FormData(e.target);
-    const { error } = await sb.rpc('payment_method_set', { p: { method: 'bank_transfer', enabled: !!f.get('enabled'),
-      account_holder: f.get('account_holder'), iban: f.get('iban'), bic: f.get('bic'), bank_name: f.get('bank_name'),
-      currency: (f.get('currency') || 'AED').toUpperCase(), instructions: f.get('instructions') } });
-    if (error) return fail(error); toast('Bank transfer settings saved'); finance().catch(fail);
-  });
-  view.querySelectorAll('form.psp-form').forEach((form) => form.addEventListener('submit', async (e) => {
-    e.preventDefault(); const f = new FormData(form);
-    const { error } = await sb.rpc('payment_method_set', { p: { method: form.dataset.psp, enabled: !!f.get('enabled'),
-      handoff_app: f.get('handoff_app'), handoff_url: f.get('handoff_url'), currency: 'AED' } });
-    if (error) return fail(error); toast('In-person acceptance saved'); finance().catch(fail);
-  }));
-}
+/* Finance and the BEAU PH workspace live in /admin/finance.js (Transactions, Payment methods, Rails, FX). */
 
 /* =============================== ANALYTICS =============================== */
 async function analytics() {

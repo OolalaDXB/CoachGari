@@ -43,7 +43,7 @@ export function corsHeaders(origin: string | null, allowed: boolean, methods = "
   if (origin && allowed) {
     h["Access-Control-Allow-Origin"] = origin;
     h["Access-Control-Allow-Methods"] = methods;
-    h["Access-Control-Allow-Headers"] = "Content-Type";
+    h["Access-Control-Allow-Headers"] = "Content-Type, Authorization";   // Authorization: the back-office helper (ph-admin) sends the user's JWT
     h["Access-Control-Max-Age"] = "86400";
   }
   return h;

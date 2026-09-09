@@ -419,5 +419,68 @@ begin
   -- postgres itself has no app permission: the RPC refuses it too (no superuser side door)
   begin perform public.catalog_save_service('{"slug":"t-new","title":"x"}'::jsonb); fail := fail + 1; log := log || ' [rpc without permission]'; exception when insufficient_privilege then ok := ok + 1; end;
 
+  /* ---- 10. Finance + BEAU PH workspace: both launch users reach it through finance:view / finance:manage, never through platform:admin;
+             a coach-only user, an access administrator and anon are refused; nothing secret-shaped leaves the server; every change is audited with its actor ---- */
+  -- production provisioning: Gari (grej28roux@gmail.com) and Mickael (mickael@thestudio.mt) both hold the finance pair (real rows, read here, never written)
+  select count(*) into n from public.app_permissions where email in ('grej28roux@gmail.com', 'mickael@thestudio.mt') and permission in ('finance:view', 'finance:manage');
+  if n = 4 and (select count(*) from public.app_users where email in ('grej28roux@gmail.com', 'mickael@thestudio.mt') and active) = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [launch users finance provisioning ' || n || ']'; end if;
+  -- Gari-like persona (launch set) and Mickael-like persona (finance pair): identical reach
+  foreach q in array array['launch@test.local', 'finance@test.local'] loop
+    perform set_config('request.jwt.claims', format('{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000000a","email":"%s"}', q), true);
+    execute 'set local role authenticated';
+    j := public.finance_transactions(50);
+    if exists (select 1 from jsonb_array_elements(j) t where t ->> 'reference' = oref and t ->> 'status' = 'paid' and t ->> 'type' = 'service' and t ->> 'method' = 'stripe' and (t ->> 'amount')::int = 4500 and t ->> 'currency' = 'USD')
+       and j::text not like '%Paying Person%' and j::text not like '%payer@example.com%' then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s transactions]', q); end if;
+    s := public.finance_transaction_detail(oref);
+    if s -> 'earning' ->> 'gari_payable' = '3905' and s::text not like '%Paying Person%' and s::text not like '%private message body%' then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s transaction detail]', q); end if;
+    j := public.payment_methods_summary();
+    if jsonb_typeof(j) = 'array' and exists (select 1 from jsonb_array_elements(j) m where m ->> 'provider' = 'stripe') then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s methods summary]', q); end if;
+    s := public.payment_method_get('stripe');
+    if s -> 'provider' ->> 'key' = 'stripe' and jsonb_typeof(s -> 'provider' -> 'config_schema') = 'array' then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s method get]', q); end if;
+    j := public.beau_ph_rails();
+    if jsonb_array_length(j -> 'rails') >= 8 and (j -> 'merchant' ->> 'mode') = 'test' then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s rails]', q); end if;
+    s := public.beau_ph_fx();
+    if (s ? 'health') and (s ? 'currencies') and (s ? 'settings') then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s fx]', q); end if;
+    -- nothing secret-shaped, no secret value under a secret-looking key, in any workspace payload
+    if (j::text || s::text || public.payment_methods_summary()::text || public.payment_method_get('stripe')::text || public.finance_transaction_detail(oref)::text) !~ '(sk|rk)_(live|test)_|whsec_'
+       and (j::text || s::text) !~* '"(secret|api_?key|private_?key|password)"\s*:\s*"[^"]{8,}"' then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s secret-shaped output]', q); end if;
+    -- a change through the single write path: audited with the actor, and never a secret value
+    s := public.payment_method_set(jsonb_build_object('method', 'bank_transfer', 'enabled', true, 'currency', 'USD', 'countries', jsonb_build_array('AE', 'ZW'), 'currencies', jsonb_build_array('USD'),
+                                                       'fields', jsonb_build_object('account_holder', 'Coach Gari', 'iban', 'AE07TEST' || upper(left(q, 3)), 'bic', 'TESTAEAD')));
+    if (s ->> 'enabled')::boolean and s -> 'countries' = '["AE","ZW"]'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s method set %s]', q, s::text); end if;
+    begin perform public.payment_method_set('{"method":"stripe","fields":{"api_key":"sk_test_abcdefghijklmnop"}}'::jsonb); fail := fail + 1; log := log || format(' [%s secret accepted as field]', q); exception when sqlstate '22023' or check_violation then ok := ok + 1; end;
+    begin perform public.admin_list_access(); fail := fail + 1; log := log || format(' [%s lists access]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    execute 'reset role';
+    select count(*) into n from beau_ph.config_audit a join beau_ph.merchants mc on mc.id = a.merchant_id
+     where mc.key = 'coach_gari' and a.area = 'merchant_method' and a.entity = 'bank_transfer' and a.actor = q and a.field = 'instructions.iban'
+       and beau_ph.no_secret_keys(a.new_value);
+    if n >= 1 and exists (select 1 from public.admin_audit where area = 'payment_method' and entity_id = 'bank_transfer' and action = 'set' and changed_by = q) then ok := ok + 1; else fail := fail + 1; log := log || format(' [%s method audit]', q); end if;
+  end loop;
+  if beau_ph.no_secret_keys(beau_ph.rails_overview('coach_gari')) and beau_ph.no_secret_keys(beau_ph.merchant_method_get('coach_gari', 'stripe')) and beau_ph.no_secret_keys(beau_ph.fx_overview('coach_gari'))
+  then ok := ok + 1; else fail := fail + 1; log := log || ' [workspace secret keys]'; end if;
+  -- coach only, platform:admin only, anon: refused at the function
+  foreach q in array array['coach@test.local', 'padmin@test.local'] loop
+    perform set_config('request.jwt.claims', format('{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000000b","email":"%s"}', q), true);
+    execute 'set local role authenticated';
+    begin perform public.finance_transactions(10); fail := fail + 1; log := log || format(' [%s transactions allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    begin perform public.finance_transaction_detail(oref); fail := fail + 1; log := log || format(' [%s detail allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    begin perform public.payment_methods_summary(); fail := fail + 1; log := log || format(' [%s methods allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    begin perform public.payment_method_get('stripe'); fail := fail + 1; log := log || format(' [%s method get allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    begin perform public.payment_method_set('{"method":"aani","enabled":false}'::jsonb); fail := fail + 1; log := log || format(' [%s method set allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    begin perform public.payment_method_remove('aani'); fail := fail + 1; log := log || format(' [%s method remove allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    begin perform public.beau_ph_rails(); fail := fail + 1; log := log || format(' [%s rails allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    begin perform public.beau_ph_fx(); fail := fail + 1; log := log || format(' [%s fx allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    begin perform public.beau_ph_fx_set('{"enabled":true}'::jsonb); fail := fail + 1; log := log || format(' [%s fx set allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    begin perform public.beau_ph_config_audit(10); fail := fail + 1; log := log || format(' [%s config audit allowed]', q); exception when insufficient_privilege then ok := ok + 1; end;
+    execute 'reset role';
+  end loop;
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  execute 'set local role anon';
+  foreach q in array array['select public.finance_transactions(10)', 'select public.payment_methods_summary()', 'select public.payment_method_set(''{}''::jsonb)', 'select public.beau_ph_rails()', 'select public.beau_ph_fx()',
+                           'select count(*) from beau_ph.merchant_methods', 'select count(*) from beau_ph.config_audit', 'select count(*) from beau_ph.fx_quotes'] loop
+    begin execute q; fail := fail + 1; log := log || ' [anon allowed: ' || q || ']'; exception when insufficient_privilege then ok := ok + 1; end;
+  end loop;
+  execute 'reset role';
+
   raise exception 'CG0025_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

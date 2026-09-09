@@ -27,14 +27,16 @@
 │   cg_ph_request_for_order / _for_pack / _for_booking          │
 │   attach_checkout · process_stripe_event ·                    │
 │   payment_record_manual · report_view · payment_method_set    │
-│   payment_methods_list · payment_rails · cg_country_code      │
+│   finance_transactions · payment_methods_summary ·            │
+│   beau_ph_rails · beau_ph_fx · cg_country_code                │
 └───────────────┬───────────────────────────────────────────────┘
                 │ owner-only calls (definer functions) — no API exposure
                 ▼
 ┌───────────── Postgres: schema beau_ph (BEAU PH CORE) ─────────────────────────────────┐
-│  merchants · providers · merchant_methods                                             │
+│  merchants · providers · provider_capabilities · merchant_methods                     │
+│  settlement_destinations · method_settlements · config_audit                          │
 │  payment_requests · payment_attempts · provider_events · payment_events               │
-│  reconciliations                                                                      │
+│  reconciliations · fx_sources · fx_currencies · fx_rates · merchant_fx · fx_quotes    │
 │  method_matrix / eligible_methods · create_request · attach_attempt ·                 │
 │  ingest_provider_event (+ normalize_stripe_event) · confirm_manual ·                  │
 │  cancel_request / expire_request · mark_reconciled / is_reconciled · request_events   │
@@ -56,7 +58,10 @@ beau_ph normalized "paid" event      ──▶  public.payments (+ orders, earni
 |---|---|---|
 | Merchant / tenant | `merchants` | `key` (e.g. `coach_gari`), `country`, `default_currency`, `mode` (test/live) |
 | Payment provider | `providers` | `key`, `kind` (online/manual/crypto), `confirmation` (provider_event/operator/unavailable), `countries[]`, `currencies[]`, `readiness` (available/not_configured/placeholder) |
-| Payment method (merchant × provider) | `merchant_methods` | `enabled`, `currency` (settlement), `countries[]` override, `instructions` (public), `settings` (non-secret) |
+| Payment method (merchant × provider) | `merchant_methods` | `enabled`, `listed`, `currency` (settlement), `countries[]`, `currencies[]`, `intents[]`, `limits` (per currency, minor units), `capabilities[]`, `instructions` (public), `settings` (non-secret). `null` countries / currencies = **needs configuration**, never "any"; eligibility is the intersection with the provider's coverage |
+| Settlement destination | `settlement_destinations`, `method_settlements` | where a rail pays out (label, currency, non-secret details), mapped per method; distinct from the method itself |
+| Configuration audit | `config_audit` | field-level: merchant, area, entity, actor, field, old, new — CHECKed free of secrets |
+| FX | `fx_sources`, `fx_currencies`, `fx_rates`, `fx_refresh_runs`, `merchant_fx`, `fx_quotes` | EUR-base daily rates, freshness, immutable expiring quotes — see `FX.md` |
 | Payment request | `payment_requests` | `external_reference` (host order ref), `public_reference` (payer-facing, never a UUID), `amount`, `currency`, `customer_country`, `status`, `provider_reference`, `payment_reference`, `instructions`/redirect payload, `metadata`, `expires_at`, `paid_at` |
 | Payment attempt | `payment_attempts` | `n`, `provider_reference` (e.g. Checkout Session), `redirect_url`, `expires_at`, `status` |
 | Provider event (raw evidence) | `provider_events` | `provider_key`, `provider_event_id` (unique per provider), `event_type`, `payload` (verbatim), `outcome` |
@@ -65,7 +70,9 @@ beau_ph normalized "paid" event      ──▶  public.payments (+ orders, earni
 
 | Provider capability | `provider_capabilities` | `(provider, capability)`, `readiness`, `confirmation` (provider_event / operator / unavailable), `platforms[]` (null = any), `initiated_by` (customer / merchant / any), `handoff` |
 
-A request also records `capability`, `channel` (online / in_person), `initiated_by` and `platform`.
+A request also records `capability`, `channel` (online / in_person), `initiated_by`, `platform`, the **intent** (`service · package · support · other`), and — when paid in another currency than it was priced in — `pricing_amount`, `pricing_currency` and the `fx_quote_id` it consumed (`amount` / `currency` are always the payment side).
+
+Providers carry, besides readiness, `channel_label`, `intents[]`, the **names** of the deployment secrets they need, a `config_schema` (the fields the operator may fill: store `instructions` or `settings`, type, options, mask, public) and `onboarding` notes; the rail editor is rendered from this schema.
 
 Invariants (indexes/CHECKs): one **live** request per (merchant, order, provider); one **paid** request per (merchant, order); `public_reference` is not a UUID; no secret-like key/value in any JSON column; `amount > 0`; ISO currency/country; capability ∈ the vocabulary `online_checkout · payment_link · manual_instructions · wallet · bank_transfer · mobile_money · softpos · card_present · tap_to_pay · qr · crypto`; platform ∈ `web · ios_pwa · android_pwa · ios_app · android_app`.
 
@@ -93,9 +100,11 @@ Every change goes through one internal path (`beau_ph.record_event`), which writ
 |---|---|
 | capability readiness = placeholder | `coming_soon` |
 | capability readiness = not_configured | `not_configured` |
-| merchant method missing or disabled | `disabled` |
-| country ∉ (merchant override ∪ provider countries) | `country` |
-| currency ∉ provider currencies | `currency` |
+| merchant method missing, disabled or unlisted | `disabled` |
+| merchant countries or currencies not configured (`null`) | `needs_configuration` |
+| country ∉ provider countries, or ∉ merchant countries | `country` |
+| currency ∉ provider currencies, or ∉ merchant currencies | `currency` |
+| intent asked and ∉ provider intents or ∉ merchant intents | `intent` |
 | merchant narrowed its capabilities and this one is excluded | `disabled` |
 | capability initiator ≠ who is asking (customer page vs merchant "Collect") | `initiator` |
 | capability restricted to platforms and the device is unknown or not among them | `platform` |
@@ -115,6 +124,13 @@ Inputs: merchant configuration, customer country (host-derived; unknown → merc
 
 **In person — SoftPOS handoff (V0, merchant-initiated)**
 `host order → Collect in person → eligible_capabilities(merchant, currency, platform, 'merchant') → operator opens the PSP's certified Tap to Pay app (N-Genius One / SwipeX) → customer taps → PSP receipt → operator records the receipt reference → create_request(capability softpos, channel in_person) [pending, instructions incl. handoff_app] → confirm_manual (receipt reference mandatory; evidence.verification = operator_attested_provider_receipt) → host ledger once → mark_reconciled`. The native path (`tap_to_pay`: PSP SDK inside a BEAU PH Merchant iOS app, provider-event-confirmed, `ios_app` only) is reserved as a placeholder; see `SOFTPOS.md`.
+
+**Another payment currency (BEAU FX)**
+`report_view(token, runtime, currency)` lists the pricing currency and every currency FX can quote → the payer picks a code → `cg_ph_request_for_pack(pack, rail, runtime, currency)` takes a stored quote (`fx_quote`, immutable, 15 min) and creates the request in the payment currency carrying the pricing origin and the quote id; one live request per rail and order, in the currency last chosen → `attach_checkout` attaches the Checkout Session to that live request → the webhook must match the **payment** amount → the host ledger and earning are stamped in the payment currency. FX off (the default) = the pricing currency only. See `FX.md`.
+
+## 5b. Operator workspace (host-embedded, V0)
+
+Finance › **Transactions** (`finance_transactions`, `finance_transaction_detail`) and **Payment methods** (`payment_methods_summary`, `payment_method_get/set/add/remove`); BEAU PH › **Rails** (`beau_ph_rails`, `beau_ph_rail_events`, `beau_ph_config_audit`, settlement destinations) and **FX** (`beau_ph_fx*`). Every one of these is a thin `public` wrapper: permission gate, merchant key `coach_gari`, then `beau_ph.*`. The Edge helper `ph-admin` adds deployment readiness (secret presence per catalogue name, Stripe mode verdict). The page (`admin/finance.js`) loads each surface lazily, caches reads for a minute and invalidates on write.
 
 ## 6. Extraction seams (what makes V2 possible)
 

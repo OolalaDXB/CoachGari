@@ -1,6 +1,6 @@
 # BEAU PH — Provider readiness matrix (V0)
 
-Readiness is a **product** property (is the adapter implemented and onboardable?). "Enabled" is a **merchant** property. "Configured" is a **deployment** property reported by the adapter at request time (secret presence + mode). A rail is offered only when all three line up *and* country/currency match.
+Readiness is a **product** property (is the adapter implemented and onboardable?). "Enabled" is a **merchant** property. "Configured" is a **deployment** property reported by the adapter at request time (secret presence + mode). A rail is offered only when all three line up *and* the customer's country, the currency and the intent fall inside **both** the provider's coverage and the merchant's persisted configuration (`merchant_methods.countries / currencies / intents`, ISO codes; `null` = needs configuration, never "any"). The BEAU PH › Rails workspace shows the two sides separately and the checklist per rail (credentials present · webhook · merchant configuration · last provider event).
 
 | Rail | Key | Kind | Confirmed by | Readiness | Countries | Currencies | Secrets (names only) | Coach Gari today | Owner action |
 |---|---|---|---|---|---|---|---|---|---|

@@ -126,6 +126,14 @@ begin
   execute 'reset role';
   j := public.report_view(tok);
   if (j->'bank'->>'enabled')::boolean and (j->'bank'->>'iban')='AE070331234567890123456' and (j->'bank'->>'reference')=pref and (j->>'pay_ref')=pref then ok:=ok+1; else fail:=fail+1; log:=log||' [report_view bank]'; end if;
+  -- the payment block is authoritative: pricing currency and amount, the pricing currency always offered; with merchant FX off
+  -- (the launch default) a requested other currency is not an option and the view falls back to the pricing currency, never a browser-chosen amount
+  perform beau_ph.merchant_fx_set('coach_gari', '{"enabled":false}'::jsonb, 'cg012');
+  j := public.report_view(tok, '{}'::jsonb, 'USD');
+  if (j->'payment'->>'pricing_currency') = 'AED' and (j->'payment'->>'pricing_amount')::int = 312000 and (j->'payment'->>'currency') = 'AED' and (j->'payment'->>'amount')::int = 312000
+     and (j->'payment'->'fx') = 'null'::jsonb and (j->>'currency') = 'AED'
+     and (select count(*) from jsonb_array_elements(j->'payment'->'options') o) = 1 and (j->'payment'->'options'->0->>'pricing')::boolean
+     then ok:=ok+1; else fail:=fail+1; log:=log||' [report_view payment block '||(j->'payment')::text||']'; end if;
   perform set_config('request.jwt.claims','{"role":"authenticated","email":"fin@test.local"}',true);
   execute 'set local role authenticated';
   perform public.payment_record_manual(p3, 312000, 'AED', 'bank_transfer', pref);

@@ -12,8 +12,11 @@ declare
   ok int := 0; fail int := 0; log text := '';
   svc uuid; d date; base timestamptz; j jsonb; o jsonb; ev jsonb; res jsonb; n int; e record; s jsonb;
   ref text; tok text; oref text; sess text := 'cs_test_' || replace(gen_random_uuid()::text, '-', ''); pi text := 'pi_test_' || replace(gen_random_uuid()::text, '-', '');
+  b_orders int; b_pay int; b_earn int; b_wh int; b_ref int; b_cb int;   -- the live ledger is not empty: every count below is a delta over this baseline
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
+  select count(*) into b_orders from public.orders; select count(*) into b_pay from public.payments; select count(*) into b_earn from public.partner_earnings;
+  select count(*) into b_wh from public.webhook_events; select count(*) into b_ref from public.refunds; select count(*) into b_cb from public.chargebacks;
   d := current_date + 3; while extract(isodow from d) <> 1 loop d := d + 1; end loop;
   update public.availability_rules set active = false;
   insert into public.services (slug, title, category, duration_minutes, price_amount, currency, delivery_mode, default_capacity, active, listed)
@@ -28,7 +31,7 @@ begin
   if (o ->> 'gross_amount')::int = 4500 and o ->> 'currency' = 'USD' and o ->> 'status' = 'pending_payment' and oref like 'OR-%' then ok := ok + 1;
   else fail := fail + 1; log := log || ' [order create ' || o::text || ']'; end if;
   -- idempotent: a second call returns the same order
-  if (public.create_order_for_booking(ref, tok) ->> 'reference') = oref and (select count(*) from public.orders) = 1 then ok := ok + 1;
+  if (public.create_order_for_booking(ref, tok) ->> 'reference') = oref and (select count(*) from public.orders) = b_orders + 1 then ok := ok + 1;
   else fail := fail + 1; log := log || ' [order idempotence]'; end if;
 
   /* 2. attach checkout: booking pending_payment, hold aligned to checkout expiry (30 min) */
@@ -49,7 +52,7 @@ begin
   res := public.process_stripe_event(ev);
   if res ->> 'status' = 'processed' and (select status from public.orders where reference = oref) = 'paid'
      and (select status from public.bookings where reference = ref) = 'confirmed'
-     and (select count(*) from public.payments) = 1 then ok := ok + 1;
+     and (select count(*) from public.payments) = b_pay + 1 then ok := ok + 1;
   else fail := fail + 1; log := log || ' [completed ' || res::text || ']'; end if;
   select * into e from public.partner_earnings pe join public.orders oo on oo.id = pe.order_id where oo.reference = oref;
   if e.gross_amount = 4500 and e.stripe_fee = 161 and e.net_collected = 4339 and e.oolala_commission = 434 and e.gari_payable = 3905 and e.status = 'open' then ok := ok + 1;
@@ -59,12 +62,12 @@ begin
 
   /* 4. retry of the same event: duplicate, nothing doubled */
   res := public.process_stripe_event(ev);
-  if (res ->> 'duplicate')::boolean and (select count(*) from public.payments) = 1 and (select count(*) from public.partner_earnings) = 1
-     and (select count(*) from public.webhook_events) = 1 then ok := ok + 1;
+  if (res ->> 'duplicate')::boolean and (select count(*) from public.payments) = b_pay + 1 and (select count(*) from public.partner_earnings) = b_earn + 1
+     and (select count(*) from public.webhook_events) = b_wh + 1 then ok := ok + 1;
   else fail := fail + 1; log := log || ' [retry duplicate ' || res::text || ']'; end if;
   -- a different event id for the same session/payment_intent (Stripe re-delivery with new id) still yields one payment
   res := public.process_stripe_event(ev || jsonb_build_object('id', 'evt_test_1b'));
-  if (select count(*) from public.payments) = 1 and (select count(*) from public.partner_earnings) = 1 then ok := ok + 1;
+  if (select count(*) from public.payments) = b_pay + 1 and (select count(*) from public.partner_earnings) = b_earn + 1 then ok := ok + 1;
   else fail := fail + 1; log := log || ' [re-delivery duplicated payment]'; end if;
 
   /* 5. amount mismatch never confirms */
@@ -102,7 +105,7 @@ begin
   -- refund.updated for the same refund does not double count
   res := public.process_stripe_event(jsonb_build_object('id', 'evt_test_5', 'type', 'refund.updated', 'livemode', false,
           'data', jsonb_build_object('object', jsonb_build_object('id', 're_test_1', 'amount', 2000, 'currency', 'usd', 'status', 'succeeded', 'payment_intent', pi))));
-  if (select count(*) from public.refunds) = 1 and (select refund_amount from public.partner_earnings pe join public.orders oo on oo.id = pe.order_id where oo.reference = oref) = 2000 then ok := ok + 1;
+  if (select count(*) from public.refunds) = b_ref + 1 and (select refund_amount from public.partner_earnings pe join public.orders oo on oo.id = pe.order_id where oo.reference = oref) = 2000 then ok := ok + 1;
   else fail := fail + 1; log := log || ' [refund.updated double count]'; end if;
 
   /* 8. full refund of the rest → net −161 (Stripe keeps the fee), commission floors at 0, payable −161 */
@@ -126,7 +129,7 @@ begin
   perform public.process_stripe_event(jsonb_build_object('id', 'evt_test_9', 'type', 'charge.dispute.closed', 'livemode', false,
           'data', jsonb_build_object('object', jsonb_build_object('id', 'dp_test_1', 'amount', 4500, 'currency', 'usd', 'status', 'lost', 'payment_intent', pi || '_4'))));
   select * into e from public.partner_earnings pe join public.orders oo on oo.id = pe.order_id where oo.reference = o ->> 'reference';
-  if e.chargeback_amount = 4500 and e.net_collected = -161 and e.oolala_commission = 0 and e.gari_payable = -161 and (select count(*) from public.chargebacks) = 1 then ok := ok + 1;
+  if e.chargeback_amount = 4500 and e.net_collected = -161 and e.oolala_commission = 0 and e.gari_payable = -161 and (select count(*) from public.chargebacks) = b_cb + 1 then ok := ok + 1;
   else fail := fail + 1; log := log || format(' [dispute lost cb=%s n=%s]', e.chargeback_amount, e.net_collected); end if;
 
   /* 10. settlement over the period: both earnings, sums, transitions */

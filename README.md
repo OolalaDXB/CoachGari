@@ -238,6 +238,8 @@ STRIPE_WEBHOOK_SECRET=whsec_… node scripts/test-webhook.mjs            # lapto
 REPORT_TOKEN=<64-hex> node scripts/e2e-runtime.mjs [--pay] [--wait]    # laptop: BEAU PH runtime E2E on the deployed /r page (view, Aani/bank without payment, Stripe TEST checkout, webhook → pack)
 psql "$DATABASE_URL" -f supabase/tests/cg003_payments.sql              # ledger / idempotency, rolls back
 node scripts/test-checkout.mjs --wait                                  # real Stripe round trip
+node scripts/test-admin-workspace.mjs                                  # offline (Playwright, mocked Supabase): Finance / BEAU PH workspace lazy loading, 34 checks
+psql "$DATABASE_URL" -f supabase/tests/beau_ph_contract.sql            # BEAU PH contract incl. rail configuration + FX, rolls back
 ```
 
 Signature verification is Stripe's own scheme, implemented in
@@ -260,9 +262,15 @@ destination is a permission-gated tab; sign-in is a Supabase Auth magic link
 with `shouldCreateUser: false`, so an email the owner has not invited cannot
 even create an auth user. What a person sees is decided by the database, not
 the page; the page never writes permissions directly. Navigation:
-**Overview · CRM · Schedule · Bookings · Services · Finance · Analytics ·
-Access**. Schedule merges the four time-management domains (Calendar, Weekly
-availability, Exceptions, Tour stops) as sub-tabs; CRM has Leads + Contacts.
+**Overview · CRM · Schedule · Bookings · Services · Finance · BEAU PH ·
+Analytics · Access**. Schedule merges the four time-management domains
+(Calendar, Weekly availability, Exceptions, Tour stops) as sub-tabs; CRM has
+Leads + Contacts; Finance has Transactions (default) + Payment methods; BEAU PH
+has Rails + FX (the embedded payment hub's operator workspace, see
+`beau-ph/docs/`). Both launch users — Gari (`grej28roux@gmail.com`) and Mickaël
+(`mickael@thestudio.mt`) — hold `finance:view` + `finance:manage`, so both see
+Finance and BEAU PH; Gari's auth invite exists and completes on the first
+magic-link sign-in.
 
 | Permission | What it unlocks in `/admin` |
 |---|---|
@@ -273,8 +281,8 @@ availability, Exceptions, Tour stops) as sub-tabs; CRM has Leads + Contacts.
 | `health_metrics:manage` | Record / correct body measurements (BMI is derived, never typed) |
 | `catalog:view` | Services — the whole commercial catalogue, listed or not, and its change log |
 | `catalog:manage` | Services — create / edit through the audited `catalog_save_service` RPC (title, descriptions, price, currency, duration, delivery, capacity, booking mode, active, listed, order, features) |
-| `finance:view` | Finance — Orders (`finance_orders()`), payments, refunds, chargebacks, partner ledger, settlements, webhook log (`finance_webhook_log()`). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
-| `finance:manage` | Finance — create settlements, mark paid (bank reference), mark reconciled |
+| `finance:view` | Finance — **Transactions** (one list across every rail: type, method, amount in the collected currency, normalised status, lazy detail drawer), Orders / ledger (`finance_orders()`), settlements, webhook log; **Payment methods** (the configured rails, read); **BEAU PH** — Rails (provider capability vs merchant configuration, deployment readiness as secret *presence*) and FX (rates, freshness, quotes). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
+| `finance:manage` | Finance — create settlements, mark paid (bank reference), mark reconciled; configure / add / remove payment methods (inline editor, one confirmation, field-level audit); BEAU PH — configure rails, settlement destinations, FX settings, start a rate refresh |
 | `analytics:view` | Analytics — aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month); output asserted free of names, emails, phones, references |
 | `platform:admin` | Access — list application users, activate / deactivate, grant / revoke permissions. **Nothing else**: no lead, booking, order or ledger row becomes visible through it (tested) |
 
@@ -328,10 +336,10 @@ no `content:*` permission: the website is edited in Git.
 
 ```
 psql "$DATABASE_URL" -f supabase/tests/cg0025_permissions.sql   # one suite
-DATABASE_URL=postgresql://… scripts/db-tests.sh                   # all three suites, exit 1 on any fail
+DATABASE_URL=postgresql://… scripts/db-tests.sh                   # every database suite, exit 1 on any fail
 ```
 
-`CG0025_TESTS ok=236 fail=0`, always rolled back. It switches role and JWT
+`CG0025_TESTS ok=288 fail=0`, always rolled back. It switches role and JWT
 claims per persona and asserts the negatives: anon is refused on every private
 table and RPC (including the `admin_*`, `set_app_access`, `issue_upload_token`
 and `reserve_contact_media` functions); a stranger or inactive user gets zero
