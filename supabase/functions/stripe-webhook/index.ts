@@ -23,7 +23,7 @@
    checkout.session.expired, refund.created, refund.updated,
    charge.dispute.created, charge.dispute.updated, charge.dispute.closed.
    ============================================================= */
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { providers } from "../../../beau-ph/core/registry.ts";
 import { processStripeEvent } from "../../../beau-ph/host-adapters/coach-gari/adapter.ts";
 import { drainOutbox } from "../_shared/email.ts";   // host concern: the outbox (queued by the DB when the payment reconciled)

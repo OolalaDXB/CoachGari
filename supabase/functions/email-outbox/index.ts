@@ -13,7 +13,7 @@
             verification state as Resend reports it. Never a value.
    Not browser-facing (no CORS); an unknown or missing key is a 401.
    ============================================================= */
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { drainOutbox, emailStatus } from "../_shared/email.ts";
 
 const env = (name: string) => Deno.env.get(name);

@@ -14,7 +14,7 @@
    verified against Supabase Auth and the permission check runs inside the
    RPC the caller's session executes — never through the service role.
    ============================================================= */
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { stripe } from "../../../beau-ph/providers/stripe/adapter.ts";
 import { originAllowed, corsHeaders as cors } from "../_shared/cors.ts";
 

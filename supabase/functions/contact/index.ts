@@ -19,7 +19,7 @@
    is best-effort, and a GLOBAL back-stop (all callers, short window) caps the
    insert rate whatever identity a caller presents.
    ============================================================= */
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 import { drainOutbox } from "../_shared/email.ts";                  // lead notification to letsgo@ + acknowledgement to the customer
 

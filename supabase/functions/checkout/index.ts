@@ -17,7 +17,7 @@
                            (default: https://coachgari28.com).
    The browser never supplies an amount; any such field is ignored.
    ============================================================= */
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { providers, runtimeMap } from "../../../beau-ph/core/registry.ts";
 import type { CreateRequestResult } from "../../../beau-ph/contracts/provider.ts";
 import { requestForBooking, attachCheckout, siteUrl, HOST_APP, MERCHANT_KEY } from "../../../beau-ph/host-adapters/coach-gari/adapter.ts";

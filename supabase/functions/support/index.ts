@@ -17,7 +17,7 @@
    consume a credit. No name, contact, note or health data reaches Stripe —
    the description carries the public reference only.
    ============================================================= */
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { stripe } from "../../../beau-ph/providers/stripe/adapter.ts";
 import { originAllowed, corsHeaders as cors } from "../_shared/cors.ts";
 

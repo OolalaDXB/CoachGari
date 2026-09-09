@@ -13,7 +13,7 @@
    the database. The bucket is private; only coach:operations can
    read the files through signed URLs in the back-office.
    ============================================================= */
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 
 import { originAllowed, corsHeaders as cors } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 

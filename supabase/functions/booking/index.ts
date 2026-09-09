@@ -18,7 +18,7 @@
    limiting and PII-free logging. Secrets: none in code — the platform
    injects SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.
    ============================================================= */
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 import { drainOutbox } from "../_shared/email.ts";                  // cancellation email (queued by cancel_booking for a confirmed booking)
 

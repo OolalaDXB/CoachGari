@@ -28,7 +28,7 @@
    paid — only a verified Stripe webhook (card) or an authorised operator
    (manual rails) can. Logs carry only action/status, never contact data.
    ============================================================= */
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { providers, runtimeMap, assertPublic } from "../../../beau-ph/core/registry.ts";
 import type { CreateRequestResult } from "../../../beau-ph/contracts/provider.ts";
 import { reportView, requestForPack, packIdForToken, attachCheckout, siteUrl, HOST_APP, MERCHANT_KEY } from "../../../beau-ph/host-adapters/coach-gari/adapter.ts";
