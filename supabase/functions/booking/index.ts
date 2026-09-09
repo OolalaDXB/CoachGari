@@ -3,7 +3,9 @@
    Public Edge Function in front of the booking RPCs.
 
    GET  ?action=services      — the public catalogue (active + listed), the only
-                                source of the Route C cards and the picker (CG-007)
+                                source of the Route C cards (CG-007)
+   GET  ?action=bookable      — every active slot-bookable service (listed or not):
+                                what the booking picker may resolve a choice to
    GET  ?action=tour_stops
    GET  ?action=slots&service=<slug>&from=YYYY-MM-DD&to=YYYY-MM-DD&tz=<IANA>
    GET  ?action=state&ref=<CG-XXXXXX>&token=<manage_token>
@@ -122,6 +124,17 @@ Deno.serve(async (req: Request) => {
       const { data, error } = await withRetry("services", (c) => c.from("services")
         .select("slug, title, category, tagline, description, long_description, duration_minutes, price_amount, currency, price_unit, delivery_mode, default_capacity, booking_mode, features, featured, cta_label, sort_order")
         .eq("active", true).eq("listed", true).order("sort_order"));
+      if (error) return rpcError(error, origin, allowed);
+      return json(200, { ok: true, services: data }, origin, allowed);
+    }
+
+    if (action === "bookable") {
+      // The booking picker's catalogue: every ACTIVE slot-bookable service, listed or not (an unlisted
+      // one is a booking entry without a marketing card). The picker's family hierarchy is the page's
+      // information architecture; this only says which canonical services can be booked right now.
+      const { data, error } = await withRetry("bookable", (c) => c.from("services")
+        .select("slug, title, duration_minutes, price_amount, currency, delivery_mode, default_capacity, sort_order")
+        .eq("active", true).eq("booking_mode", "slot").order("sort_order"));
       if (error) return rpcError(error, origin, allowed);
       return json(200, { ok: true, services: data }, origin, allowed);
     }

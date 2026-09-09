@@ -37,6 +37,7 @@ listed in `docs/DECISIONS.md`.
 │   ├── check-links.mjs           → CI: internal links & assets
 │   ├── test-contact.mjs          → CG-001 gate test against the deployed function
 │   ├── test-booking.mjs          → CG-002 API test incl. the capacity race
+│   ├── test-booking-picker.mjs   → booking picker: 3 families → child → availability (Playwright, offline)
 │   └── test-checkout.mjs         → CG-003 Stripe test-mode round trip
 ├── docs/DECISIONS.md             → decisions & documented blockers
 ├── vercel.json                   → clean URLs, redirects, security headers, noindex headers
@@ -239,6 +240,7 @@ REPORT_TOKEN=<64-hex> node scripts/e2e-runtime.mjs [--pay] [--wait]    # laptop:
 psql "$DATABASE_URL" -f supabase/tests/cg003_payments.sql              # ledger / idempotency, rolls back
 node scripts/test-checkout.mjs --wait                                  # real Stripe round trip
 node scripts/test-admin-workspace.mjs                                  # offline (Playwright, mocked Supabase): Finance / BEAU PH workspace lazy loading, 34 checks
+node scripts/test-booking-picker.mjs                                   # offline (Playwright, mocked booking API): picker hierarchy, availability timing, error/retry, 390 px, 36 checks
 psql "$DATABASE_URL" -f supabase/tests/beau_ph_contract.sql            # BEAU PH contract incl. rail configuration + FX, rolls back
 ```
 

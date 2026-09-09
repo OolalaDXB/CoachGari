@@ -1,6 +1,6 @@
 /* =============================================================
    Coach Gari — booking flow (CG-002 / CG-003)
-   service → date → slot → details → hold → payment → confirmation
+   family → (child) → date → slot → details → hold (recap + price) → payment → confirmation
 
    Talks only to CONFIG.BOOKING_ENDPOINT (public Edge Function) and,
    for paid services, CONFIG.CHECKOUT_ENDPOINT. Nothing here decides
@@ -59,7 +59,22 @@ function todayPlus(days){
 
 function init(){
   var tz = (Intl.DateTimeFormat().resolvedOptions().timeZone) || 'UTC';
-  var state = { services: [], tourStops: [], service: null, date: todayPlus(1), slots: [], slot: null, key: uuid(), booking: null };
+  var state = { services: [], tourStops: [], family: null, choice: null, service: null, date: todayPlus(1), slots: [], slot: null, slotsSeq: 0, key: uuid(), booking: null };
+  var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  /* Public booking hierarchy: what the customer chooses first, then optionally a child choice, then
+     availability. A family either IS a bookable service (final) or reveals children that are. This is
+     the page's information architecture — it does not mirror catalogue rows one-to-one — and it holds
+     nothing commercial: no price, no currency, no duration. A family (or child) whose canonical
+     service is not bookable right now is simply not offered. Adding a child under any family later
+     does not add a top-level choice. */
+  var FAMILIES = [
+    { key: 'conversation',      label: 'The Conversation', context: 'Online', service: 'conversation' },
+    { key: 'personal-training', label: 'Personal training', context: 'Dubai',  service: 'personal-training-dubai' },
+    { key: 'padel',             label: 'Padel',            context: 'Dubai',  children: [
+        { key: 'padel-one-to-one', label: 'One-to-one',   service: 'padel-one-to-one' },
+        { key: 'padel-group',      label: 'Group session', service: 'padel-group-session' } ] },
+  ];
 
   var status = el('p', { class: 'bk-status', role: 'status', 'aria-live': 'polite' });
   var stepService = el('div', { class: 'bk-step' });
@@ -71,6 +86,8 @@ function init(){
   root.appendChild(stepForm); root.appendChild(stepDone); root.appendChild(status);
 
   function say(msg, cls){ status.textContent = msg || ''; status.className = 'bk-status ' + (cls || ''); }
+  function after(ms, fn){ if (reduceMotion) fn(); else setTimeout(fn, ms); }
+  function nextFrame(fn){ if (reduceMotion) fn(); else requestAnimationFrame(function(){ requestAnimationFrame(fn); }); }
 
   // Returning from payment? ?booking=REF&t=TOKEN
   var q = new URLSearchParams(window.location.search);
@@ -81,23 +98,22 @@ function init(){
   }
 
   /* Catalogue load. Three outcomes, never confused:
-       - API answered 200 with services      → picker
-       - API answered 200 with no service    → "opens soon"   (a real catalogue state)
-       - API error / network error           → "temporarily unavailable", after one retry,
+       - API answered 200 with bookable services → picker
+       - API answered 200 with none bookable     → "opens soon"   (a real catalogue state)
+       - API error / network error               → "temporarily unavailable", after one retry,
          and always console.error('booking_init_failed: <reason>') so a regression
          is diagnosable from the browser. */
   function loadCatalogue(attempt){
     say('Loading…');
-    return Promise.all([api('?action=services'), api('?action=tour_stops')]).then(function(res){
+    return Promise.all([api('?action=bookable'), api('?action=tour_stops')]).then(function(res){
       var bad = res.find(function(r){ return r.status !== 200 || !r.body || r.body.ok === false; });
       if (bad) {
         throw new Error('http ' + bad.status + (bad.body && bad.body.error ? ' ' + bad.body.error : '') + (bad.body && bad.body.code ? ' (' + bad.body.code + ')' : ''));
       }
-      // the picker offers only bookable services; enquiry-only products are cards on the page
-      state.services = (res[0].body.services || []).filter(function(s){ return s.booking_mode !== 'enquiry'; });
+      state.services = res[0].body.services || [];
       state.tourStops = res[1].body.tour_stops || [];
-      if (!state.services.length) {
-        console.warn('booking_init_failed: no_active_services (API reachable, catalogue empty)');
+      if (!offered().length) {
+        console.warn('booking_init_failed: no_active_services (API reachable, nothing bookable)');
         say('Booking opens soon. Message on WhatsApp in the meantime.', 'err');
         return;
       }
@@ -112,32 +128,113 @@ function init(){
   }
   loadCatalogue(1);
 
+  function svc(slug){ for (var i = 0; i < state.services.length; i++) if (state.services[i].slug === slug) return state.services[i]; return null; }
+  // the families the catalogue can honour right now, in the fixed order
+  function offered(){
+    return FAMILIES.map(function(f){
+      if (f.children) {
+        var kids = f.children.filter(function(c){ return !!svc(c.service); });
+        return kids.length ? { key: f.key, label: f.label, context: f.context, children: kids } : null;
+      }
+      return svc(f.service) ? f : null;
+    }).filter(Boolean);
+  }
+
+  var levelHost = null, tourHost = null;
   function renderServices(){
     stepService.innerHTML = '';
     stepService.appendChild(el('h4', { text: '1. What do you want to book?' }));
-    var list = el('div', { class: 'bk-services' });
-    state.services.forEach(function(s){
-      var b = el('button', { type: 'button', class: 'bk-service' + (state.service && state.service.slug === s.slug ? ' on' : '') }, [
-        el('b', { text: s.title }),
-        el('span', { text: s.duration_minutes + ' min · ' + money(s.price_amount, s.currency) + ' · ' + (s.delivery_mode === 'online' ? 'online' : 'in person') }),
-      ]);
-      b.addEventListener('click', function(){ state.service = s; state.slot = null; renderServices(); renderDate(); loadSlots(); });
+    levelHost = el('div', { class: 'bk-level' });
+    stepService.appendChild(levelHost);
+    tourHost = el('div');
+    stepService.appendChild(tourHost);
+    renderFamilies();
+  }
+  function choiceButton(item, onPick){
+    var b = el('button', { type: 'button', class: 'bk-service', 'data-choice': item.key, 'aria-pressed': 'false' }, [
+      el('b', { text: item.label }),
+      item.context ? el('span', { text: item.context }) : null,
+    ]);
+    b.addEventListener('click', onPick);
+    return b;
+  }
+  function mark(b, on){ b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+
+  // level 0: exactly the top-level families, nothing else
+  function renderFamilies(focusKey, animate){
+    levelHost.innerHTML = '';
+    var list = el('div', { class: 'bk-services' + (animate && !reduceMotion ? ' bk-in' : ''), role: 'group', 'aria-label': 'What do you want to book?' });
+    offered().forEach(function(f){
+      var b = choiceButton(f, function(){ if (f.children) openFamily(f, b, list); else pickService(f, f, b, list); });
+      if (f.children) b.setAttribute('aria-expanded', 'false');
+      if (state.choice && state.choice.key === f.key) mark(b, true);
       list.appendChild(b);
     });
-    stepService.appendChild(list);
-    var stops = state.tourStops.filter(function(t){ return !state.service || t.services.indexOf(state.service.slug) !== -1; });
-    if (stops.length) {
-      var tour = el('div', { class: 'bk-tour' }, [el('h4', { text: 'Gari on tour' })]);
-      stops.forEach(function(t){
-        tour.appendChild(el('div', { class: 'bk-tourstop' }, [
-          el('b', { text: t.city + ', ' + t.country }),
-          el('span', { text: fmtDate(t.start_at, t.timezone) + ' → ' + fmtDate(t.end_at, t.timezone) + ' · ' + t.timezone + (t.venue ? ' · ' + t.venue : '') }),
-          t.location_notes ? el('em', { text: t.location_notes }) : null,
-        ]));
+    levelHost.appendChild(list);
+    if (focusKey) { var t = list.querySelector('[data-choice="' + focusKey + '"]'); if (t) t.focus(); }
+  }
+
+  // a final choice: the canonical service is known → availability may load now
+  function pickService(family, item, btn, list){
+    Array.prototype.forEach.call(list.querySelectorAll('.bk-service'), function(c){ mark(c, c === btn); });
+    state.family = family; state.choice = item; state.service = svc(item.service); state.slot = null;
+    say('');
+    renderTour(); renderDate(); loadSlots();
+  }
+
+  // a family with children: the other top-level choices fade out and leave the layout, the chosen one
+  // stays as the current context, the children enter from the right. No availability request yet.
+  function openFamily(f, btn, list){
+    state.family = f; state.choice = null; state.service = null; state.slot = null; state.slotsSeq++;
+    stepDate.innerHTML = ''; stepSlots.innerHTML = ''; stepForm.innerHTML = ''; stepDone.innerHTML = ''; tourHost.innerHTML = '';
+    btn.classList.add('ctx'); btn.setAttribute('aria-expanded', 'true'); btn.setAttribute('aria-pressed', 'true');
+    btn.onclick = null;
+    btn.addEventListener('click', function(){ closeFamily(f); }, { once: true });   // the context itself is a way back
+    var siblings = Array.prototype.filter.call(list.querySelectorAll('.bk-service'), function(c){ return c !== btn; });
+    siblings.forEach(function(c){ c.classList.add('bk-out'); c.setAttribute('tabindex', '-1'); });
+    after(280, function(){
+      siblings.forEach(function(c){ c.hidden = true; });
+      var view = el('div', { class: 'bk-children' + (reduceMotion ? '' : ' bk-enter') });
+      var group = el('div', { class: 'bk-services', role: 'group', 'aria-label': f.label + ' — which session?' });
+      f.children.forEach(function(c){
+        var b = choiceButton(c, function(){ pickService(f, c, b, group); });
+        group.appendChild(b);
       });
-      stepService.appendChild(tour);
-    }
-    if (!state.service && state.services.length === 1) { state.service = state.services[0]; renderServices(); renderDate(); loadSlots(); }
+      var back = el('button', { type: 'button', class: 'bk-back', text: '← Back', 'aria-label': 'Back to all sessions' });
+      back.addEventListener('click', function(){ closeFamily(f); });
+      view.appendChild(group); view.appendChild(back);
+      levelHost.appendChild(view);
+      nextFrame(function(){ view.classList.remove('bk-enter'); });
+      say(f.label + ': choose ' + f.children.map(function(c){ return c.label.toLowerCase(); }).join(' or ') + '.');
+      var first = group.querySelector('.bk-service'); if (first) first.focus();
+    });
+  }
+
+  // back to the three top-level choices; reverses the transition, keeps the date the customer picked
+  function closeFamily(f){
+    var view = levelHost.querySelector('.bk-children');
+    state.family = null; state.choice = null; state.service = null; state.slot = null; state.slotsSeq++;
+    stepDate.innerHTML = ''; stepSlots.innerHTML = ''; stepForm.innerHTML = ''; stepDone.innerHTML = ''; tourHost.innerHTML = '';
+    say('');
+    if (view) view.classList.add('bk-enter');
+    after(250, function(){ renderFamilies(f.key, true); });
+  }
+
+  // "Gari on tour": context for the chosen service only — never a top-level choice
+  function renderTour(){
+    tourHost.innerHTML = '';
+    if (!state.service) return;
+    var stops = state.tourStops.filter(function(t){ return t.services.indexOf(state.service.slug) !== -1; });
+    if (!stops.length) return;
+    var tour = el('div', { class: 'bk-tour' }, [el('h4', { text: 'Gari on tour' })]);
+    stops.forEach(function(t){
+      tour.appendChild(el('div', { class: 'bk-tourstop' }, [
+        el('b', { text: t.city + ', ' + t.country }),
+        el('span', { text: fmtDate(t.start_at, t.timezone) + ' → ' + fmtDate(t.end_at, t.timezone) + ' · ' + t.timezone + (t.venue ? ' · ' + t.venue : '') }),
+        t.location_notes ? el('em', { text: t.location_notes }) : null,
+      ]));
+    });
+    tourHost.appendChild(tour);
   }
 
   function renderDate(){
@@ -150,27 +247,43 @@ function init(){
     stepDate.appendChild(el('p', { class: 'bk-note', text: 'Times shown in your timezone (' + tz + ').' }));
   }
 
+  function where(s){ return s.tour_stop_id ? s.city + ', ' + s.country + ' (' + s.session_timezone + ')' : (state.service.delivery_mode === 'online' ? 'Online' : 'In person') + ' · ' + s.session_timezone; }
+
+  /* Availability loads only once a FINAL service is chosen, and exactly one outcome is ever on screen:
+     free times, "nothing free", or an error with a retry — never times next to an error, never times
+     from an earlier choice (a request superseded by a newer choice is dropped when it answers). */
   function loadSlots(){
     if (!state.service || !state.date) return;
-    stepSlots.innerHTML = ''; stepForm.innerHTML = ''; stepDone.innerHTML = '';
+    var seq = ++state.slotsSeq;
+    stepSlots.innerHTML = ''; stepForm.innerHTML = ''; stepDone.innerHTML = ''; say('');
     stepSlots.appendChild(el('h4', { text: '3. Pick a time' }));
     var wait = el('p', { class: 'bk-note', text: 'Looking for free times…' });
     stepSlots.appendChild(wait);
     api('?action=slots&service=' + encodeURIComponent(state.service.slug) + '&from=' + state.date + '&to=' + state.date + '&tz=' + encodeURIComponent(tz))
       .then(function(res){
-        stepSlots.removeChild(wait);
-        state.slots = (res.body && res.body.slots) || [];
+        if (seq !== state.slotsSeq) return;
+        if (!(res.status === 200 && res.body && res.body.ok !== false && Array.isArray(res.body.slots))) throw new Error('http ' + res.status + (res.body && res.body.error ? ' ' + res.body.error : ''));
+        wait.remove(); say('');
+        state.slots = res.body.slots;
         if (!state.slots.length) { stepSlots.appendChild(el('p', { class: 'bk-note', text: 'Nothing free that day. Try another one.' })); return; }
-        var grid = el('div', { class: 'bk-slots' });
+        var grid = el('div', { class: 'bk-slots', role: 'group', 'aria-label': 'Free times' });
         state.slots.forEach(function(s){
           var label = fmtTime(s.start_at, tz) + (s.tour_stop_id ? ' · ' + s.city : '');
-          var b = el('button', { type: 'button', class: 'bk-slot' + (s.tour_stop_id ? ' tour' : ''), text: label, title: s.tour_stop_id ? s.city + ', ' + s.country + ' (' + s.session_timezone + ')' : 'Online · ' + s.session_timezone });
-          b.addEventListener('click', function(){ state.slot = s; renderForm(); Array.prototype.forEach.call(grid.children, function(c){ c.classList.remove('on'); }); b.classList.add('on'); });
+          var b = el('button', { type: 'button', class: 'bk-slot' + (s.tour_stop_id ? ' tour' : ''), text: label, title: where(s), 'aria-pressed': 'false' });
+          b.addEventListener('click', function(){ state.slot = s; renderForm(); Array.prototype.forEach.call(grid.children, function(c){ c.classList.remove('on'); c.setAttribute('aria-pressed', 'false'); }); b.classList.add('on'); b.setAttribute('aria-pressed', 'true'); });
           grid.appendChild(b);
         });
         stepSlots.appendChild(grid);
       })
-      .catch(function(e){ console.error('booking_slots_failed: ' + ((e && e.message) || 'network_error')); say('Could not load times. Try again in a moment.', 'err'); });
+      .catch(function(e){
+        if (seq !== state.slotsSeq) return;
+        console.error('booking_slots_failed: ' + ((e && e.message) || 'network_error'));
+        stepSlots.innerHTML = '';
+        stepSlots.appendChild(el('h4', { text: '3. Pick a time' }));
+        var retry = el('button', { type: 'button', class: 'bk-retry', text: 'Try again' });
+        retry.addEventListener('click', function(){ loadSlots(); });
+        stepSlots.appendChild(el('div', { class: 'bk-error', role: 'alert' }, [el('p', { text: 'Could not load times. Try again in a moment.' }), retry]));
+      });
   }
 
   function renderForm(){
@@ -179,8 +292,8 @@ function init(){
     stepForm.appendChild(el('h4', { text: '4. Your details' }));
     stepForm.appendChild(el('p', { class: 'bk-summary', html:
       '<b>' + svc.title + '</b> · ' + fmtDateTime(s.start_at, tz) +
-      (s.tour_stop_id ? '<br>In person: ' + s.city + ', ' + s.country + ' (' + s.session_timezone + ')' + (s.venue ? ' · ' + s.venue : '') : '<br>Online · session timezone ' + s.session_timezone) +
-      '<br>' + money(svc.price_amount, svc.currency) }));
+      (s.tour_stop_id ? '<br>In person: ' + s.city + ', ' + s.country + ' (' + s.session_timezone + ')' + (s.venue ? ' · ' + s.venue : '')
+                      : '<br>' + (svc.delivery_mode === 'online' ? 'Online' : 'In person') + ' · session timezone ' + s.session_timezone) }));
     var form = el('form', { class: 'bk-form', novalidate: '' });
     form.appendChild(el('div', { class: 'two' }, [
       el('div', { class: 'field' }, [el('label', { for: 'bk-name', text: 'Your name' }), el('input', { id: 'bk-name', name: 'name', type: 'text', autocomplete: 'name', required: '' })]),

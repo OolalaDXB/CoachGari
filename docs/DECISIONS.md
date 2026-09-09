@@ -23,6 +23,75 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Coach Gari — booking picker: three choices, progressive disclosure (2026-09-09)
+
+**What changed.** The first booking step shows exactly **The Conversation ·
+Personal training · Padel**, in that order, with a one-word context (Online /
+Dubai) and no price, currency or duration. Padel is a family: choosing it
+fades the other two out of the layout, keeps Padel as the current context
+and slides **One-to-one / Group session** in from the right; **← Back** (or
+the Padel context itself) reverses it without a reload and keeps the date
+already picked. Price appears only once a time is held (the recap and
+payment stage), as before.
+
+### Decisions
+
+- **The public hierarchy is the page's, not the catalogue's.**
+  `assets/booking.js` holds a `FAMILIES` map — family → optional child →
+  canonical service slug — with nothing commercial in it. Any family can
+  have children later (online coaching, live session, replay, tour formats)
+  without adding a top-level choice. A family whose canonical service is not
+  bookable right now is simply not offered.
+- **Mapping.** The Conversation → `conversation`; Personal training →
+  `personal-training-dubai` (title stays "Personal training in Dubai");
+  Padel › One-to-one → `padel-one-to-one`; Padel › Group session →
+  `padel-group-session`.
+- **Three canonical services were created** (`20261004`), because only The
+  Conversation was bookable: active, slot-bookable, **unlisted** (booking
+  entries, not marketing cards — the page's Padel surface stays an enquiry)
+  and **priced on request** (`price_amount` null). No price was invented; a
+  hold on them takes the existing "request this time" path until the owner
+  sets a price in Services. Duration 60 min, capacity 1, in person, Dubai.
+  Audited as catalogue creates.
+- **A dedicated booking catalogue.** `?action=bookable` returns every active
+  slot-bookable service, listed or not; `?action=services` (the marketing
+  cards) is unchanged.
+- **Availability loads only for a final service.** Choosing Padel sends no
+  request. A slots response that arrives after a newer choice is dropped.
+- **One availability state at a time.** A failed request renders an error
+  with a Retry button and no time buttons; a successful one renders times
+  and clears the error. The previous build could show both.
+- **Motion.** Opacity and a 26 px translate, ~280–300 ms, one easing curve,
+  no library. `prefers-reduced-motion` switches states immediately. Hidden
+  choices leave the layout and the tab order; the chosen family carries
+  `aria-expanded` / `aria-pressed`; focus moves to the first child and back
+  to the family; a status line announces the family choice.
+
+### Not changed
+
+Prices, durations, availability rules, hold logic, package consumption,
+BEAU PH, Stripe, Finance, authentication. The placeholder availability rules
+apply to every active service (`service_ids` null), so the new Dubai
+services inherit the same hours until Gari scopes them in Schedule.
+
+### Tests
+
+`scripts/test-booking-picker.mjs` (Playwright, mocked booking API):
+`BOOKING_PICKER_TESTS ok=36 fail=0` — order and content of the initial
+step, availability timing per choice, transition and Back, error/retry
+exclusivity, 390 px without horizontal overflow, touch, reduced motion.
+`available_slots` returns times for all four canonical services in
+production; the booking Edge Function is version 13.
+
+### Owner actions
+
+- Set a price on the three Dubai services in Services when ready; until
+  then a booking on them is a request Gari confirms directly.
+- Scope availability per service in Schedule if court hours differ from
+  online hours; Group session capacity is 1 until changed in Services.
+
+---
+
 ## Coach Gari / BEAU PH — Finance workspace, rails configuration, BEAU FX (2026-09-09)
 
 **What changed.** The Finance tab is now two sub-tabs — **Transactions**
