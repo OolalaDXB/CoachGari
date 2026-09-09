@@ -2,19 +2,20 @@
 
    What it does: makes the back-office installable and keeps its SHELL available offline —
    the HTML, the two stylesheets, the scripts, the config, the manifest and icons, the
-   supabase-js UMD build and the web fonts. Shell files: stale-while-revalidate (served from
+   self-hosted supabase-js UMD build and the web fonts. Shell files: stale-while-revalidate (served from
    cache at once, refreshed in the background; a new version replaces the cache on activate).
    What it never does: cache data. Every request to Supabase (REST, RPC, auth, Edge
    Functions) goes to the network untouched and is never stored — nothing from the CRM,
    the calendar, the finance or the emails lives in this cache. Offline, a data request
    simply fails and the app shows its own error; the shell still opens. */
-const VERSION = 'cg-admin-v1';
+const VERSION = 'cg-admin-v2';
 const SHELL = [
   '/admin/', '/admin/index.html', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js',
   '/admin/manifest.webmanifest', '/admin/icons/icon-192.png', '/admin/icons/icon-512.png', '/admin/icons/maskable-512.png',
+  '/admin/vendor/supabase-js@2.116.0/supabase.js',
   '/assets/coach-gari.css', '/config.js',
 ];
-const SHELL_HOSTS = ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com'];   // static third-party files the shell needs, never data
+const SHELL_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];   // the web fonts, the only third-party files the shell needs; never data
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

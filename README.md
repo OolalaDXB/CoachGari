@@ -359,8 +359,9 @@ no `content:*` permission: the website is edited in Git.
   on `/admin/` now; `/finance` is a Vercel redirect to `/admin#finance`, not a
   sign-in target. Magic links use Supabase's built-in mailer until a custom
   SMTP (Resend) is configured there.
-- **Frontend**: `admin/index.html` + `admin/admin.js` (supabase-js UMD from
-  jsdelivr, allowed by a dedicated CSP on `/admin*`), publishable key and
+- **Frontend**: `admin/index.html` + `admin/admin.js` (supabase-js 2.116.0 UMD
+  self-hosted at `admin/vendor/`, exact version, served from `'self'` under the
+  dedicated `/admin*` CSP — no CDN), publishable key and
   project URL from `config.js`. Times are shown and
   entered in a chosen IANA zone and stored in UTC.
 

@@ -80,7 +80,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 const calls = [];                       // every rpc call the page makes, in order
 await page.exposeFunction('__rpc', (name, args) => { calls.push({ name, args }); const v = FIXTURES[name]; return v === undefined ? { data: null, error: { code: 'PGRST202', message: `no fixture for ${name}` } } : { data: JSON.parse(JSON.stringify(v)), error: null }; });
-await page.route('**/cdn.jsdelivr.net/**', (r) => r.abort());
+await page.route('**/admin/vendor/**', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: '/* stubbed: the test injects window.supabase */' }));
 await page.route('**/fonts.googleapis.com/**', (r) => r.abort());
 await page.route('**/plausible.io/**', (r) => r.abort());
 await page.route('**/functions/v1/ph-admin', (r) => { calls.push({ name: 'fetch:ph-admin', args: { auth: !!r.request().headers()['authorization'] } }); r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RUNTIME) }); });
