@@ -23,6 +23,74 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Coach Gari — Support Coach Gari, Corporate CTA copy, CRM country picker (2026-09-09)
+
+**Support Coach Gari** is a generic BEAU PH payment with intent `support`
+— not a service, booking, package or session, and it never appears in the
+booking picker or the catalogue. A discreet link in the footer opens a
+compact dialog: AED 25 / 50 / 100 / Other, an optional "Message to Coach
+Gari", card payment (Stripe Embedded Checkout). No reason is required.
+Vocabulary is "Support Coach Gari" only: no donation, charity, fundraiser
+or tax wording, no receipt of that kind, no supporter list, target,
+leaderboard or recurring support.
+
+### Data model
+
+- Host record: an `orders` row with `order_reason = 'support'`, no booking
+  and no session pack (constraint `orders_target_ck`), `service_title`
+  "Support Coach Gari", a payer-held state token (sha256 in
+  `access_token_hash`). It is the host's generic money record, so the
+  existing payment / refund / chargeback / earning handling applies
+  unchanged; nothing downstream can confirm a booking, mark a pack paid or
+  consume a credit (proven).
+- BEAU PH: `payment_requests` with `intent = 'support'`, the optional
+  message in `metadata.message` (trimmed, capped at 500 characters). The
+  message never goes to Stripe: the Checkout description carries the public
+  reference `SUP-xxxxxx` only.
+- Amount authority: the browser proposes; `support_create()` validates the
+  currency BEAU PH can offer for `support` right now, the floor / ceiling
+  (AED 10 – 5,000 in minor units, same magnitude for other currencies) and
+  the rail, then creates the order and the request; the Checkout Session is
+  built from the DB row. Only the verified Stripe webhook marks it paid.
+- Rails opt in explicitly: Stripe lists `service, package, support`; Aani,
+  cash and bank transfer list `service, package` — so only card is offered
+  for support (proven).
+- Currency: AED presets today; the same flow reads what BEAU FX can offer
+  when merchant FX is enabled, no support-specific FX logic.
+- Finance › Transactions shows Type **Support** with amount, currency,
+  method, normalised status, timestamp and the message (already handled by
+  `finance_transactions` / the detail drawer).
+- Commission: a Stripe-collected support payment goes through
+  `recompute_earning` like any Stripe payment (10 % Oolala commission, Gari
+  payable via settlements). Owner decision if support should be treated
+  differently.
+- Payer identity: the order carries "Supporter" / "n/a"; Stripe knows the
+  card holder. Capturing the Checkout email into the order is a possible
+  follow-up, not done here.
+
+### Also in this change
+
+- Corporate CTA copy: "Discuss a corporate session" → **"Let's energise
+  your team"**; same `#enquiry` link with the Corporate preselect, still
+  enquiry-led, no product, slot or price.
+- Admin › CRM contact editor: the Country field is the same searchable
+  dropdown as the public enquiry form (an existing free-text value is kept
+  until the operator picks).
+
+### Tests
+
+`supabase/tests/cg013_support.sql` — `CG013_TESTS ok=23 fail=0`: not a
+service; floor, ceiling, unsupported currency and no-rail refused
+server-side; order and request shape, message persisted safely (trimmed,
+capped, absent when empty); Aani and cash refused for the intent; token
+reads state only; a forged webhook amount is ignored, the verified event
+pays once, a re-delivery does not double-pay; no booking / pack / session /
+credit moved; Finance row and detail; RPCs are service-role only.
+Regression: `CG003_TESTS ok=24 fail=0`, `CG012_TESTS ok=36 fail=0`.
+Edge Function `support` v1 (card via the Stripe adapter, CORS allowlist).
+
+---
+
 ## BEAU PH — Cash is a rail (2026-09-09)
 
 **Before.** Cash was only a host "source" on `payment_record_manual`: the

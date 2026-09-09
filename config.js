@@ -27,6 +27,7 @@ export const CONFIG = {
   // Server-side Stripe Checkout creation (mode = the deployment's PAYMENTS_MODE: test | live).
   // Empty = payment step disabled; holds are still created.
   CHECKOUT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/checkout',
+  SUPPORT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/support',     // Support Coach Gari (card, via BEAU PH); '' = the surface is hidden,
 
   // Client-facing progress-tracking consent link (CG-010). The /consent page
   // reads a one-time token from the URL and POSTs here to view the notice and

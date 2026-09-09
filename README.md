@@ -242,6 +242,7 @@ node scripts/test-checkout.mjs --wait                                  # real St
 node scripts/test-admin-workspace.mjs                                  # offline (Playwright, mocked Supabase): Finance / BEAU PH workspace lazy loading, 34 checks
 node scripts/test-booking-picker.mjs                                   # offline (Playwright, mocked booking API): picker hierarchy, availability timing, error/retry, 390 px, 40 checks
 psql "$DATABASE_URL" -f supabase/tests/beau_ph_contract.sql            # BEAU PH contract incl. rail configuration + FX, rolls back
+psql "$DATABASE_URL" -f supabase/tests/cg013_support.sql               # Support Coach Gari: server-side amount / rail authority, webhook-only paid, no side effects
 ```
 
 Signature verification is Stripe's own scheme, implemented in

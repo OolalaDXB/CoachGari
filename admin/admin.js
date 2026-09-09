@@ -1655,6 +1655,66 @@ async function pfAttribution() {
 }
 
 /* ---- create / edit canonical contact ---- */
+/* ---- searchable country picker (same behaviour as the public form): a select-like trigger, a search box, a
+   scrollable list; the input keeps carrying the value so the RPC payload is unchanged. Names from
+   Intl.DisplayNames in the operator's language, English fallback. ---- */
+let COUNTRY_NAMES = null;
+function countryNames() {
+  if (COUNTRY_NAMES) return COUNTRY_NAMES;
+  const codes = 'AF AX AL DZ AS AD AO AI AQ AG AR AM AW AU AT AZ BS BH BD BB BY BE BZ BJ BM BT BO BQ BA BW BV BR IO BN BG BF BI KH CM CA CV KY CF TD CL CN CX CC CO KM CG CD CK CR CI HR CU CW CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FK FO FJ FI FR GF PF TF GA GM GE DE GH GI GR GL GD GP GU GT GG GN GW GY HT HM VA HN HK HU IS IN ID IR IQ IE IM IL IT JM JP JE JO KZ KE KI KP KR KW KG LA LV LB LS LR LY LI LT LU MO MG MW MY MV ML MT MH MQ MR MU YT MX FM MD MC MN ME MS MA MZ MM NA NR NP NL NC NZ NI NE NG NU NF MK MP NO OM PK PW PS PA PG PY PE PH PN PL PT PR QA RE RO RU RW BL SH KN LC MF PM VC WS SM ST SA SN RS SC SL SG SX SK SI SB SO ZA GS SS ES LK SD SR SJ SE CH SY TW TJ TZ TH TL TG TK TO TT TN TR TM TC TV UG UA AE GB US UM UY UZ VU VE VN VG VI WF EH YE ZM ZW'.split(' ');
+  let names = null;
+  for (const loc of [navigator.language, 'en']) { if (names || !loc) continue; try { names = new Intl.DisplayNames([loc], { type: 'region' }); } catch { names = null; } }
+  COUNTRY_NAMES = codes.map((c) => { try { return (names && names.of(c)) || c; } catch { return c; } }).sort((a, b) => a.localeCompare(b));
+  return COUNTRY_NAMES;
+}
+function countryPicker(input) {
+  if (!input || input.type === 'hidden') return;
+  const NAMES = countryNames();
+  const wrap = document.createElement('div'); wrap.className = 'cs';
+  input.parentNode.insertBefore(wrap, input); wrap.appendChild(input); input.type = 'hidden';
+  const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'cs-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
+  const value = document.createElement('span'); value.className = 'cs-value'; const chev = document.createElement('span'); chev.className = 'cs-chev'; chev.setAttribute('aria-hidden', 'true');
+  trigger.append(value, chev);
+  const pop = document.createElement('div'); pop.className = 'cs-pop'; pop.hidden = true;
+  const search = document.createElement('input'); search.type = 'text'; search.className = 'cs-search'; search.autocomplete = 'off'; search.placeholder = 'Type to search…'; search.setAttribute('aria-label', 'Search countries');
+  const list = document.createElement('ul'); list.className = 'cs-list'; list.setAttribute('role', 'listbox');
+  pop.append(search, list); wrap.append(trigger, pop);
+  let active = -1, rows = [];
+  const setValue = (name) => { input.value = name || ''; value.textContent = name || 'Choose a country'; value.classList.toggle('ph', !name); };
+  const setActive = (i, center) => {
+    if (active >= 0 && rows[active]) rows[active].classList.remove('active');
+    active = i; if (active >= 0 && rows[active]) { rows[active].classList.add('active'); rows[active].scrollIntoView({ block: center ? 'center' : 'nearest' }); }
+  };
+  const render = (q) => {
+    q = (q || '').trim().toLowerCase(); list.innerHTML = ''; rows = []; active = -1;
+    for (const n of NAMES) {
+      if (q && !n.toLowerCase().includes(q)) continue;
+      const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = n;
+      const on = n === input.value; li.setAttribute('aria-selected', on ? 'true' : 'false'); if (on) li.classList.add('on');
+      li.addEventListener('mousedown', (e) => { e.preventDefault(); choose(n); });
+      list.appendChild(li); rows.push(li);
+    }
+    if (!rows.length) { const e = document.createElement('li'); e.className = 'cs-empty'; e.textContent = 'No match'; list.appendChild(e); }
+    const sel = rows.findIndex((li) => li.classList.contains('on')); setActive(sel >= 0 ? sel : (q ? 0 : -1), true);
+  };
+  const open = () => { if (!pop.hidden) return; pop.hidden = false; trigger.setAttribute('aria-expanded', 'true'); search.value = ''; render(''); search.focus(); };
+  const close = (refocus) => { if (pop.hidden) return; pop.hidden = true; trigger.setAttribute('aria-expanded', 'false'); if (refocus) trigger.focus(); };
+  const choose = (name) => { setValue(name); close(true); };
+  trigger.onclick = () => (pop.hidden ? open() : close(true));
+  trigger.onkeydown = (e) => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); open(); } };
+  search.oninput = () => render(search.value);
+  search.onkeydown = (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (rows.length) setActive(Math.min(active + 1, rows.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (rows.length) setActive(Math.max(active - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0 && rows[active]) choose(rows[active].textContent); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(true); }
+    else if (e.key === 'Tab') close(false);
+  };
+  document.addEventListener('mousedown', (e) => { if (!wrap.contains(e.target)) close(false); });
+  const exact = NAMES.find((n) => n.toLowerCase() === (input.value || '').trim().toLowerCase());
+  setValue(exact || (input.value || '').trim());   // an existing free-text value is kept and shown until the operator picks
+}
+
 function openContactEditor(c) {
   const host = $('#profile'); host.hidden = false; document.body.style.overflow = 'hidden';
   const v = (x) => x == null ? '' : x;
@@ -1674,6 +1734,7 @@ function openContactEditor(c) {
       <div class="actions"><button class="btn btn-accent btn-sm" type="submit">${c ? 'Save' : 'Create'}</button>
       <button class="btn btn-line btn-sm" type="button" id="ce-cancel">Cancel</button></div>
     </form></div></div>`;
+  countryPicker($('#ce-form').country);
   $('#ce-x').onclick = () => c ? renderProfile('overview') : pfClose();
   $('#ce-cancel').onclick = () => c ? renderProfile('overview') : pfClose();
   $('#ce-form').onsubmit = async (e) => {
