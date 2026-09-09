@@ -69,6 +69,20 @@ for (const file of files) {
     }
     // relative non-root links: none expected in this repo
   }
+  // responsive images: every candidate in a srcset must resolve; <picture> sources need type + srcset; <img> needs width/height
+  for (const m of raw.matchAll(/\ssrcset=["']([^"']*)["']/g)) {
+    for (const cand of m[1].split(',')) {
+      const url = cand.trim().split(/\s+/)[0];
+      if (url && url.startsWith('/') && !resolveAbsolute(url)) errors.push(`${rel}: missing srcset target ${url}`);
+    }
+  }
+  for (const m of raw.matchAll(/<source\b[^>]*>/g)) {
+    if (!/\stype=["']image\//.test(m[0]) || !/\ssrcset=/.test(m[0])) errors.push(`${rel}: <source> without type/srcset: ${m[0].slice(0, 80)}`);
+  }
+  for (const m of raw.matchAll(/<img\b[^>]*\ssrcset=[^>]*>/g)) {
+    if (!/\swidth=["']\d+["']/.test(m[0]) || !/\sheight=["']\d+["']/.test(m[0])) errors.push(`${rel}: responsive <img> without width/height: ${m[0].slice(0, 80)}`);
+    if (!/\salt=/.test(m[0])) errors.push(`${rel}: <img> without alt: ${m[0].slice(0, 80)}`);
+  }
 }
 
 if (errors.length) {

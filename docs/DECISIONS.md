@@ -23,6 +23,35 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Shoot photos + Zimbabwe Bird signature (2026-09-09, awaiting the binaries)
+
+Three approved photos, one section each — never a gallery: the smiling cardio
+portrait is the About Coach Gari image (4:5, editorial, beside the copy on
+desktop); the dumbbell front raise is the Book a session visual (4:5, beside
+the intro, the picker below — personal training is booked there); the twist in
+the tropical gym is the Online coaching image (wide 2:1 editorial band inside
+the existing bigcard, 4:3 on mobile — movement and adaptability, not a feature
+card). The hero and the Conversation portrait are untouched. Object positions
+are set per photo (smile, raised dumbbell + face, lunge + raised arm).
+
+Zimbabwe Bird: used exactly once, as a small monochrome signature (26 px wide,
+grayscale, ~55 % opacity, static, `aria-hidden`) in front of the "Zimbabwe to
+Dubai, and back again" heading. Not a logo, not in the header, footer, hero,
+booking or Support; no favicon, no lockup, no pattern, no animation.
+
+Delivery: sources in `assets/img/source/` (kept as delivered),
+`scripts/build-images.mjs` writes AVIF + WebP ladders (640 / 960 / 1280 where
+the source allows) and a JPEG fallback to `assets/img/shoot/`, `<picture>` with
+explicit width / height, `sizes`, lazy loading (none of the three is in the
+initial viewport), no JS. The link checker now resolves every `srcset`
+candidate and refuses a `<source>` without type / srcset or a responsive
+`<img>` without dimensions or alt. The photos and the SVG were supplied in the
+conversation only, so the branch carries the integration and the pipeline;
+`main` moves once the four files land in `assets/img/source/` and the
+derivatives are built.
+
+---
+
 ## Footer + anchors — 3 columns, Support row, normalised ids (2026-09-09)
 
 Footer = a direct map of the main site sections, never the catalogue:
