@@ -23,6 +23,28 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Legal pages + editorial footer (2026-09-09)
+
+`/legal` (terms & legal notice: operator, what is sold, booking, prices and
+payment, cancellation / rescheduling / refunds, Support Coach Gari as a
+voluntary non-refundable payment that is not a donation, health and age,
+liability, content, law) and `/privacy` (controller, data and purposes, legal
+basis, processors, retention, rights, security, cookies). Operator on every
+page: Oolala Next FZ-LLC · Licence 47017963 RAK (U.A.E.) · PO Box 644762 The
+Sustainable City, Dubai (U.A.E.), contact letsgo@coachgari28.com. "By paying
+you agree to the terms" at the three pay points (booking hold, /r, Support
+dialog). Defaults chosen pending the owner's confirmation: 24-hour cancellation
+rule with full refund or reschedule, no refund inside 24 h or on no-show,
+14-day window for a Support payment made in error, 24-month / 5-year retention.
+VAT: "where U.A.E. VAT applies it is included" — a TRN is added on receipts
+once the owner confirms registration.
+
+Footer, editorial version: two tight link columns on the left, the "Next live
+session" signup as a white card on the right (full width under 900 px), the
+operator line above the bottom bar, Terms · Privacy next to the copyright.
+
+---
+
 ## Shoot photos + Zimbabwe Bird signature (2026-09-09)
 
 Three approved photos, one section each — never a gallery: the smiling cardio

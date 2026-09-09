@@ -380,6 +380,9 @@ function init(){
     var pay = el('button', { type: 'button', class: 'btn btn-accent', text: 'Continue to payment →' });
     pay.addEventListener('click', function(){ startCheckout(b, pay); });
     stepDone.appendChild(pay);
+    var terms = el('p', { class: 'bk-terms' }); terms.appendChild(document.createTextNode('By paying you agree to the '));
+    terms.appendChild(el('a', { href: '/legal#cancellation', target: '_blank', rel: 'noopener', text: 'terms and cancellation policy' })); terms.appendChild(document.createTextNode('.'));
+    stepDone.appendChild(terms);
   }
 
   // Stripe.js is loaded only when someone actually pays (never on page load).

@@ -1,0 +1,16 @@
+/* Legal pages (/legal, /privacy): the site's type and header, a narrow reading column. */
+.doc{max-width:720px;padding-top:64px;padding-bottom:72px;}
+.doc-kicker{font-size:12.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
+.doc h1{font-size:clamp(2rem,4vw,2.8rem);margin-bottom:10px;}
+.doc-meta{color:var(--grey-text);font-size:15px;margin:0 0 36px;}
+.doc-meta a{color:var(--black);font-weight:600;}
+.doc section{margin:0 0 30px;}
+.doc h2{font-size:1.25rem;letter-spacing:-.02em;margin:0 0 10px;}
+.doc p,.doc li{font-size:16.5px;line-height:1.65;}
+.doc ul{margin:0 0 12px;padding-left:22px;}
+.doc li{margin:0 0 6px;}
+.doc a{color:var(--black);}
+.doc-entity{background:var(--grey-bg);border-radius:14px;padding:16px 20px;line-height:1.7;}
+.doc-foot{background:var(--grey-bg);padding:28px 0 36px;text-align:center;font-size:13.5px;color:var(--grey-text);}
+.doc-foot p{margin:0 0 6px;}
+.doc-foot a{color:var(--black);text-decoration:none;font-weight:600;}
