@@ -48,3 +48,28 @@ jobs:
       - name: Run rollback suites
         if: env.DATABASE_URL != ''
         run: bash scripts/db-tests.sh
+
+  # Edge Functions — deployed from main with the same multi-file bundles the
+  # project has always used (scripts/deploy-functions.mjs). Runs only when the
+  # SUPABASE_ACCESS_TOKEN secret is set; only the functions whose bundle
+  # contains a changed file are redeployed. Never on pull requests or branches.
+  deploy-edge-functions:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: static-checks
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF || 'acrjrlgeeyseyolmofuq' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Skipped (no SUPABASE_ACCESS_TOKEN secret)
+        if: env.SUPABASE_ACCESS_TOKEN == ''
+        run: echo "::notice::SUPABASE_ACCESS_TOKEN not set — Edge Functions are not deployed automatically. Add the secret to enable it."
+      - name: Deploy the functions touched by this push
+        if: env.SUPABASE_ACCESS_TOKEN != ''
+        run: node scripts/deploy-functions.mjs --changed "${{ github.event.before }}"

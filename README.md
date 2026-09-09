@@ -499,9 +499,14 @@ Project: `acrjrlgeeyseyolmofuq` (eu-central-1).
    (`supabase db push`, the dashboard SQL editor, or the MCP `apply_migration`).
    Creates `public.contacts` with RLS on and **no** anon/authenticated access:
    only the Edge Function (service role, injected by the platform) reads/writes.
-2. **Function** — deploy `supabase/functions/contact` **publicly**:
-   `supabase functions deploy contact --no-verify-jwt`
-   (or the MCP `deploy_edge_function` with `verify_jwt: false`).
+2. **Function** — deploy `supabase/functions/contact` **publicly** (every
+   function deploys with `verify_jwt: false` and enforces its own boundary):
+   `SUPABASE_ACCESS_TOKEN=… SUPABASE_PROJECT_REF=acrjrlgeeyseyolmofuq node scripts/deploy-functions.mjs --only contact`
+   — the script builds the same multi-file bundle (entrypoint + relative
+   imports from `_shared/` and `beau-ph/`) the project has always deployed;
+   `--list` shows the bundles without deploying, `--changed <ref>` picks only
+   the functions a diff touched. CI runs it on every push to `main` once the
+   `SUPABASE_ACCESS_TOKEN` secret exists (skipped, with a notice, until then).
    The function uses `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` that Supabase
    injects automatically — do not set or copy them anywhere.
 3. **Secrets** — set by the operator, never committed:
