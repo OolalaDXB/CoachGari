@@ -223,6 +223,27 @@ async function ledgerPanel(host, manage) {
   };
 }
 
+/* =============================== FINANCE · COMMISSIONS =============================== */
+/* The Oolala commission on money Oolala collected (Stripe), month × currency × type — service, package,
+   support. Manual rails (Aani, bank transfer, cash) never carry a commission: that money never passed
+   through Oolala. Settled = included in a settlement to Gari; open = not yet. Never summed across currencies. */
+export async function financeCommissions() {
+  const { esc, money, view } = C;
+  const d = await rpc('finance_commissions');
+  const rows = d.rows || [], totals = d.totals || [];
+  const pct = Math.round(Number(d.rate || 0.1) * 10000) / 100;
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Oolala commissions</h1><p class="ad-muted">The ${esc(String(pct))} % commission on every payment Oolala collected for Coach Gari — sessions, packages and support alike — after Stripe fees, refunds and chargebacks. Aani, bank transfer and cash carry no commission: that money never passed through Oolala. Figures stay in the currency collected.</p></div></div>
+    <div class="ad-kpis">${totals.map((t) => `<div class="ad-kpi"><b>${money(t.commission, t.currency)}</b><span>Commission (${esc(t.currency)}) · settled ${money(t.commission_settled, t.currency)} · open ${money(t.commission_open, t.currency)} · on ${money(t.net, t.currency)} net from ${t.payments} payment${t.payments === 1 ? '' : 's'}</span></div>`).join('') || '<div class="ad-kpi"><b>—</b><span>No commission yet</span></div>'}</div>
+    <div class="ad-panel">
+      ${C.table(['Month', 'Currency', 'Type', 'Payments', 'Gross', 'Stripe fees', 'Refunds / chargebacks', 'Net', 'Commission', 'Settled', 'Open', 'Gari payable'], rows.map((r) => `<tr>
+        <td><b>${esc(r.month)}</b></td><td>${esc(r.currency)}</td><td>${esc(TYPE_LABEL[r.type] || r.type)}</td><td class="num">${r.payments}</td>
+        <td class="num">${money(r.gross, r.currency)}</td><td class="num">${money(r.fees, r.currency)}</td><td class="num">${money((r.refunds || 0) + (r.chargebacks || 0), r.currency)}</td>
+        <td class="num">${money(r.net, r.currency)}</td><td class="num"><b>${money(r.commission, r.currency)}</b></td><td class="num">${money(r.commission_settled, r.currency)}</td><td class="num">${money(r.commission_open, r.currency)}</td>
+        <td class="num">${money(r.gari_payable, r.currency)}${r.adjusted ? `<div class="msg" style="font-size:12px">${r.adjusted} adjusted after settlement</div>` : ''}</td></tr>`), 'No commission yet.')}
+    </div>`;
+}
+
 /* =============================== FINANCE · PAYMENT METHODS =============================== */
 export async function financePaymentMethods() {
   const { $, esc, view, has } = C;

@@ -228,7 +228,8 @@ function newId(){
    names to maintain, nothing fetched). The visitor types to search;
    on submit the value must match one of those names. The form still
    sends one "City, Country" string, so the backend is unchanged.  */
-var COUNTRY_NAMES = [];
+export var COUNTRY_NAMES = [];
+export var COUNTRY_CODES = {};   // display name → ISO 3166-1 alpha-2
 (function countries(){
   var lists = document.querySelectorAll('[data-countries]');
   if (!lists.length) return;
@@ -241,6 +242,7 @@ var COUNTRY_NAMES = [];
   });
   COUNTRY_NAMES = codes.map(function(c){
     var n = c; try { n = (names && names.of(c)) || c; } catch (e) {}
+    COUNTRY_CODES[n] = c;
     return n;
   }).sort(function(a, b){ return a.localeCompare(b); });
   lists.forEach(function(list){
@@ -254,7 +256,7 @@ var COUNTRY_NAMES = [];
 /* A searchable dropdown over the country input: a select-like trigger, a search box and a
    scrollable list (typing filters, arrows move, Enter picks, Escape closes). The original input
    becomes hidden and keeps carrying the value, so submission and validation are unchanged. */
-function enhanceCountry(input){
+export function enhanceCountry(input){
   if (!COUNTRY_NAMES.length || input.type === 'hidden') return;
   var wrap = document.createElement('div'); wrap.className = 'cs';
   input.parentNode.insertBefore(wrap, input); wrap.appendChild(input);
@@ -319,7 +321,7 @@ function enhanceCountry(input){
   setValue(matchCountry(input.value) || '');
 }
 
-function matchCountry(value){
+export function matchCountry(value){
   var v = String(value || '').trim().toLowerCase();
   if (!v) return null;
   for (var i = 0; i < COUNTRY_NAMES.length; i++) if (COUNTRY_NAMES[i].toLowerCase() === v) return COUNTRY_NAMES[i];

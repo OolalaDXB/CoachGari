@@ -1,6 +1,7 @@
 -- CG-013 Support Coach Gari — database suite. One transaction, always rolls
 -- back (RAISE EXCEPTION 'CG013_TESTS ok=… fail=…').
--- Proves: Support is not a service (nothing bookable); the amount, currency,
+-- Proves: Support is not a service (nothing bookable); the payer's COUNTRY decides
+-- which currencies / methods are offered (support_options); the amount, currency,
 -- floor / ceiling and rail are validated SERVER-side; the record is a generic
 -- support order + a BEAU PH request with intent `support` and the optional
 -- message in its metadata; a rail that does not list the intent is refused;
@@ -24,16 +25,27 @@ begin
   if not exists (select 1 from public.services where slug ilike '%support%' or title ilike '%support%') then ok := ok + 1; else fail := fail + 1; log := log || ' [support in catalogue]'; end if;
 
   /* ---- 2. server-side validation: floor, ceiling, currency ---- */
-  begin perform public.support_create(500, 'AED', null, rt); fail := fail + 1; log := log || ' [below floor accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
-  begin perform public.support_create(600000, 'AED', null, rt); fail := fail + 1; log := log || ' [above ceiling accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
-  begin perform public.support_create(5000, 'ZAR', null, rt); fail := fail + 1; log := log || ' [unsupported currency accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
-  begin perform public.support_create(5000, 'AED', null, '{}'::jsonb); fail := fail + 1; log := log || ' [no configured rail accepted]'; exception when sqlstate '22023' or sqlstate 'P0003' then ok := ok + 1; end;
+  begin perform public.support_create(500, 'AED', null, rt, 'AE'); fail := fail + 1; log := log || ' [below floor accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.support_create(600000, 'AED', null, rt, 'AE'); fail := fail + 1; log := log || ' [above ceiling accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.support_create(5000, 'ZAR', null, rt, 'AE'); fail := fail + 1; log := log || ' [unsupported currency accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.support_create(5000, 'AED', null, '{}'::jsonb, 'AE'); fail := fail + 1; log := log || ' [no configured rail accepted]'; exception when sqlstate '22023' or sqlstate 'P0003' then ok := ok + 1; end;
   -- only rails that list the support intent are offered: card, not Aani / cash
   j := beau_ph.eligible_methods('coach_gari', 'AE', 'AED', rt, null, 'customer', 'support');
   if (select array_agg(e ->> 'provider' order by e ->> 'provider') from jsonb_array_elements(j) e) = array['stripe'] then ok := ok + 1; else fail := fail + 1; log := log || ' [support rails ' || j::text || ']'; end if;
+  -- the country decides: options for the UAE and for a covered country (ZW) carry card in AED + USD; an uncovered country (BR) gets nothing, and a create for it is refused
+  j := public.support_options('AE', rt);
+  if j ->> 'default_currency' = 'AED' and (select array_agg(c ->> 'currency' order by c ->> 'currency') from jsonb_array_elements(j -> 'currencies') c) = array['AED','USD']
+     and (select bool_and(jsonb_array_length(c -> 'methods') = 1 and c -> 'methods' -> 0 ->> 'provider' = 'stripe') from jsonb_array_elements(j -> 'currencies') c) then ok := ok + 1; else fail := fail + 1; log := log || ' [options AE ' || j::text || ']'; end if;
+  j := public.support_options('ZW', rt);
+  if jsonb_array_length(j -> 'currencies') = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [options ZW]'; end if;
+  j := public.support_options('BR', rt);
+  if jsonb_array_length(j -> 'currencies') = 0 and (j -> 'default_currency') = 'null'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || ' [options BR ' || j::text || ']'; end if;
+  begin perform public.support_create(5000, 'AED', null, rt, 'BR'); fail := fail + 1; log := log || ' [uncovered country accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.support_create(5000, 'AED', null, rt, null); fail := fail + 1; log := log || ' [no country accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.support_options('XX1', rt); fail := fail + 1; log := log || ' [bad country accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
 
   /* ---- 3. create: generic support order + BEAU PH request, intent support, message persisted safely ---- */
-  j := public.support_create(5000, 'AED', '  Keep going,   Coach Gari!  ', rt);
+  j := public.support_create(5000, 'AED', '  Keep going,   Coach Gari!  ', rt, 'AE');
   oref := j -> 'order' ->> 'reference'; tok := j ->> 'token'; rid := (j -> 'request' ->> 'id')::uuid;
   if (select order_reason from public.orders where reference = oref) = 'support'
      and (select booking_id is null and session_pack_id is null from public.orders where reference = oref)
@@ -43,12 +55,13 @@ begin
      and (select amount from beau_ph.payment_requests where id = rid) = 5000 and (select currency from beau_ph.payment_requests where id = rid) = 'AED'
      and (select provider_key from beau_ph.payment_requests where id = rid) = 'stripe'
      and (select public_reference from beau_ph.payment_requests where id = rid) like 'SUP-%'
+     and (select customer_country from beau_ph.payment_requests where id = rid) = 'AE'
      and (select metadata ->> 'message' from beau_ph.payment_requests where id = rid) = 'Keep going, Coach Gari!' then ok := ok + 1; else fail := fail + 1; log := log || ' [support request ' || j::text || ']'; end if;
   if tok ~ '^[0-9a-f]{64}$' and (select access_token_hash from public.orders where reference = oref) = encode(extensions.digest(tok, 'sha256'), 'hex') then ok := ok + 1; else fail := fail + 1; log := log || ' [support token]'; end if;
   -- an over-long message is capped, never refused; no message is fine
-  j := public.support_create(2500, 'AED', repeat('x', 900), rt);
+  j := public.support_create(2500, 'AED', repeat('x', 900), rt, 'AE');
   if length((select metadata ->> 'message' from beau_ph.payment_requests where id = (j -> 'request' ->> 'id')::uuid)) = 500 then ok := ok + 1; else fail := fail + 1; log := log || ' [message cap]'; end if;
-  j := public.support_create(2500, 'AED', null, rt);
+  j := public.support_create(2500, 'AED', null, rt, 'AE');
   if not ((select metadata from beau_ph.payment_requests where id = (j -> 'request' ->> 'id')::uuid) ? 'message') then ok := ok + 1; else fail := fail + 1; log := log || ' [empty message stored]'; end if;
 
   /* ---- 4. a rail that does not list the intent is refused for this order ---- */
@@ -91,13 +104,23 @@ begin
   j := public.finance_transaction_detail(oref);
   if j -> 'order' ->> 'reason' = 'support' and (j -> 'booking') = 'null'::jsonb and (j -> 'pack') = 'null'::jsonb and j -> 'requests' -> 0 ->> 'intent' = 'support'
      and j -> 'requests' -> 0 ->> 'support_message' = 'Keep going, Coach Gari!' then ok := ok + 1; else fail := fail + 1; log := log || ' [finance detail]'; end if;
+  -- the Oolala commission report: the support payment carries the standard commission (Stripe-collected), by month × currency × type
+  j := public.finance_commissions();
+  if exists (select 1 from jsonb_array_elements(j -> 'rows') r where r ->> 'type' = 'support' and r ->> 'currency' = 'AED' and (r ->> 'payments')::int >= 1
+                and (r ->> 'commission')::int >= round((5000 - 200) * 0.10) and (r ->> 'month') = to_char(now(), 'YYYY-MM'))
+     and exists (select 1 from jsonb_array_elements(j -> 'totals') t where t ->> 'currency' = 'AED' and (t ->> 'commission')::int >= 480) then ok := ok + 1; else fail := fail + 1; log := log || ' [commission report ' || (j -> 'rows')::text || ']'; end if;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"nobody@test.local"}', true);
+  execute 'set local role authenticated';
+  begin perform public.finance_commissions(); fail := fail + 1; log := log || ' [commissions without finance:view]'; exception when insufficient_privilege then ok := ok + 1; end;
   execute 'reset role';
 
   /* ---- 9. the RPCs are service-role only (the Edge Function is the only caller) ---- */
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);
   execute 'set local role anon';
-  begin perform public.support_create(5000, 'AED', null, rt); fail := fail + 1; log := log || ' [anon creates]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin perform public.support_create(5000, 'AED', null, rt, 'AE'); fail := fail + 1; log := log || ' [anon creates]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.support_state(oref, tok); fail := fail + 1; log := log || ' [anon reads state]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin perform public.support_options('AE', rt); fail := fail + 1; log := log || ' [anon reads options]'; exception when insufficient_privilege then ok := ok + 1; end;
   execute 'reset role';
 
   raise exception 'CG013_TESTS ok=% fail=% %', ok, fail, log;

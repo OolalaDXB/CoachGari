@@ -1,6 +1,10 @@
 /* =============================================================
    Support Coach Gari — a generic BEAU PH payment (intent "support")
-     POST {action:"create", amount, currency, message?}
+     POST {action:"options", country}
+          → {ok, options:{country, currencies:[{currency, methods[]}], default_currency}}
+            What BEAU PH can offer a payer in THAT country for the support
+            intent (rails that list the intent, their markets, the runtime).
+     POST {action:"create", country, amount, currency, message?}
           → {ok, ui:"embedded", client_secret, publishable_key, expires_at, reference, token, amount, currency}
             The browser PROPOSES an amount; support_create() validates the
             merchant, the intent, the currency BEAU PH can offer, the floor /
@@ -42,16 +46,27 @@ Deno.serve(async (req: Request) => {
     return json(200, { ok: true, support: data }, origin, allowed);
   }
 
+  const country = typeof body.country === "string" && /^[A-Za-z]{2}$/.test(body.country) ? body.country.toUpperCase() : "";
+  const rt = stripe.runtime(env);
+  const runtime = { stripe: rt };   // presence + mode, never a value
+
+  if (body.action === "options") {
+    if (!country) return json(400, { ok: false, error: "validation", fields: ["country"] }, origin, allowed);
+    const { data, error } = await sb.rpc("support_options", { p_country: country, p_runtime: runtime });
+    if (error) { log("rpc_failed", { code: error.code }); return json(error.code === "22023" ? 400 : 500, { ok: false, error: error.code === "22023" ? "validation" : "server_error" }, origin, allowed); }
+    if (SECRET_VALUE_RE.test(JSON.stringify(data))) { log("public_guard_tripped"); return json(500, { ok: false, error: "server_error" }, origin, allowed); }
+    return json(200, { ok: true, options: data }, origin, allowed);
+  }
+
   if (body.action === "create") {
-    const rt = stripe.runtime(env);
     if (!rt.configured || !rt.embedded) { log("not_configured", { mode: rt.mode ?? null, reason: rt.reason ?? null }); return json(503, { ok: false, error: "payments_not_configured" }, origin, allowed); }
     const amount = Number.isInteger(body.amount) ? Number(body.amount) : NaN;
     const currency = typeof body.currency === "string" && /^[A-Za-z]{3}$/.test(body.currency) ? body.currency.toUpperCase() : "";
     const message = typeof body.message === "string" ? body.message.slice(0, 500) : "";
+    if (!country) return json(400, { ok: false, error: "validation", fields: ["country"], message: "Choose your country." }, origin, allowed);
     if (!(amount > 0) || !currency) return json(400, { ok: false, error: "validation", fields: ["amount", "currency"], message: "Choose an amount." }, origin, allowed);
 
-    const runtime = { stripe: rt };   // presence + mode, never a value
-    const { data, error } = await sb.rpc("support_create", { p_amount: amount, p_currency: currency, p_message: message, p_runtime: runtime });
+    const { data, error } = await sb.rpc("support_create", { p_amount: amount, p_currency: currency, p_message: message, p_runtime: runtime, p_country: country });
     if (error) {
       if (error.code === "22023") return json(400, { ok: false, error: "validation", message: error.message }, origin, allowed);
       if (error.code === "P0003") return json(409, { ok: false, error: "unavailable", message: error.message }, origin, allowed);

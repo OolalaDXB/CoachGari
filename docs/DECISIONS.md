@@ -60,10 +60,21 @@ leaderboard or recurring support.
 - Finance › Transactions shows Type **Support** with amount, currency,
   method, normalised status, timestamp and the message (already handled by
   `finance_transactions` / the detail drawer).
-- Commission: a Stripe-collected support payment goes through
-  `recompute_earning` like any Stripe payment (10 % Oolala commission, Gari
-  payable via settlements). Owner decision if support should be treated
-  differently.
+- Commission: **confirmed by the owner** — a Stripe-collected support
+  payment carries the standard Oolala commission like any Stripe payment,
+  Gari payable via settlements. Finance › **Commissions** (new,
+  `finance_commissions`, finance:view) reports the Oolala commission by
+  month × currency × type (service / package / support), settled vs open,
+  never summed across currencies; manual rails carry none.
+- **Country first.** The dialog asks the payer's country (the same
+  searchable picker as the enquiry form) and asks the server what BEAU PH
+  can offer for `support` in that country (`support_options`: currencies,
+  and the eligible methods per currency). Presets follow the offered
+  currency (AED 25 / 50 / 100, USD 10 / 25 / 50, otherwise "Other" only);
+  an uncovered country is told card payment is not available yet.
+  `support_create` requires the country and validates the currency against
+  it; the request records the customer country.
+  `cg_ph_request_for_order` gained an explicit `p_country` (8th argument).
 - Payer identity: the order carries "Supporter" / "n/a"; Stripe knows the
   card holder. Capturing the Checkout email into the order is a possible
   follow-up, not done here.
@@ -79,8 +90,8 @@ leaderboard or recurring support.
 
 ### Tests
 
-`supabase/tests/cg013_support.sql` — `CG013_TESTS ok=23 fail=0`: not a
-service; floor, ceiling, unsupported currency and no-rail refused
+`supabase/tests/cg013_support.sql` — `CG013_TESTS ok=32 fail=0`: not a
+service; options by country (AE, ZW covered; BR not), country required; floor, ceiling, unsupported currency and no-rail refused
 server-side; order and request shape, message persisted safely (trimmed,
 capped, absent when empty); Aani and cash refused for the intent; token
 reads state only; a forged webhook amount is ignored, the verified event

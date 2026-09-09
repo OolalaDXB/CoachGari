@@ -28,7 +28,7 @@
    tables, so `select *` would be refused.
    ============================================================= */
 import { CONFIG } from '/config.js';
-import { initFinance, financeTransactions, financePaymentMethods, phRails, phFx } from '/admin/finance.js';
+import { initFinance, financeTransactions, financeCommissions, financePaymentMethods, phRails, phFx } from '/admin/finance.js';
 
 const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUBLISHABLE_KEY, { auth: { flowType: 'pkce', persistSession: true } });
 
@@ -115,6 +115,7 @@ function navModel() {
     // payment-infrastructure workspace (Rails, FX); both gated on the finance permissions, never on platform:admin.
     { key: 'finance', label: 'Finance', icon: '$', show: () => has('finance:view'),
       subs: [ { key: 'transactions', label: 'Transactions', show: () => true, run: financeTransactions },
+              { key: 'commissions', label: 'Commissions', show: () => true, run: financeCommissions },
               { key: 'methods', label: 'Payment methods', show: () => true, run: financePaymentMethods } ] },
     { key: 'beauph', label: 'BEAU PH', icon: '⌁', show: () => has('finance:view'),
       subs: [ { key: 'rails', label: 'Rails', show: () => true, run: phRails },

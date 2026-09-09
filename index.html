@@ -338,14 +338,14 @@
     <h3 id="sp-title">Support Coach Gari</h3>
     <p class="sp-sub">A small thank-you for the free content and the community work. No reason needed.</p>
     <form class="sp-form" data-support-form novalidate>
-      <div class="sp-amounts" role="group" aria-label="Amount">
-        <button type="button" class="sp-amt" data-amount="2500" aria-pressed="false">AED 25</button>
-        <button type="button" class="sp-amt" data-amount="5000" aria-pressed="false">AED 50</button>
-        <button type="button" class="sp-amt" data-amount="10000" aria-pressed="false">AED 100</button>
-        <button type="button" class="sp-amt" data-amount="other" aria-pressed="false">Other</button>
+      <div class="field">
+        <label for="sp-country">Country</label>
+        <input id="sp-country" name="country" type="text" autocomplete="country-name" placeholder="Choose a country" data-support-country>
+        <p class="sp-hint" data-support-hint hidden></p>
       </div>
+      <div class="sp-amounts" role="group" aria-label="Amount" data-support-amounts hidden></div>
       <div class="field sp-other" hidden>
-        <label for="sp-other">Amount (AED)</label>
+        <label for="sp-other">Amount <span data-support-ccy></span></label>
         <input id="sp-other" name="other" type="number" inputmode="decimal" min="10" max="5000" step="1" placeholder="e.g. 75">
       </div>
       <div class="field">

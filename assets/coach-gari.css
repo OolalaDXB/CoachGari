@@ -374,6 +374,9 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .sp-amt:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 .sp-form .field{margin-bottom:16px;}
 .sp-form .field[hidden]{display:none;}
+.sp-hint{margin:8px 0 0;font-size:13.5px;font-weight:500;color:#B3261E;line-height:1.5;}
+.sp-hint[hidden]{display:none;}
+.sp-amounts[hidden]{display:none;}
 .sp-status{margin:10px 0 0;font-size:14px;font-weight:500;color:var(--grey-text);min-height:1.2em;}
 .sp-status.err{color:#B3261E;}
 .sp-checkout[hidden],.sp-done[hidden]{display:none;}
