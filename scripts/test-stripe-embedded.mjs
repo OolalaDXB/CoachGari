@@ -77,7 +77,69 @@ await t('resumePaymentRequest re-opens an open embedded session (same reference)
 await t('resumePaymentRequest refuses a complete / expired session', async () => withFetch(() => jsonRes(200, { id: 'cs_live_x', status: 'complete', ui_mode: 'embedded', client_secret: 'cs_live_x_secret_z' }), async () => (await stripe.resumePaymentRequest('cs_live_x', envOf(LIVE))).kind === 'unavailable'));
 await t('resumePaymentRequest refuses a hosted session for the embedded surface', async () => withFetch(() => jsonRes(200, { id: 'cs_live_x', status: 'open', ui_mode: 'hosted', url: 'https://checkout.stripe.com/x' }), async () => (await stripe.resumePaymentRequest('cs_live_x', envOf(LIVE))).kind === 'unavailable'));
 
-/* ---- 5. webhook mode symmetry is unchanged ---- */
+/* ---- 5. the Stripe fee: never silently zero ----
+   Case 2 is the exact shape that made the first live payment record a fee
+   of zero: Stripe returned the balance transaction as an id string, so the
+   old code found no `fee` on it and reported null. */
+const { feeEvidence } = await import('../beau-ph/providers/stripe/adapter.ts');
+const noSleep = () => Promise.resolve();
+const routes = (map) => (url) => { for (const [frag, body] of map) if (String(url).includes(frag)) return jsonRes(200, typeof body === 'function' ? body() : body); return jsonRes(404, {}); };
+const PI = 'pi_live_1', CH = 'ch_live_1', BT = 'txn_live_1';
+const btObj = (currency = 'aed') => ({ id: BT, object: 'balance_transaction', fee: 89, net: 911, currency });
+
+await t('fee: balance transaction already expanded → fee taken as is', async () => withFetch(routes([['/payment_intents/', { id: PI, latest_charge: { id: CH, balance_transaction: btObj() } }]]), async () => {
+  const f = await feeEvidence(PI, 'AED', 'sk_live_x', { sleep: noSleep });
+  return f.fee_amount === 89 && f.charge_id === CH && f.balance_transaction_id === BT && f.net_amount === 911 && f.fee_currency === 'aed';
+}));
+await t('fee: balance transaction returned as a bare id → fetched directly (the live bug)', async () => withFetch(routes([
+  ['/payment_intents/', { id: PI, latest_charge: { id: CH, balance_transaction: BT } }],
+  ['/balance_transactions/', btObj()],
+]), async () => {
+  const f = await feeEvidence(PI, 'AED', 'sk_live_x', { sleep: noSleep });
+  return f.fee_amount === 89 && f.balance_transaction_id === BT && f.charge_id === CH;
+}));
+await t('fee: balance transaction lands only on a later read → retry finds it', async () => { let n = 0; return withFetch(routes([
+  ['/payment_intents/', () => (++n < 3 ? { id: PI, latest_charge: { id: CH, balance_transaction: null } } : { id: PI, latest_charge: { id: CH, balance_transaction: btObj() } })],
+]), async () => {
+  const f = await feeEvidence(PI, 'AED', 'sk_live_x', { sleep: noSleep });
+  return f.fee_amount === 89 && n === 3;
+}); });
+await t('fee: never available → unknown, not zero, and the charge is still reported', async () => withFetch(routes([['/payment_intents/', { id: PI, latest_charge: { id: CH, balance_transaction: null } }]]), async () => {
+  const f = await feeEvidence(PI, 'AED', 'sk_live_x', { sleep: noSleep });
+  return f.fee_amount === null && f.charge_id === CH && f.fee_settlement_amount === null;
+}));
+await t('fee: settled in another currency → kept as evidence, never used as the order fee', async () => withFetch(routes([
+  ['/payment_intents/', { id: PI, latest_charge: { id: CH, balance_transaction: btObj('usd') } }],
+]), async () => {
+  const f = await feeEvidence(PI, 'AED', 'sk_live_x', { sleep: noSleep });
+  return f.fee_amount === null && f.fee_settlement_amount === 89 && f.fee_currency === 'usd';
+}));
+await t('fee: charge itself returned as a bare id → charge captured, fee unknown', async () => withFetch(routes([['/payment_intents/', { id: PI, latest_charge: CH }]]), async () => {
+  const f = await feeEvidence(PI, 'AED', 'sk_live_x', { sleep: noSleep });
+  return f.charge_id === CH && f.fee_amount === null;
+}));
+await t('fee: a Stripe error never throws and never invents a figure', async () => withFetch(() => Promise.reject(new Error('network')), async () => {
+  const f = await feeEvidence(PI, 'AED', 'sk_live_x', { sleep: noSleep });
+  return f.fee_amount === null && f.charge_id === null;
+}));
+const paidEvent = { id: 'evt_1', type: 'checkout.session.completed', livemode: true, data: { object: { id: 'cs_live_1', currency: 'aed', amount_total: 1000, payment_intent: PI } } };
+await t('enrich: attaches the fee to the event the host reconciles', async () => withFetch(routes([
+  ['/payment_intents/', { id: PI, latest_charge: { id: CH, balance_transaction: BT } }],
+  ['/balance_transactions/', btObj()],
+]), async () => {
+  const e = await stripe.enrich(paidEvent, envOf(LIVE));
+  return e._enrich.fee_amount === 89 && e._enrich.charge_id === CH && e._enrich.balance_transaction_id === BT && e.id === 'evt_1';
+}));
+await t('enrich: an unknown fee is absent, so the host records fee_known = false', async () => withFetch(routes([['/payment_intents/', { id: PI, latest_charge: { id: CH, balance_transaction: null } }]]), async () => {
+  const e = await stripe.enrich(paidEvent, envOf(LIVE));
+  return e._enrich.fee_amount === null && e._enrich.charge_id === CH;
+}));
+await t('enrich: only touches checkout.session.completed', async () => withFetch(() => { throw new Error('must not call Stripe'); }, async () => {
+  const e = await stripe.enrich({ ...paidEvent, type: 'refund.created' }, envOf(LIVE));
+  return e._enrich === undefined;
+}));
+
+/* ---- 6. webhook mode symmetry is unchanged ---- */
 await t('verifyWebhook: mode unset refuses before any signature work', async () => (await stripe.verifyWebhook({ headers: new Headers(), rawBody: '{}' }, envOf({ STRIPE_WEBHOOK_SECRET: 'whsec_x' }))).ok === false);
 
 console.log(`\nSTRIPE_EMBEDDED_TESTS ok=${ok} fail=${fail}`);

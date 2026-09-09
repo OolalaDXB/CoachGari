@@ -23,6 +23,39 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Coach Gari / BEAU PH — the Stripe fee was recorded as zero (2026-09-09)
+
+**Root cause.** The Stripe adapter's `enrich()` asked for the payment intent
+with `expand[]=latest_charge.balance_transaction` and only read a fee when
+Stripe returned that balance transaction as an expanded object. On the live
+payment it came back as an id string, so `fee_amount` stayed null and the
+ledger stored a zero fee. A second cause sits behind the first: the balance
+transaction can lag the charge by a moment, so even a correct read can be
+too early.
+
+**Fix** (`beau-ph/providers/stripe/adapter.ts`). A `feeEvidence()` helper
+now resolves the fee properly: it accepts the balance transaction either
+expanded or as an id, fetches `/v1/balance_transactions/{id}` directly when
+it only has the id, and retries up to three times 800 ms apart when the
+transaction is not there yet. It also keeps the settlement currency
+straight — `fee_amount` is set only when Stripe's fee is denominated in the
+payment currency; a foreign settlement currency is carried as
+`fee_settlement_amount` with its own currency and never silently mixed with
+the payment amount.
+
+**An unknown fee is now visibly unknown.** `public.payments.fee_known`
+already distinguished "the fee is zero" from "we do not know it yet", and
+its upsert already lets a later, better reading fill an unknown fee in.
+Nothing surfaced the flag, so a missing fee looked like a real zero.
+`finance_orders()` returns `fee_known`
+(`20260925_finance_orders_fee_known.sql`, forward only, with the same
+explicit PUBLIC/anon revokes the previous migration needed), and the
+Finance tab shows "pending" instead of 0.00 for an earning whose fee has
+not arrived. Reporting and evidence only: no amount, earning, commission or
+settlement logic changed.
+
+---
+
 ## Coach Gari — Finance list was blind to session-pack orders (2026-09-09)
 
 **Found by the first live payment.** `public.finance_orders()` joined orders

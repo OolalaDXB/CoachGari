@@ -11,7 +11,7 @@
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
-  cA uuid; p1 uuid; p2 uuid; p3 uuid; s1 uuid; oref text; tok text; j jsonb; jh jsonb; n int; ordid uuid; pref text;
+  cA uuid; p1 uuid; p2 uuid; p3 uuid; p4 uuid; s1 uuid; oref text; tok text; j jsonb; jh jsonb; n int; ordid uuid; pref text;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
   insert into public.app_users (email, display_name, party) values
@@ -135,13 +135,32 @@ begin
   select id into ordid from public.orders where session_pack_id=p3 order by created_at desc limit 1;
   if not exists (select 1 from public.partner_earnings where order_id=ordid) then ok:=ok+1; else fail:=fail+1; log:=log||' [bank earning]'; end if;
 
+  /* ---- 5b-bis. the Stripe fee reaches the ledger, and an unknown fee is not a zero ---- */
+  -- the paid pack order of section 3 carried _enrich.fee_amount = 5000
+  if (select fee_amount from public.payments pm join public.orders oo on oo.id = pm.order_id where oo.reference = oref) = 5000
+     and (select fee_known from public.payments pm join public.orders oo on oo.id = pm.order_id where oo.reference = oref)
+     and (select stripe_fee from public.partner_earnings pe join public.orders oo on oo.id = pe.order_id where oo.reference = oref) = 5000
+     and (select net_collected from public.partner_earnings pe join public.orders oo on oo.id = pe.order_id where oo.reference = oref) = 312000 - 5000
+     then ok:=ok+1; else fail:=fail+1; log:=log||' [stripe fee not recorded]'; end if;
+  -- a payment whose fee Stripe has not reported yet records fee_known = false, never a fabricated zero
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '1-session pack #nofee', 1, 20000, 'AED', 'unpaid', 'seed') returning id into p4;
+  j := public.create_order_for_pack(p4);
+  perform public.process_stripe_event(jsonb_build_object('id','evt_nofee','type','checkout.session.completed','livemode',false,
+    'data', jsonb_build_object('object', jsonb_build_object('id','cs_nofee','payment_status','paid','amount_total',20000,'currency','aed','payment_intent','pi_nofee','client_reference_id',j->>'reference')),
+    '_enrich', jsonb_build_object('charge_id','ch_nofee','balance_transaction_id',null,'fee_amount',null)));
+  if (select fee_known from public.payments pm join public.orders oo on oo.id = pm.order_id where oo.reference = j->>'reference') = false
+     and (select provider_charge_id from public.payments pm join public.orders oo on oo.id = pm.order_id where oo.reference = j->>'reference') = 'ch_nofee'
+     then ok:=ok+1; else fail:=fail+1; log:=log||' [unknown fee not flagged]'; end if;
+
   /* ---- 5c. the Finance list shows session-pack orders, not only booking orders ---- */
   perform set_config('request.jwt.claims','{"role":"authenticated","email":"fin@test.local"}',true);
   execute 'set local role authenticated';
   -- oref is the Stripe-paid pack order from section 3: it must appear, labelled as a pack, with its money
   if (select count(*) from public.finance_orders() f
        where f.reference = oref and f.order_reason = 'session_pack' and f.pack_reference ~ '^CG-[0-9]{4,}$'
-         and f.booking_reference is null and f.gross_amount = 312000 and f.crm_contact_id = cA) = 1
+         and f.booking_reference is null and f.gross_amount = 312000 and f.crm_contact_id = cA
+         and f.fee_known and f.stripe_fee = 5000) = 1
      then ok:=ok+1; else fail:=fail+1; log:=log||' [finance list omits pack orders]'; end if;
   -- every pack order created by this suite is listed (none is silently dropped by a join)
   if (select count(*) from public.finance_orders()) = (select count(*) from public.orders)

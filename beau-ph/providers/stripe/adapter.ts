@@ -66,6 +66,92 @@ function metadata(input: CreateRequestInput): Record<string, string> {
   return m;
 }
 
+const API = "https://api.stripe.com/v1";
+
+async function getJson(url: string, key: string): Promise<Record<string, unknown> | null> {
+  try {
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${key}` } });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
+
+/** Stripe returns an expandable field as either the object or its id string. */
+// deno-lint-ignore no-explicit-any
+const idOf = (v: any): string | null =>
+  typeof v === "string" ? v : (v && typeof v === "object" && typeof v.id === "string" ? v.id : null);
+
+/** What we can prove about the provider's cut for one payment. Nulls mean "not known", never "zero". */
+export interface FeeEvidence {
+  charge_id: string | null;
+  balance_transaction_id: string | null;
+  /** The fee in the PAYMENT's currency — the only figure the host ledger may use. Null when not (yet) known. */
+  fee_amount: number | null;
+  /** The currency the balance transaction reported, i.e. the account's settlement currency. */
+  fee_currency: string | null;
+  /** The fee as reported, whatever the settlement currency. Evidence only. */
+  fee_settlement_amount: number | null;
+  net_amount: number | null;
+}
+
+/* =============================================================
+   Resolving the Stripe fee.
+
+   The fee lives on the charge's BALANCE TRANSACTION. Two things make it
+   easy to miss at webhook time, and both bit the first live payment,
+   which recorded a fee of zero:
+
+     1. `latest_charge.balance_transaction` is not always returned as an
+        expanded object; Stripe may hand back the id as a string, and an
+        id has no `fee` on it.
+     2. The balance transaction can lag the charge by a moment, so the
+        very first read may have nothing to expand at all.
+
+   So: expand, accept a bare id and fetch it, and retry a couple of times
+   while it is still being created.
+
+   The fee is denominated in the account's SETTLEMENT currency. It is
+   reported as `fee_amount` only when that matches the payment currency;
+   otherwise it stays evidence and the fee remains unknown, because a fee
+   in another currency cannot be subtracted from the order's gross. The
+   host then records `fee_known = false` rather than a wrong number, and
+   its payments upsert lets a later, better reading fill it in.
+   ============================================================= */
+export async function feeEvidence(
+  paymentIntentId: string, currency: string, key: string,
+  opts: { attempts?: number; waitMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<FeeEvidence> {
+  const attempts = opts.attempts ?? 3;
+  const waitMs = opts.waitMs ?? 800;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const want = (currency || "").toLowerCase();
+  const out: FeeEvidence = { charge_id: null, balance_transaction_id: null, fee_amount: null,
+                             fee_currency: null, fee_settlement_amount: null, net_amount: null };
+
+  for (let i = 0; i < attempts; i++) {
+    if (i) await sleep(waitMs);                                     // the balance transaction may still be landing
+    const pi = await getJson(`${API}/payment_intents/${encodeURIComponent(paymentIntentId)}?expand[]=latest_charge.balance_transaction`, key);
+    // deno-lint-ignore no-explicit-any
+    const charge: any = pi?.latest_charge ?? null;
+    out.charge_id = idOf(charge) ?? out.charge_id;
+    // deno-lint-ignore no-explicit-any
+    let bt: any = charge && typeof charge === "object" ? charge.balance_transaction : null;
+    out.balance_transaction_id = idOf(bt) ?? out.balance_transaction_id;
+    // an id without the object (the common case at webhook time): read it directly
+    if (out.balance_transaction_id && typeof bt?.fee !== "number") {
+      bt = await getJson(`${API}/balance_transactions/${encodeURIComponent(out.balance_transaction_id)}`, key);
+    }
+    if (typeof bt?.fee === "number") {
+      out.fee_settlement_amount = bt.fee;
+      out.fee_currency = typeof bt.currency === "string" ? bt.currency : null;
+      out.net_amount = typeof bt.net === "number" ? bt.net : null;
+      out.fee_amount = out.fee_currency === want ? bt.fee : null;   // never a fee in someone else's currency
+      return out;
+    }
+  }
+  return out;                                                       // charge known, fee not yet: the host keeps fee_known false
+}
+
 /** The exact form body sent to POST /v1/checkout/sessions (exported so tests can assert it without a network). */
 export function checkoutSessionParams(input: CreateRequestInput, expiresAt: number): URLSearchParams {
   const params = new URLSearchParams();
@@ -192,16 +278,11 @@ export const stripe: ProviderAdapter = {
   async enrich(event: Record<string, unknown>, env: EnvReader) {
     if (event.type !== "checkout.session.completed") return event;
     if (!stripe.runtime(env).configured) return event;
-    const key = env("STRIPE_SECRET_KEY")!;
     // deno-lint-ignore no-explicit-any
-    const pi = (event as any).data?.object?.payment_intent;
-    if (typeof pi !== "string") return event;
-    try {
-      const r = await fetch(`https://api.stripe.com/v1/payment_intents/${pi}?expand[]=latest_charge.balance_transaction`, { headers: { Authorization: `Bearer ${key}` } });
-      const p = await r.json();
-      const ch = p?.latest_charge; const bt = ch?.balance_transaction;
-      if (!ch?.id) return event;
-      return { ...event, _enrich: { charge_id: ch.id, balance_transaction_id: bt?.id ?? null, fee_amount: typeof bt?.fee === "number" ? bt.fee : null } };
-    } catch { return event; }
+    const obj: any = (event as any).data?.object ?? {};
+    if (typeof obj.payment_intent !== "string") return event;
+    const fee = await feeEvidence(obj.payment_intent, typeof obj.currency === "string" ? obj.currency : "", env("STRIPE_SECRET_KEY")!);
+    if (!fee.charge_id) return event;                               // nothing provable yet; the payment still records
+    return { ...event, _enrich: { ...fee } };
   },
 };
