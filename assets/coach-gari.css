@@ -286,6 +286,10 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .f-top li{padding:6px 0;font-size:16px;font-weight:600;}
 .f-top a{text-decoration:none;color:var(--grey-text);transition:color .25s ease;}
 .f-top a:hover,.f-top a:focus-visible{color:var(--black);}
+.f-social{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.f-social span{color:var(--line);font-weight:400;}
+.f-top a.f-support{display:inline-flex;margin-top:18px;color:#fff;}
+.f-top a.f-support:hover,.f-top a.f-support:focus-visible{color:#fff;background:var(--accent);}
 .f-news{display:flex;gap:10px;margin-top:16px;}
 .f-news input{flex:1;min-width:0;padding:15px 18px;border:1.5px solid var(--line);border-radius:9px;
   font-family:inherit;font-size:14.5px;background:#fff;}
