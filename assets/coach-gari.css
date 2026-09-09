@@ -74,7 +74,11 @@ p{margin:0 0 1em;}
 .logo{font-size:1.3rem;font-weight:800;letter-spacing:-.045em;text-decoration:none;white-space:nowrap;}
 .logo i{color:var(--accent);font-style:normal;}
 .nav-links{display:flex;gap:28px;font-size:14px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;margin-left:auto;}
-.nav-links a{text-decoration:none;}
+/* tonal navigation: the current section is near-black, the others soft grey; hover only shifts tone (site.js marks .is-active from an observer) */
+.nav-links a{text-decoration:none;color:var(--grey-text);transition:color .28s ease;}
+.nav-links a:hover,.nav-links a:focus-visible{color:#3A3A44;}
+.nav-links a.is-active{color:var(--black);}
+.nav-links a.is-active:hover,.nav-links a.is-active:focus-visible{color:#2A2A31;}
 .nav-right{margin-left:auto;display:flex;align-items:center;gap:20px;}
 .nav-right .plain{font-size:14px;font-weight:700;text-transform:uppercase;text-decoration:none;}
 
@@ -170,6 +174,11 @@ p{margin:0 0 1em;}
 .way .way-cred{font-size:14px;font-weight:700;color:var(--black);margin-top:14px;}
 .way-cta{display:inline-flex;align-items:center;gap:8px;margin-top:auto;padding-top:26px;font-weight:700;font-size:15.5px;text-decoration:none;
   color:var(--black);transition:color .2s ease;}
+/* tonal focus: while one panel is hovered, its sibling recedes (colour only, no movement) */
+.way h3,.way .way-cred{transition:color .3s ease;}
+.way{transition:opacity .3s ease;}
+.ways:hover .way:not(:hover){opacity:.62;}
+.ways:hover .way:not(:hover) h3{color:var(--grey-text);}
 .way-cta span{display:inline-block;transition:transform .25s cubic-bezier(.2,.7,.2,1);}
 .way:hover .way-cta,.way-cta:focus-visible{color:var(--accent);}
 .way:hover .way-cta span,.way-cta:focus-visible span{transform:translateX(4px);}
@@ -256,7 +265,8 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
   color:var(--grey-text);margin-bottom:18px;}
 .f-top ul{list-style:none;padding:0;margin:0;}
 .f-top li{padding:6px 0;font-size:16px;font-weight:600;}
-.f-top a{text-decoration:none;}
+.f-top a{text-decoration:none;color:var(--grey-text);transition:color .25s ease;}
+.f-top a:hover,.f-top a:focus-visible{color:var(--black);}
 .f-news{display:flex;gap:10px;margin-top:16px;}
 .f-news input{flex:1;min-width:0;padding:15px 18px;border:1.5px solid var(--line);border-radius:9px;
   font-family:inherit;font-size:14.5px;background:#fff;}
@@ -305,5 +315,5 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
   html{scroll-behavior:auto;}
   .reveal,.reveal-seq>*,.reveal-seq .way{opacity:1;transform:none;transition:none;}
   .together::before{opacity:1;transform:none;transition:none;}
-  .nav,.nav-in,.way-cta span{transition:none;}
+  .nav,.nav-in,.way-cta span,.nav-links a,.way,.way h3,.way .way-cred,.f-top a{transition:none;}
 }

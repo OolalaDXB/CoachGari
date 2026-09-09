@@ -51,6 +51,28 @@ import { CONFIG } from '/config.js';
   }, { threshold: 0 }).observe(s);
 })();
 
+/* ---- 1c. current section in the navigation ---------------- */
+/* Each nav link pointing at a section id gets .is-active while that
+   section crosses the middle band of the viewport. One observer, no
+   scroll listener; the styling is a colour transition in CSS.      */
+(function navCurrent(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('.nav-links a[href^="#"]'));
+  if (!links.length || !('IntersectionObserver' in window)) return;
+  var byId = {};
+  links.forEach(function(a){ var el = document.getElementById(a.getAttribute('href').slice(1)); if (el) byId[el.id] = a; });
+  var ids = Object.keys(byId);
+  if (!ids.length) return;
+  var current = null;
+  function set(id){
+    if (id === current) return; current = id;
+    links.forEach(function(a){ a.classList.toggle('is-active', a === byId[id]); });
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){ if (e.isIntersecting) set(e.target.id); });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  ids.forEach(function(id){ io.observe(document.getElementById(id)); });
+})();
+
 /* ---- 2. catalogue cards (CG-007) ----------------------------- */
 /* The programme cards render from the authoritative catalogue
    (services table, through the public booking function). Nothing
