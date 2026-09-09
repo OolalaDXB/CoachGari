@@ -24,7 +24,7 @@
 html{scroll-behavior:smooth;}
 /* anchor targets land below the sticky header; --nav-h follows the real header height (site.js, ResizeObserver) */
 :root{--nav-h:78px;}
-section[id],header[id]{scroll-margin-top:calc(var(--nav-h) + 20px);}
+section[id],header[id],article[id]{scroll-margin-top:calc(var(--nav-h) + 20px);}
 body{
   margin:0;background:#fff;color:var(--black);
   font-family:"Manrope",system-ui,sans-serif;font-size:17px;line-height:1.6;
@@ -283,18 +283,17 @@ p{margin:0 0 1em;}
 /* big footer (routes B & C) */
 footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .f-top{display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:44px;}
-.f-top h4{font-size:12.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
-  color:var(--grey-text);margin-bottom:18px;}
+.f-top h4{font-size:14px;font-weight:800;letter-spacing:-.01em;color:var(--black);margin-bottom:18px;}
 .f-top ul{list-style:none;padding:0;margin:0;}
 .f-top li{padding:6px 0;font-size:16px;font-weight:600;}
 .f-top a{text-decoration:none;color:var(--grey-text);transition:color .25s ease;}
 .f-top a:hover,.f-top a:focus-visible{color:var(--black);}
 .f-news-copy{font-size:15.5px;color:var(--grey-text);font-weight:500;margin:0;}
-/* secondary row under the columns: visible, but subordinate to the service CTAs */
-.f-support{margin-top:44px;padding-top:26px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px 28px;flex-wrap:wrap;}
-.f-support p{margin:0;font-size:15px;font-weight:500;color:var(--grey-text);}
-.f-support .btn{color:#fff;}
-.f-support .btn:hover,.f-support .btn:focus-visible{color:#fff;background:var(--accent);}
+/* Support Coach Gari: a footer link, slightly emphasised (black, arrow), never a button */
+.f-top a.f-support{color:var(--black);font-weight:700;display:inline-flex;align-items:center;gap:6px;}
+.f-top a.f-support span{display:inline-block;transition:transform .25s cubic-bezier(.2,.7,.2,1);}
+.f-top a.f-support:hover,.f-top a.f-support:focus-visible{color:var(--accent);}
+.f-top a.f-support:hover span,.f-top a.f-support:focus-visible span{transform:translateX(3px);}
 .f-news{display:flex;gap:10px;margin-top:16px;}
 .f-news input{flex:1;min-width:0;padding:15px 18px;border:1.5px solid var(--line);border-radius:9px;
   font-family:inherit;font-size:14.5px;background:#fff;}

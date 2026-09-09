@@ -29,7 +29,7 @@ const server = createServer(async (req, res) => {
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
-let ok = 0, fail = 0;
+let ok = 0, fail = 0; const jsErrors = [];
 const check = (name, cond, extra = '') => { if (cond) ok++; else fail++; console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond ? '' : ' ' + extra}`); };
 
 const BOOKABLE = [
@@ -47,6 +47,7 @@ async function open(path, opts = {}) {
     const body = a === 'tour_stops' ? { ok: true, tour_stops: [] } : a === 'slots' ? { ok: true, tz: 'UTC', slots: [] } : { ok: true, services: BOOKABLE };
     r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
   });
+  page.on('pageerror', (e) => { jsErrors.push(String(e)); });
   await page.goto(`${base}${path}`);
   await page.waitForSelector('[data-booking] .bk-service', { state: 'attached' });
   return { browser, page };
@@ -70,20 +71,34 @@ const wellPlaced = (l) => l.atBottom || (l.gap >= 8 && l.gap <= 80);
     const aliases = {}; (document.body.getAttribute('data-anchor-aliases') || '').split(/\s+/).forEach((p) => { const [a, b] = p.split(':'); if (a) aliases[a] = b; });
     const links = [...document.querySelectorAll('.nav a[href^="#"], footer a[href^="#"]')].map((a) => a.getAttribute('href').slice(1));
     const bad = links.filter((id) => !document.getElementById(id) && !(aliases[id] && document.getElementById(aliases[id])));
-    const removed = [...document.querySelectorAll('footer a')].map((a) => a.textContent.trim()).filter((t) => /Zimbabwe|Dubai one-to-one|Padel & corporate|letsgo@/i.test(t));
+    const removed = [...document.querySelectorAll('footer a, footer h4')].map((a) => a.textContent.trim()).filter((t) => /^(Zimbabwe|Dubai one-to-one|Padel & corporate|Live events|Live group sessions|Train online|In person|More)$|letsgo@|Padel one-to-one|Group session|Replay/i.test(t));
     const cols = document.querySelectorAll('.f-top > div').length;
-    const supportInCol = !!document.querySelector('.f-top [data-support-open]');
-    const supportRow = !!document.querySelector('footer .f-support [data-support-open]');
-    const fixedIds = ['programme', 'online-coaching', 'group-sessions', 'conversation', 'padel', 'about', 'book', 'contact'].filter((id) => !document.getElementById(id));
-    return { links: links.length, bad, removed, cols, supportInCol, supportRow, fixedIds, gari: [...document.querySelectorAll('footer')].map((f) => f.textContent).join(' ').match(/\bGari\b(?!\.)/g)?.filter((m, i, arr) => true) };
+    const col1 = [...document.querySelectorAll('.f-top > div:nth-child(1) li a')].map((a) => a.textContent.trim());
+    const col2 = [...document.querySelectorAll('.f-top > div:nth-child(2) li a')].map((a) => a.textContent.replace(/\s*→\s*$/, '').trim());
+    const heads = [...document.querySelectorAll('.f-top h4')].map((h) => h.textContent.trim() + '|' + getComputedStyle(h).textTransform);
+    const support = document.querySelector('.f-top > div:nth-child(2) a[data-support-open]');
+    const supportInCol = !!support && !support.classList.contains('btn') && getComputedStyle(support).backgroundColor === 'rgba(0, 0, 0, 0)';
+    const supportRow = !document.querySelector('footer .btn[data-support-open]');
+    const external = [...document.querySelectorAll('.f-top a[href^="http"]')].map((a) => a.getAttribute('href'));
+    const dupIds = (() => { const seen = new Set(), dup = []; document.querySelectorAll('[id]').forEach((e) => { if (seen.has(e.id)) dup.push(e.id); seen.add(e.id); }); return dup; })();
+    const fixedIds = ['programme', 'online-coaching', 'conversation', 'padel', 'corporate', 'about', 'book', 'contact'].filter((id) => !document.getElementById(id));
+    return { links: links.length, bad, removed, cols, col1, col2, heads, supportInCol, supportRow, external, dupIds, fixedIds };
   });
   check('header + footer anchors all resolve', r.bad.length === 0, JSON.stringify(r.bad));
   check('confusing footer links removed', r.removed.length === 0, JSON.stringify(r.removed));
   check('footer has exactly 3 content columns', r.cols === 3, String(r.cols));
-  check('Support Coach Gari sits in its own row below the columns', !r.supportInCol && r.supportRow);
+  check('Services column: exact order, no subcategories', r.col1.join('|') === 'The Programme|Online coaching|The Conversation|Personal training|Padel|Corporate', r.col1.join('|'));
+  check('Coach Gari column: Book a session … Support Coach Gari', r.col2.join('|') === 'Book a session|About Coach Gari|Contact|TikTok|Instagram|Support Coach Gari', r.col2.join('|'));
+  check('column titles in sentence case, not uppercased', r.heads.join(',') === 'Services|none,Coach Gari|none,Next live session|none', r.heads.join(','));
+  check('Support Coach Gari is a link in the Coach Gari column, not a button', r.supportInCol && r.supportRow);
+  check('social links unchanged', r.external.join(',') === 'https://www.tiktok.com/@coach_gari28,https://www.instagram.com/coach_gari28', r.external.join(','));
+  check('no duplicate ids on the page', r.dupIds.length === 0, JSON.stringify(r.dupIds));
   check('normalised section ids exist', r.fixedIds.length === 0, JSON.stringify(r.fixedIds));
   const bareGari = await page.$eval('footer', (f) => (f.textContent.match(/(?<!Coach )\bGari\b(?!\.)/g) || []).length);
   check('footer never says "Gari" alone', bareGari === 0, String(bareGari));
+  await page.click('.f-top a[data-support-open]');
+  const opened = await page.evaluate(() => !document.getElementById('support').hidden && location.hash !== '#book');
+  check('Support Coach Gari opens the Support flow (no scroll to Booking)', opened);
   await browser.close();
 }
 
@@ -186,6 +201,7 @@ for (const [legacy, canon] of [['enquiry', 'contact'], ['programmes', 'programme
   await browser.close();
 }
 
+check('no JavaScript errors during anchor navigation', jsErrors.length === 0, JSON.stringify(jsErrors));
 server.close();
 console.log(`\nANCHOR_TESTS ok=${ok} fail=${fail}`);
 process.exit(fail ? 1 : 0);

@@ -25,13 +25,17 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ## Footer + anchors — 3 columns, Support row, normalised ids (2026-09-09)
 
-Footer: **Services** (The Programme, Online coaching, Live group sessions, The
-Conversation, Personal training, Padel) · **About & connect** (About Coach Gari,
-Contact, TikTok, Instagram) · **Next live session** (email box). "Support Coach
-Gari" sits in its own secondary row under the columns — visible, subordinate to
-the service CTAs. Removed from footer navigation: Zimbabwe & Southern Africa,
-Dubai one-to-one, Padel & corporate (they belong to the content / booking
-surfaces).
+Footer = a direct map of the main site sections, never the catalogue:
+**Services** (The Programme, Online coaching, The Conversation, Personal
+training, Padel, Corporate) · **Coach Gari** (Book a session, About Coach Gari,
+Contact, TikTok, Instagram, Support Coach Gari — an emphasised link with an
+arrow that opens the Support flow, not a button) · **Next live session** (email
+box). Headings in sentence case. Removed from footer navigation: the Train
+online / In person / More groupings, Live events, Live group sessions, Zimbabwe
+& Southern Africa, Dubai one-to-one, Padel & corporate; subcategories (Padel
+one-to-one / group, package variants) never appear — the section or the picker
+handles them. `#corporate` is the Corporate panel inside the Padel & corporate
+section; `#booking` is an alias of `#book`.
 
 Section ids normalised: `programme`, `online-coaching`, `conversation`,
 `group-sessions`, `padel`, `contact` (`about`, `book`, `top` unchanged). The old
