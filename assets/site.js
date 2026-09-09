@@ -51,6 +51,59 @@ import { CONFIG } from '/config.js';
   }, { threshold: 0 }).observe(s);
 })();
 
+/* ---- 1b2. anchor offset + legacy anchor aliases ------------ */
+/* Anchor targets sit below the sticky header through CSS
+   scroll-margin-top, computed from --nav-h. --nav-h follows the
+   REAL header height (a ResizeObserver on .nav, so the compact
+   scrolled state and any viewport change are honoured) — nothing is
+   hard-coded and no scroll listener is involved.
+   Older section ids stay valid as aliases: a deep link such as
+   #enquiry lands on #contact and the address bar is normalised.
+   #personal-training resolves to the booking picker with that
+   family preselected (booking.js reads data-book-family).        */
+(function anchors(){
+  var nav = document.querySelector('.nav');
+  var rootEl = document.documentElement;
+  function setNavHeight(){ if (nav) rootEl.style.setProperty('--nav-h', nav.getBoundingClientRect().height + 'px'); }
+  setNavHeight();
+  if (nav && 'ResizeObserver' in window) new ResizeObserver(setNavHeight).observe(nav);
+  else window.addEventListener('resize', setNavHeight);
+
+  // "old:new old:new …" on <body>; the link checker reads the same attribute, so an alias is one declaration
+  var ALIASES = {};
+  (document.body.getAttribute('data-anchor-aliases') || '').split(/\s+/).forEach(function(pair){
+    var i = pair.indexOf(':'); if (i > 0) ALIASES[pair.slice(0, i)] = pair.slice(i + 1);
+  });
+  function resolve(){
+    var id = (window.location.hash || '').slice(1);
+    if (!id || !ALIASES[id] || document.getElementById(id)) return;
+    if (id === 'personal-training') rootEl.setAttribute('data-book-family', 'personal-training');
+    var target = document.getElementById(ALIASES[id]);
+    if (!target) return;
+    if (history.replaceState) history.replaceState(null, '', '#' + ALIASES[id]);
+    target.scrollIntoView({ block: 'start' });
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
+  }
+  resolve();
+  window.addEventListener('hashchange', resolve);
+
+  /* Deep link on load: sections above the target grow when the catalogue and the
+     booking picker render (async), which would leave the target further down the
+     page than where the browser first put it. For a short settle window after
+     load, keep the target aligned as the layout changes — but stop the moment the
+     visitor scrolls, touches or presses a key, so nothing fights their intent. */
+  var id = (window.location.hash || '').slice(1);
+  var target = id && document.getElementById(id);
+  if (target && 'ResizeObserver' in window) {
+    var stopped = false, stop = function(){ stopped = true; ro.disconnect(); };
+    ['wheel', 'touchstart', 'keydown', 'pointerdown'].forEach(function(ev){ window.addEventListener(ev, stop, { once: true, passive: true }); });
+    var ro = new ResizeObserver(function(){ if (!stopped) target.scrollIntoView({ block: 'start', behavior: 'instant' }); });
+    ro.observe(document.body);
+    setTimeout(stop, 3000);
+  }
+})();
+
 /* ---- 1c. current section in the navigation ---------------- */
 /* Each nav link pointing at a section id gets .is-active while that
    section crosses the middle band of the viewport. One observer, no
@@ -121,7 +174,7 @@ import { CONFIG } from '/config.js';
     var buy = node('div', 'buy');
     var a = node('a', 'btn btn-full btn-sm ' + (s.featured ? 'btn-accent' : 'btn-soft'));
     var bookable = s.booking_mode === 'slot';
-    a.href = bookable ? '#book' : '#enquiry';
+    a.href = bookable ? '#book' : '#contact';
     a.textContent = s.cta_label || (bookable ? 'Book a session →' : 'Enquire →');
     if (!bookable && INTEREST[s.slug]) a.setAttribute('data-preselect', INTEREST[s.slug]);
     buy.appendChild(a);
@@ -142,7 +195,7 @@ import { CONFIG } from '/config.js';
 
   if (CONFIG.COMMERCE) {
     document.querySelectorAll('[data-cta-main]').forEach(function(a){
-      if (a.getAttribute('href') === '#enquiry') a.setAttribute('href', '#programmes');
+      if (a.getAttribute('href') === '#contact') a.setAttribute('href', '#programme');
     });
   }
 })();
@@ -397,7 +450,7 @@ var CATEGORIES = {
       if (form.applyCategory) form.applyCategory();
     }
     if (email && contact && !contact.value) contact.value = email;
-    var target = document.getElementById('enquiry') || form;
+    var target = document.getElementById('contact') || form;
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (city) setTimeout(function(){ city.focus({ preventScroll: true }); }, 450);
   }

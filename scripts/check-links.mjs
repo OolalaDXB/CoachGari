@@ -28,6 +28,13 @@ function stripComments(html) {
 function idsOf(html) {
   const ids = new Set();
   for (const m of html.matchAll(/\sid=["']([^"']+)["']/g)) ids.add(m[1]);
+  // declared anchor aliases (body[data-anchor-aliases]="old:new …", resolved by site.js) count as ids
+  // only when their target id exists on the page
+  const decl = html.match(/data-anchor-aliases=["']([^"']+)["']/);
+  if (decl) for (const pair of decl[1].trim().split(/\s+/)) {
+    const [alias, target] = pair.split(':');
+    if (alias && target && ids.has(target)) ids.add(alias);
+  }
   return ids;
 }
 

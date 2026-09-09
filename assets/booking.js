@@ -119,6 +119,7 @@ function init(){
       }
       say('');
       renderServices();
+      preselectFamily();
     }).catch(function(e){
       var reason = (e && e.message) || 'network_error';
       if (attempt < 2) { console.warn('booking_init_retry: ' + reason); return new Promise(function(r){ setTimeout(r, 1500); }).then(function(){ return loadCatalogue(attempt + 1); }); }
@@ -141,6 +142,17 @@ function init(){
   }
 
   var levelHost = null, tourHost = null, busy = false;
+  /* A deep link such as #personal-training (resolved by site.js to #book + data-book-family)
+     opens the picker on that family, as if the customer had chosen it. Only from the root state. */
+  function preselectFamily(){
+    var key = document.documentElement.getAttribute('data-book-family');
+    if (!key || !levelHost) return;
+    document.documentElement.removeAttribute('data-book-family');
+    if (state.family) return;
+    var b = levelHost.querySelector('[data-choice="' + key + '"]');
+    if (b) b.click();
+  }
+  window.addEventListener('hashchange', function(){ preselectFamily(); });
   function renderServices(){
     stepService.innerHTML = '';
     stepService.appendChild(el('h4', { text: '1. What do you want to book?' }));
