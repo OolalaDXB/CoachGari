@@ -87,23 +87,30 @@ const noOverflow = (page) => page.evaluate(() => document.documentElement.scroll
   check(`${tag}: no availability requested before a final service is chosen`, slotsCalls().length === 0);
   check(`${tag}: choices are real buttons with an accessible pressed state`, await page.$$eval('[data-booking] .bk-level button.bk-service[aria-pressed]', (e) => e.length) === 3);
 
-  // The Conversation → availability
+  // The Conversation → the other choices collapse, it stays as context, availability loads
   await page.click('[data-choice="conversation"]');
   await page.waitForSelector('[data-booking] .bk-slot');
+  await page.waitForFunction(() => document.querySelectorAll('[data-booking] .bk-level > .bk-services .bk-service[hidden]').length === 2);
   check(`${tag}: The Conversation loads availability for conversation`, slotsCalls().length === 1 && slotsCalls()[0].service === 'conversation');
   check(`${tag}: times shown, no error`, (await timeButtons(page)).length === 3 && !(await page.$('[data-booking] .bk-error')));
-  check(`${tag}: Personal training and Padel still offered after a top-level final choice`, JSON.stringify(await visibleChoices(page)) === JSON.stringify(['The Conversation', 'Personal training', 'Padel']));
+  check(`${tag}: the other two choices collapsed, The Conversation stays as context with Back`, JSON.stringify(await visibleChoices(page)) === JSON.stringify(['The Conversation']) && !!(await page.$('[data-booking] .bk-back')));
+  check(`${tag}: The Conversation has no child choices`, (await page.$$('[data-booking] .bk-children .bk-service')).length === 0);
 
   // pick a time: step 4 shows no price (price belongs to the recap / payment stage)
   await page.click('[data-booking] .bk-slot');
   const summary = await page.$eval('[data-booking] .bk-summary', (e) => e.textContent);
   check(`${tag}: the details step names the service and time, not the price`, /The Conversation/.test(summary) && !/USD|100/.test(summary), summary);
 
-  // Personal training → availability for the canonical Dubai service
+  // Back, then Personal training → availability for the canonical Dubai service
+  await page.click('[data-booking] .bk-back');
+  await page.waitForFunction(() => document.querySelectorAll('[data-booking] .bk-level .bk-service:not([hidden])').length === 3 && !document.querySelector('[data-booking] .bk-children'));
+  check(`${tag}: Back after a final choice restores the three and clears the steps below`, !(await page.$('[data-booking] .bk-slot')) && !(await page.$('[data-booking] .bk-form')));
   await page.click('[data-choice="personal-training"]');
   await page.waitForFunction(() => document.querySelectorAll('[data-booking] .bk-slot').length === 3);
   check(`${tag}: Personal training loads availability for personal-training-dubai`, slotsCalls().length === 2 && slotsCalls()[1].service === 'personal-training-dubai');
-  check(`${tag}: the details form of the previous choice is gone`, !(await page.$('[data-booking] .bk-form')));
+  check(`${tag}: Personal training collapses the others too`, JSON.stringify(await visibleChoices(page)) === JSON.stringify(['Personal training']));
+  await page.click('[data-booking] .bk-back');
+  await page.waitForFunction(() => document.querySelectorAll('[data-booking] .bk-level .bk-service:not([hidden])').length === 3 && !document.querySelector('[data-booking] .bk-children'));
 
   // Padel → family, no availability
   const before = slotsCalls().length;
@@ -118,7 +125,17 @@ const noOverflow = (page) => page.evaluate(() => document.documentElement.scroll
   check(`${tag}: focus moved to the first child choice`, await page.evaluate(() => document.activeElement && document.activeElement.getAttribute('data-choice') === 'padel-one-to-one'));
   check(`${tag}: a Back control is present`, !!(await page.$('[data-booking] .bk-back')));
 
+  // the context button itself goes back; re-opening never stacks a second children row
+  await page.click('[data-choice="padel"]');
+  await page.waitForFunction(() => document.querySelectorAll('[data-booking] .bk-level .bk-service:not([hidden])').length === 3 && !document.querySelector('[data-booking] .bk-children'));
+  check(`${tag}: clicking the Padel context goes back`, JSON.stringify(await visibleChoices(page)) === JSON.stringify(['The Conversation', 'Personal training', 'Padel']));
+  await page.click('[data-choice="padel"]');
+  await page.waitForSelector('[data-booking] .bk-children .bk-service');
+  await page.waitForFunction(() => document.querySelectorAll('[data-booking] .bk-level > .bk-services .bk-service[hidden]').length === 2);
+  check(`${tag}: exactly one children row after re-opening Padel`, (await page.$$('[data-booking] .bk-children')).length === 1 && (await page.$$('[data-booking] .bk-back')).length === 1);
+
   // Padel › One-to-one → availability
+
   await page.click('[data-choice="padel-one-to-one"]');
   await page.waitForSelector('[data-booking] .bk-slot');
   check(`${tag}: Padel one-to-one loads availability for padel-one-to-one`, slotsCalls().slice(-1)[0].service === 'padel-one-to-one');

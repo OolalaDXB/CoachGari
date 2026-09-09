@@ -11,7 +11,7 @@
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
-  cA uuid; p1 uuid; p2 uuid; p3 uuid; p4 uuid; s1 uuid; oref text; tok text; j jsonb; jh jsonb; n int; ordid uuid; pref text;
+  cA uuid; p1 uuid; p2 uuid; p3 uuid; p4 uuid; p5 uuid; s1 uuid; oref text; tok text; tok5 text; j jsonb; jh jsonb; n int; ordid uuid; pref text;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
   insert into public.app_users (email, display_name, party) values
@@ -101,6 +101,30 @@ begin
   if not exists (select 1 from public.partner_earnings where order_id=ordid) then ok:=ok+1; else fail:=fail+1; log:=log||' [aani created earning]'; end if;
   -- the payment row carries the source and no fabricated stripe id
   if exists (select 1 from public.payments where order_id=ordid and provider='aani' and provider_payment_intent_id is null and note='client-ref-123') then ok:=ok+1; else fail:=fail+1; log:=log||' [aani payment row]'; end if;
+
+  /* ---- 4b. cash is a BEAU PH rail: client option, operator receipt through the same path, reconciled once, no Oolala earning ---- */
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '5-session pack #cash', 5, 50000, 'AED', 'unpaid', 'seed') returning id into p5;
+  perform set_config('request.jwt.claims','{"role":"authenticated","email":"coachonly@test.local"}',true);
+  execute 'set local role authenticated';
+  j := public.report_issue_link(p5); tok5 := j->>'token';
+  execute 'reset role';
+  j := public.report_view(tok5);
+  if exists (select 1 from jsonb_array_elements(j->'methods') m where m->>'provider' = 'cash' and m->>'reference' = (select public_ref from public.session_packs where id = p5)
+             and m->'instructions'->>'instructions' like 'Pay in cash%') then ok:=ok+1; else fail:=fail+1; log:=log||' [cash option on report '||(j->'methods')::text||']'; end if;
+  perform set_config('request.jwt.claims','{"role":"authenticated","email":"fin@test.local"}',true);
+  execute 'set local role authenticated';
+  if exists (select 1 from jsonb_array_elements(public.cg_ph_collect_options(p5, 'web')->'options') c where c->>'provider' = 'cash' and c->>'capability' = 'cash') then ok:=ok+1; else fail:=fail+1; log:=log||' [cash collect option]'; end if;
+  j := public.payment_record_manual(p5, 50000, 'AED', 'cash', null);
+  if (j->>'ok')::boolean and (j->>'source') = 'cash' and (j->>'capability') = 'cash' and (j->>'request_id') is not null then ok:=ok+1; else fail:=fail+1; log:=log||' [cash record '||j::text||']'; end if;
+  begin perform public.payment_record_manual(p5, 50000, 'AED', 'cash', null); fail:=fail+1; log:=log||' [cash paid twice]'; exception when sqlstate 'P0003' then ok:=ok+1; end;
+  execute 'reset role';
+  select id into ordid from public.orders where session_pack_id=p5 order by created_at desc limit 1;
+  if (select payment_status from public.session_packs where id=p5) = 'paid' and (select payment_source from public.session_packs where id=p5) = 'cash'
+     and exists (select 1 from public.payments where order_id=ordid and provider='cash' and capability='cash' and ph_request_id is not null and ph_event_id is not null)
+     and (select status from beau_ph.payment_requests where id = (select ph_request_id from public.payments where order_id=ordid)) = 'paid'
+     and exists (select 1 from beau_ph.reconciliations rc where rc.payment_event_id = (select ph_event_id from public.payments where order_id=ordid))
+     and not exists (select 1 from public.partner_earnings where order_id=ordid) then ok:=ok+1; else fail:=fail+1; log:=log||' [cash ledger]'; end if;
 
   /* ---- 5. renewal: new pack, old immutable ---- */
   perform set_config('request.jwt.claims','{"role":"authenticated","email":"fin@test.local"}',true);

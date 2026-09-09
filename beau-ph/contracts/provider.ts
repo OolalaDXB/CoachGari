@@ -21,7 +21,7 @@
    ============================================================= */
 
 export type ProviderKey =
-  | "stripe" | "aani" | "bank_transfer" | "paynow" | "mpesa" | "ozow" | "payshap" | "beau_wallet"
+  | "stripe" | "aani" | "bank_transfer" | "cash" | "paynow" | "mpesa" | "ozow" | "payshap" | "beau_wallet"
   | "network_international" | "magnati" | "adyen";
 export type ProviderKind = "online" | "manual" | "crypto";
 export type Confirmation = "provider_event" | "operator" | "unavailable";
@@ -31,8 +31,8 @@ export type Mode = "test" | "live";
 /** Generic capability vocabulary (mirrors beau_ph.is_capability). */
 export type Capability =
   | "online_checkout" | "payment_link" | "manual_instructions" | "wallet" | "bank_transfer" | "mobile_money"
-  | "softpos" | "card_present" | "tap_to_pay" | "qr" | "crypto";
-export const IN_PERSON_CAPABILITIES: ReadonlySet<Capability> = new Set(["softpos", "card_present", "tap_to_pay"]);
+  | "softpos" | "card_present" | "tap_to_pay" | "qr" | "crypto" | "cash";
+export const IN_PERSON_CAPABILITIES: ReadonlySet<Capability> = new Set(["softpos", "card_present", "tap_to_pay", "cash"]);
 
 /** Device / platform the request is initiated from (mirrors beau_ph.is_platform). `ios_app` = a future BEAU PH Merchant iOS app. */
 export type Platform = "web" | "ios_pwa" | "android_pwa" | "ios_app" | "android_app";

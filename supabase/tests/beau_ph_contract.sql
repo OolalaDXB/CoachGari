@@ -18,7 +18,7 @@ declare
   j jsonb; e1 jsonb; e2 jsonb; r1 uuid; r2 uuid; r3 uuid; txt text;
   cA uuid; p1 uuid; p2 uuid; p3 uuid; oref text; oref2 text; ph_ev uuid; ordid uuid; tok text; ev jsonb;
   p4 uuid; oref4 text; rA uuid; rB uuid; jB jsonb; nB int;
-  q1 jsonb; q2 jsonb; qid uuid; mid uuid; nA int; p5 uuid; tok5 text; j5 jsonb;
+  q1 jsonb; q2 jsonb; qid uuid; mid uuid; nA int; p5 uuid; tok5 text; j5 jsonb; rC uuid;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
   insert into beau_ph.merchants (key, name, country, default_currency, mode) values (mk, 'Contract Test', 'ZW', 'USD', 'test');
@@ -697,6 +697,24 @@ begin
      and public.finance_transaction_detail(oref4)::text not like '%SECRET-NOTE%' then ok := ok + 1; else fail := fail + 1; log := log || ' [host fx: transactions list]'; end if;
   execute 'reset role';
   perform beau_ph.merchant_fx_set('coach_gari', '{"enabled":false}'::jsonb, 'fx@test');
+
+  /* ---- 25. cash is a rail: manual, in person, operator-confirmed, market-scoped ---- */
+  j := beau_ph.rails_overview(mk);
+  if exists (select 1 from jsonb_array_elements(j -> 'rails') r where r ->> 'provider' = 'cash' and r ->> 'kind' = 'manual' and r ->> 'confirmation' = 'operator' and r ->> 'readiness' = 'available' and (r -> 'merchant') = 'null'::jsonb) then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: catalogue]'; end if;
+  if beau_ph.eligible_methods(mk, 'ZW', 'USD', rt)::text not like '%"cash"%' then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: offered unconfigured]'; end if;
+  perform beau_ph.merchant_method_configure(mk, 'cash', '{"enabled":true,"listed":true,"currency":"USD","countries":["ZW"],"currencies":["USD"],"instructions":{"instructions":"Bring cash to the session."}}'::jsonb, 't');
+  j := beau_ph.eligible_methods(mk, 'ZW', 'USD', rt);
+  if exists (select 1 from jsonb_array_elements(j) e where e ->> 'provider' = 'cash' and e ->> 'capability' = 'cash' and e -> 'instructions' ->> 'instructions' = 'Bring cash to the session.') then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: eligible]'; end if;
+  if beau_ph.eligible_methods(mk, 'AE', 'USD', rt)::text not like '%"cash"%' and beau_ph.eligible_methods(mk, 'ZW', 'AED', rt)::text not like '%"cash"%' then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: market scope]'; end if;
+  if exists (select 1 from jsonb_array_elements(beau_ph.eligible_capabilities(mk, 'ZW', 'USD', rt, null, 'merchant')) c where c ->> 'provider' = 'cash' and (c ->> 'in_person')::boolean) then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: collect option]'; end if;
+  j := beau_ph.create_request(mk, 'cash', 'ORD-CASH', 'REF-2099', 4000, 'USD', 'ZW', null, '{}'::jsonb, rt, 'cash'); rC := (j ->> 'id')::uuid;
+  if j ->> 'status' = 'pending' and j ->> 'capability' = 'cash' and j ->> 'channel' = 'in_person' then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: request]'; end if;
+  e1 := beau_ph.ingest_provider_event('cash', 'fake-cash-1', 'cash.received', '{"claimed":"paid"}'::jsonb, jsonb_build_object('request_id', rC, 'status', 'paid', 'amount', 4000, 'currency', 'USD'));
+  if (e1 ->> 'outcome') = 'rejected:manual_provider_requires_operator' and (select status from beau_ph.payment_requests where id = rC) = 'pending' then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: self-confirm]'; end if;
+  begin perform beau_ph.confirm_manual(rC, 'op@test', 3900, 'USD'); fail := fail + 1; log := log || ' [cash: wrong amount]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  e1 := beau_ph.confirm_manual(rC, 'op@test', 4000, 'USD', null, now(), 'counted at the court');
+  if (e1 ->> 'to') = 'paid' and exists (select 1 from beau_ph.payment_events where id = (e1 ->> 'payment_event_id')::uuid and actor = 'operator' and actor_id = 'op@test') then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: operator confirm]'; end if;
+  begin perform beau_ph.confirm_manual(rC, 'op@test', 4000, 'USD'); fail := fail + 1; log := log || ' [cash: confirmed twice]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
 
   raise exception 'BEAU_PH_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

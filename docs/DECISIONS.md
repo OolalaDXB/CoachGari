@@ -23,16 +23,68 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## BEAU PH — Cash is a rail (2026-09-09)
+
+**Before.** Cash was only a host "source" on `payment_record_manual`: the
+receipt went straight into `public.payments` with no BEAU PH request, no
+evidence and no reconciliation, and cash appeared nowhere in Finance ›
+Payment methods, BEAU PH › Rails, the client's payment options or the
+"Collect in person" options.
+
+**Now** (`20261005`, forward only). Cash is a first-class **manual,
+in-person** rail, operator-confirmed like Aani and bank transfer:
+
+- capability vocabulary gains `cash` (in person; SQL and TypeScript);
+- provider `cash`: manual, operator, available, any country / currency
+  (the merchant scopes it), one optional instruction text, no secret;
+- Coach Gari: enabled and listed, AE, AED + USD, with a client note —
+  the report page shows "Pay in cash" with the amount in the chosen
+  currency and the human reference; "Collect in person" offers Cash next
+  to the Tap to Pay apps, with no receipt reference required;
+- `payment_record_manual('cash')` goes through BEAU PH: request →
+  operator confirmation (identity, amount, currency, date, note) → host
+  payment → reconciled once; a second receipt on a paid pack is refused;
+  no Oolala earning (the money never passed through Oolala). `manual` and
+  `external` stay host-only sources.
+
+**Also fixed** (`20261006`). Bank transfer had been added from the admin
+this morning through "+ Add payment method", which creates the row with
+no markets; a save that then *enables* the rail without naming markets
+left it enabled but eligible nowhere, and a bank receipt failed with
+"needs_configuration". Enabling a rail that still has no market now gives
+it the same explicit default as a brand-new row (provider coverage or the
+merchant's home country; provider currencies or the settlement currency);
+explicit values always win.
+
+Tests: contract §25 (catalogue, not offered until configured, market
+scope, in-person collect option, fabricated "cash paid" event refused,
+wrong amount refused, operator confirms once), `cg012` §4b (client
+option, collect option, receipt through BEAU PH, ledger, double receipt
+refused) — `CG012_TESTS ok=36 fail=0`. The Edge bundles are unchanged:
+the report function passes the database's method list through verbatim.
+
+---
+
 ## Coach Gari — booking picker: three choices, progressive disclosure (2026-09-09)
 
 **What changed.** The first booking step shows exactly **The Conversation ·
 Personal training · Padel**, in that order, with a one-word context (Online /
-Dubai) and no price, currency or duration. Padel is a family: choosing it
-fades the other two out of the layout, keeps Padel as the current context
-and slides **One-to-one / Group session** in from the right; **← Back** (or
-the Padel context itself) reverses it without a reload and keeps the date
-already picked. Price appears only once a time is held (the recap and
-payment stage), as before.
+Dubai) and no price, currency or duration. **Every** top-level choice
+collapses the other two out of the layout (opacity and width, one easing,
+~300 ms) and stays as the current context with **← Back**; The Conversation
+and Personal training then go straight to the day and time; Padel slides
+**One-to-one / Group session** in from the right. Back (or the context
+button itself) reverses it without a reload and keeps the date already
+picked. Price appears only once a time is held (the recap and payment
+stage), as before.
+
+**Fixed the same day.** The first build only collapsed for Padel, and the
+Padel context kept its original "open" handler, so a second click stacked a
+second children row and brought the siblings back — which also made the
+Padel choices appear under The Conversation. The picker is now one state
+machine (root → selected family → back) with fresh buttons on every render
+and a guard during transitions; a regression check proves exactly one
+children row and one Back after re-opening.
 
 ### Decisions
 

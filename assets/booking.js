@@ -140,7 +140,7 @@ function init(){
     }).filter(Boolean);
   }
 
-  var levelHost = null, tourHost = null;
+  var levelHost = null, tourHost = null, busy = false;
   function renderServices(){
     stepService.innerHTML = '';
     stepService.appendChild(el('h4', { text: '1. What do you want to book?' }));
@@ -159,65 +159,94 @@ function init(){
     return b;
   }
   function mark(b, on){ b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+  function clearBelow(){ stepDate.innerHTML = ''; stepSlots.innerHTML = ''; stepForm.innerHTML = ''; stepDone.innerHTML = ''; tourHost.innerHTML = ''; }
 
-  // level 0: exactly the top-level families, nothing else
-  function renderFamilies(focusKey, animate){
+  /* Level 0: exactly the top-level families. One state machine:
+       root                → the three choices
+       select(family)      → the other choices collapse out of the layout (opacity + width, one easing),
+                             the chosen one stays as the current context with a Back control;
+                             a final family goes straight to the day / time steps, a family with
+                             children slides them in from the right
+       back()              → the reverse, without a reload; the day already picked is kept
+     The context button itself is a second way back. Nothing here is re-bound: each render creates
+     fresh buttons, and `busy` ignores clicks during a transition. */
+  function renderFamilies(focusKey){
     levelHost.innerHTML = '';
-    var list = el('div', { class: 'bk-services' + (animate && !reduceMotion ? ' bk-in' : ''), role: 'group', 'aria-label': 'What do you want to book?' });
+    var list = el('div', { class: 'bk-services', role: 'group', 'aria-label': 'What do you want to book?' });
     offered().forEach(function(f){
-      var b = choiceButton(f, function(){ if (f.children) openFamily(f, b, list); else pickService(f, f, b, list); });
+      var b = choiceButton(f, function(){ if (state.family && state.family.key === f.key) back(); else select(f, b, list); });
       if (f.children) b.setAttribute('aria-expanded', 'false');
-      if (state.choice && state.choice.key === f.key) mark(b, true);
       list.appendChild(b);
     });
     levelHost.appendChild(list);
     if (focusKey) { var t = list.querySelector('[data-choice="' + focusKey + '"]'); if (t) t.focus(); }
   }
 
-  // a final choice: the canonical service is known → availability may load now
-  function pickService(family, item, btn, list){
-    Array.prototype.forEach.call(list.querySelectorAll('.bk-service'), function(c){ mark(c, c === btn); });
-    state.family = family; state.choice = item; state.service = svc(item.service); state.slot = null;
+  function select(f, btn, list){
+    if (busy || state.family) return;
+    busy = true;
+    state.family = f; state.choice = null; state.service = null; state.slot = null; state.slotsSeq++;
+    clearBelow(); say('');
+    btn.classList.add('ctx'); mark(btn, true);
+    if (f.children) btn.setAttribute('aria-expanded', 'true');
+    var siblings = Array.prototype.filter.call(list.querySelectorAll('.bk-service'), function(c){ return c !== btn; });
+    siblings.forEach(function(c){ c.classList.add('bk-out'); c.setAttribute('tabindex', '-1'); c.setAttribute('aria-hidden', 'true'); });
+    after(320, function(){
+      siblings.forEach(function(c){ c.hidden = true; });
+      var view = el('div', { class: 'bk-children' + (reduceMotion ? '' : ' bk-enter') });
+      if (f.children) {
+        var group = el('div', { class: 'bk-services', role: 'group', 'aria-label': f.label + ' — which session?' });
+        f.children.forEach(function(c){
+          var b = choiceButton(c, function(){ pickChild(f, c, b, group); });
+          group.appendChild(b);
+        });
+        view.appendChild(group);
+      }
+      var backBtn = el('button', { type: 'button', class: 'bk-back', text: '← Back', 'aria-label': 'Back to all sessions' });
+      backBtn.addEventListener('click', back);
+      view.appendChild(backBtn);
+      levelHost.appendChild(view);
+      nextFrame(function(){ view.classList.remove('bk-enter'); });
+      busy = false;
+      if (f.children) {
+        say(f.label + ': choose ' + f.children.map(function(c){ return c.label.toLowerCase(); }).join(' or ') + '.');
+        var first = view.querySelector('.bk-service'); if (first) first.focus();
+      } else {
+        state.choice = f; state.service = svc(f.service);
+        renderTour(); renderDate(); loadSlots();
+      }
+    });
+  }
+
+  // a child choice: the canonical service is known → availability may load now
+  function pickChild(f, item, btn, group){
+    Array.prototype.forEach.call(group.querySelectorAll('.bk-service'), function(c){ mark(c, c === btn); });
+    state.choice = item; state.service = svc(item.service); state.slot = null;
     say('');
     renderTour(); renderDate(); loadSlots();
   }
 
-  // a family with children: the other top-level choices fade out and leave the layout, the chosen one
-  // stays as the current context, the children enter from the right. No availability request yet.
-  function openFamily(f, btn, list){
-    state.family = f; state.choice = null; state.service = null; state.slot = null; state.slotsSeq++;
-    stepDate.innerHTML = ''; stepSlots.innerHTML = ''; stepForm.innerHTML = ''; stepDone.innerHTML = ''; tourHost.innerHTML = '';
-    btn.classList.add('ctx'); btn.setAttribute('aria-expanded', 'true'); btn.setAttribute('aria-pressed', 'true');
-    btn.onclick = null;
-    btn.addEventListener('click', function(){ closeFamily(f); }, { once: true });   // the context itself is a way back
-    var siblings = Array.prototype.filter.call(list.querySelectorAll('.bk-service'), function(c){ return c !== btn; });
-    siblings.forEach(function(c){ c.classList.add('bk-out'); c.setAttribute('tabindex', '-1'); });
-    after(280, function(){
-      siblings.forEach(function(c){ c.hidden = true; });
-      var view = el('div', { class: 'bk-children' + (reduceMotion ? '' : ' bk-enter') });
-      var group = el('div', { class: 'bk-services', role: 'group', 'aria-label': f.label + ' — which session?' });
-      f.children.forEach(function(c){
-        var b = choiceButton(c, function(){ pickService(f, c, b, group); });
-        group.appendChild(b);
-      });
-      var back = el('button', { type: 'button', class: 'bk-back', text: '← Back', 'aria-label': 'Back to all sessions' });
-      back.addEventListener('click', function(){ closeFamily(f); });
-      view.appendChild(group); view.appendChild(back);
-      levelHost.appendChild(view);
-      nextFrame(function(){ view.classList.remove('bk-enter'); });
-      say(f.label + ': choose ' + f.children.map(function(c){ return c.label.toLowerCase(); }).join(' or ') + '.');
-      var first = group.querySelector('.bk-service'); if (first) first.focus();
-    });
-  }
-
   // back to the three top-level choices; reverses the transition, keeps the date the customer picked
-  function closeFamily(f){
+  function back(){
+    if (busy || !state.family) return;
+    busy = true;
+    var f = state.family;
     var view = levelHost.querySelector('.bk-children');
+    var list = levelHost.querySelector('.bk-services');
     state.family = null; state.choice = null; state.service = null; state.slot = null; state.slotsSeq++;
-    stepDate.innerHTML = ''; stepSlots.innerHTML = ''; stepForm.innerHTML = ''; stepDone.innerHTML = ''; tourHost.innerHTML = '';
-    say('');
+    clearBelow(); say('');
     if (view) view.classList.add('bk-enter');
-    after(250, function(){ renderFamilies(f.key, true); });
+    after(220, function(){
+      if (view) view.remove();
+      Array.prototype.forEach.call(list.querySelectorAll('.bk-service'), function(c){
+        c.classList.remove('ctx'); mark(c, false); c.removeAttribute('aria-hidden'); c.removeAttribute('tabindex');
+        if (c.getAttribute('data-choice') === f.key && f.children) c.setAttribute('aria-expanded', 'false');
+        c.hidden = false;
+      });
+      nextFrame(function(){ Array.prototype.forEach.call(list.querySelectorAll('.bk-service'), function(c){ c.classList.remove('bk-out'); }); });
+      var t = list.querySelector('[data-choice="' + f.key + '"]'); if (t) t.focus();
+      after(320, function(){ busy = false; });
+    });
   }
 
   // "Gari on tour": context for the chosen service only — never a top-level choice

@@ -1215,7 +1215,7 @@ async function pfCollectInPerson(p, after) {
   if (o.paid) { out.innerHTML = '<p class="ad-muted" style="font-size:13px">This package is already paid.</p>'; return; }
   const opts = o.options || [];
   if (!opts.length) {
-    out.innerHTML = '<p class="ad-muted" style="font-size:13px">No in-person acceptance is set up yet. In <b>Finance → In-person acceptance</b>, enable the Tap to Pay app you use (Network International <i>N-Genius One</i> or Magnati <i>SwipeX</i>). The customer taps in the PSP\'s certified app; you then enter the receipt reference here. Card data never touches this app.</p>';
+    out.innerHTML = '<p class="ad-muted" style="font-size:13px">No in-person acceptance is set up yet. In <b>Finance → Payment methods</b>, enable <b>Cash</b> or the Tap to Pay app you use (Network International <i>N-Genius One</i> or Magnati <i>SwipeX</i>). Card data never touches this app.</p>';
     return;
   }
   const cur = o.currency || 'AED';
@@ -1223,30 +1223,44 @@ async function pfCollectInPerson(p, after) {
     <div class="cg-row"><label>Amount <input type="number" name="amount_major" min="0" step="0.01" required value="${o.amount != null ? (o.amount / 100).toFixed(2) : ''}"></label>
       <label>Currency <input name="currency" value="${esc(cur)}" maxlength="3" readonly></label></div>
     <label>Reference <span style="display:flex;gap:8px;align-items:center"><input name="reference_show" value="${esc(o.reference || '')}" readonly style="flex:1"><button type="button" class="btn btn-line btn-xs" data-copyref>Copy</button></span></label>
-    <label>Accept with <select name="opt">${opts.map((x, i) => `<option value="${i}">${esc(x.display_name)} — ${esc((x.settings && x.settings.handoff_app) || x.capability)}${x.handoff ? ' (PSP app)' : ''}</option>`).join('')}</select></label>
+    <label>Accept with <select name="opt">${opts.map((x, i) => `<option value="${i}">${esc(x.display_name)}${x.capability === 'cash' ? '' : ' — ' + esc((x.settings && x.settings.handoff_app) || x.capability)}${x.handoff ? ' (PSP app)' : ''}</option>`).join('')}</select></label>
     <ol class="ad-muted" id="pf-collect-steps" style="font-size:12.5px;margin:6px 0 8px 18px;padding:0;line-height:1.5"></ol>
     <div class="cg-actions" id="pf-collect-open"></div>
-    <label>Receipt / transaction reference from the app <input name="receipt" required placeholder="e.g. RRN or receipt number" autocomplete="off"></label>
-    <div class="cg-actions"><button class="btn btn-accent btn-sm" type="submit">Customer tapped — confirm paid</button></div>
-    <p class="ad-muted" style="font-size:12px;margin:6px 0 0">Confirming records an operator-attested receipt in BEAU PH and marks the package paid. The money settles to your PSP merchant account (no Oolala earning). Nothing is charged from this page.</p>
+    <label id="pf-collect-receipt-l">Receipt / transaction reference from the app <input name="receipt" placeholder="e.g. RRN or receipt number" autocomplete="off"></label>
+    <div class="cg-actions"><button class="btn btn-accent btn-sm" type="submit" id="pf-collect-submit">Customer tapped — confirm paid</button></div>
+    <p class="ad-muted" id="pf-collect-foot" style="font-size:12px;margin:6px 0 0"></p>
   </form>`;
   const form = out.querySelector('#pf-collect');
   const renderOpt = () => {
     const x = opts[Number(form.opt.value)] || opts[0];
-    const app = (x.settings && x.settings.handoff_app) || x.display_name; const url = x.settings && x.settings.handoff_url;
     const amt = Math.round(Number(form.amount_major.value) * 100) || o.amount;
+    if (x.capability === 'cash') {
+      $('#pf-collect-steps').innerHTML = [`Take <b>${money(amt, cur)}</b> in cash from the customer`, 'Count it and confirm below — the receipt is recorded in BEAU PH under your name']
+        .map((s) => `<li>${s}</li>`).join('');
+      $('#pf-collect-open').innerHTML = '';
+      $('#pf-collect-receipt-l').firstChild.textContent = 'Note (optional) ';
+      form.receipt.placeholder = 'e.g. paid after the session';
+      $('#pf-collect-submit').textContent = 'Cash received — confirm paid';
+      $('#pf-collect-foot').textContent = 'Confirming records an operator-confirmed cash receipt in BEAU PH and marks the package paid. Cash goes straight to Coach Gari (no Oolala earning). Nothing is confirmed automatically.';
+      return;
+    }
+    const app = (x.settings && x.settings.handoff_app) || x.display_name; const url = x.settings && x.settings.handoff_url;
     $('#pf-collect-steps').innerHTML = [`Open <b>${esc(app)}</b> on this phone`, `Choose Tap to Pay and enter <b>${money(amt, cur)}</b>`, 'Let the customer tap their card, phone or watch', 'Copy the receipt / transaction reference shown by the app into the field below']
       .map((s) => `<li>${s}</li>`).join('');
     $('#pf-collect-open').innerHTML = url ? `<a class="btn btn-line btn-sm" href="${esc(url)}" rel="noopener">Open ${esc(app)}</a>` : `<span class="ad-muted" style="font-size:12px">Switch to the ${esc(app)} app, then come back here.</span>`;
+    $('#pf-collect-receipt-l').firstChild.textContent = 'Receipt / transaction reference from the app ';
+    form.receipt.placeholder = 'e.g. RRN or receipt number';
+    $('#pf-collect-submit').textContent = 'Customer tapped — confirm paid';
+    $('#pf-collect-foot').textContent = 'Confirming records an operator-attested receipt in BEAU PH and marks the package paid. The money settles to your PSP merchant account (no Oolala earning). Nothing is charged from this page.';
   };
   form.opt.onchange = renderOpt; form.amount_major.oninput = renderOpt; renderOpt();
   out.querySelector('[data-copyref]').onclick = async () => { try { await navigator.clipboard.writeText(o.reference || ''); toast('Reference copied'); } catch {} };
   form.onsubmit = async (e) => {
     e.preventDefault(); const x = opts[Number(form.opt.value)] || opts[0];
     const amt = Math.round(Number(form.amount_major.value) * 100); if (!amt || amt <= 0) return toast('Enter an amount', true);
-    const receipt = (form.receipt.value || '').trim(); if (!receipt) return toast('Enter the receipt reference from the app', true);
+    const receipt = (form.receipt.value || '').trim(); if (!receipt && x.capability !== 'cash') return toast('Enter the receipt reference from the app', true);
     const { error: e2 } = await sb.rpc('payment_record_manual', {
-      p_pack_id: p.id, p_amount: amt, p_currency: cur, p_source: x.provider, p_reference: receipt, p_paid_at: null,
+      p_pack_id: p.id, p_amount: amt, p_currency: cur, p_source: x.provider, p_reference: receipt || null, p_paid_at: null,
       p_capability: x.capability, p_platform: detectPlatform() });
     if (e2) return fail(e2); toast('Paid — package and ledger updated'); closeSheet(); if (after) after();
   };

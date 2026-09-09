@@ -99,6 +99,14 @@ function render(d) {
       $('bank-ref').textContent = bank.reference || d.pay_ref || '';
       $('bank-note').textContent = ins.instructions || '';
     }
+    const cash = method('cash');
+    if (cash) {
+      const ins = cash.instructions || {};
+      $('cash-panel').hidden = false;
+      $('cash-amt').textContent = money(payAmt, payCur);   // the amount in the currency chosen on this page, never converted here
+      $('cash-ref').textContent = cash.reference || d.pay_ref || '';
+      $('cash-note').textContent = ins.instructions || '';
+    }
     if (!methods.length) $('pay-none').hidden = false;
   }
   show('content');
@@ -165,7 +173,7 @@ $('btn-card-close').addEventListener('click', closeCard);
 $('pay-ccy').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-ccy]'); if (!b || b.classList.contains('on')) return;
   payCurrency = b.dataset.ccy; closeCard();
-  for (const id of ['btn-card', 'aani-panel', 'bank-panel', 'pay-none']) $(id).hidden = true;
+  for (const id of ['btn-card', 'aani-panel', 'bank-panel', 'cash-panel', 'pay-none']) $(id).hidden = true;
   $('aani-amt-line').hidden = false; $('bank-name-line').hidden = false;
   const { res, data } = await api('view', {});
   if (res.ok && data.ok) render(data);
