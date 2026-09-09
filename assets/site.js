@@ -80,9 +80,10 @@ import { CONFIG } from '/config.js';
    features and the CTA all come from the database.
      booking_mode 'slot'    → CTA goes to the booking picker (#book)
      booking_mode 'enquiry' → CTA goes to the enquiry form, interest preselected
-   Prices: a bookable service always shows its price (it is what
-   Checkout charges). Enquiry-only products show their price only
-   when CONFIG.COMMERCE is true, otherwise "On request".              */
+   Prices: a bookable service shows NO price on its card (the price
+   is disclosed in the booking recap once a time is held). Enquiry-only
+   products show their price only when CONFIG.COMMERCE is true,
+   otherwise "On request".                                             */
 (function catalogue(){
   var host = document.querySelector('[data-catalogue]');
   if (!host) return;
@@ -103,11 +104,14 @@ import { CONFIG } from '/config.js';
     item.setAttribute('data-sku', s.slug);
     if (s.tagline) item.appendChild(node('div', 'tagline', s.tagline));
     item.appendChild(node('h3', '', s.title));
-    var p = price(s);
-    var priceEl = node('div', p ? 'price' : 'price enquire');
-    if (p) { priceEl.appendChild(document.createTextNode(p + ' ')); var small = node('small', '', s.price_unit || ''); priceEl.appendChild(small); }
-    else priceEl.textContent = 'On request';
-    item.appendChild(priceEl);
+    // a bookable session shows no price on its card: the price belongs to the booking recap, once a time is held
+    if (s.booking_mode !== 'slot') {
+      var p = price(s);
+      var priceEl = node('div', p ? 'price' : 'price enquire');
+      if (p) { priceEl.appendChild(document.createTextNode(p + ' ')); var small = node('small', '', s.price_unit || ''); priceEl.appendChild(small); }
+      else priceEl.textContent = 'On request';
+      item.appendChild(priceEl);
+    }
     if (s.description) item.appendChild(node('p', '', s.description));
     if (s.features && s.features.length) {
       var ul = node('ul');
@@ -229,8 +233,12 @@ var COUNTRY_NAMES = [];
   var lists = document.querySelectorAll('[data-countries]');
   if (!lists.length) return;
   var codes = ('AF AX AL DZ AS AD AO AI AQ AG AR AM AW AU AT AZ BS BH BD BB BY BE BZ BJ BM BT BO BQ BA BW BV BR IO BN BG BF BI KH CM CA CV KY CF TD CL CN CX CC CO KM CG CD CK CR CI HR CU CW CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FK FO FJ FI FR GF PF TF GA GM GE DE GH GI GR GL GD GP GU GT GG GN GW GY HT HM VA HN HK HU IS IN ID IR IQ IE IM IL IT JM JP JE JO KZ KE KI KP KR KW KG LA LV LB LS LR LY LI LT LU MO MG MW MY MV ML MT MH MQ MR MU YT MX FM MD MC MN ME MS MA MZ MM NA NR NP NL NC NZ NI NE NG NU NF MK MP NO OM PK PW PS PA PG PY PE PH PN PL PT PR QA RE RO RU RW BL SH KN LC MF PM VC WS SM ST SA SN RS SC SL SG SX SK SI SB SO ZA GS SS ES LK SD SR SJ SE CH SY TW TJ TZ TH TL TG TK TO TT TN TR TM TC TV UG UA AE GB US UM UY UZ VU VE VN VG VI WF EH YE ZM ZW').split(' ');
-  var names;
-  try { names = new Intl.DisplayNames([navigator.language || 'en', 'en'], { type: 'region' }); } catch (e) { names = null; }
+  var names = null;
+  // the visitor's language first; a malformed navigator.language must not leave the list as bare codes
+  [navigator.language, 'en'].forEach(function(loc){
+    if (names || !loc) return;
+    try { names = new Intl.DisplayNames([loc], { type: 'region' }); } catch (e) { names = null; }
+  });
   COUNTRY_NAMES = codes.map(function(c){
     var n = c; try { n = (names && names.of(c)) || c; } catch (e) {}
     return n;
@@ -240,7 +248,76 @@ var COUNTRY_NAMES = [];
     COUNTRY_NAMES.forEach(function(n){ var o = document.createElement('option'); o.value = n; frag.appendChild(o); });
     list.appendChild(frag);
   });
+  document.querySelectorAll('[data-country-input]').forEach(enhanceCountry);
 })();
+
+/* A searchable dropdown over the country input: a select-like trigger, a search box and a
+   scrollable list (typing filters, arrows move, Enter picks, Escape closes). The original input
+   becomes hidden and keeps carrying the value, so submission and validation are unchanged. */
+function enhanceCountry(input){
+  if (!COUNTRY_NAMES.length || input.type === 'hidden') return;
+  var wrap = document.createElement('div'); wrap.className = 'cs';
+  input.parentNode.insertBefore(wrap, input); wrap.appendChild(input);
+  input.type = 'hidden'; input.removeAttribute('list'); input.removeAttribute('required');
+  var trigger = document.createElement('button');
+  trigger.type = 'button'; trigger.className = 'cs-trigger'; trigger.id = (input.id || 'country') + '-trigger';
+  trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
+  var value = document.createElement('span'); value.className = 'cs-value';
+  var chev = document.createElement('span'); chev.className = 'cs-chev'; chev.setAttribute('aria-hidden', 'true');
+  trigger.appendChild(value); trigger.appendChild(chev);
+  var lab = input.id ? document.querySelector('label[for="' + input.id + '"]') : null;
+  if (lab) lab.setAttribute('for', trigger.id);
+  var pop = document.createElement('div'); pop.className = 'cs-pop'; pop.hidden = true;
+  var search = document.createElement('input');
+  search.type = 'text'; search.className = 'cs-search'; search.setAttribute('autocomplete', 'off'); search.setAttribute('aria-label', 'Search countries'); search.placeholder = 'Type to search…';
+  var list = document.createElement('ul'); list.className = 'cs-list'; list.setAttribute('role', 'listbox'); list.id = trigger.id + '-list';
+  search.setAttribute('aria-controls', list.id);
+  pop.appendChild(search); pop.appendChild(list);
+  wrap.appendChild(trigger); wrap.appendChild(pop);
+  var active = -1, rows = [];
+  function setValue(name){
+    input.value = name || ''; value.textContent = name || (input.getAttribute('placeholder') || 'Choose a country');
+    value.classList.toggle('ph', !name);
+  }
+  function render(q){
+    q = String(q || '').trim().toLowerCase();
+    list.innerHTML = ''; rows = []; active = -1;
+    COUNTRY_NAMES.forEach(function(n){
+      if (q && n.toLowerCase().indexOf(q) === -1) return;
+      var li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = n; li.id = list.id + '-' + rows.length;
+      var on = n === input.value; li.setAttribute('aria-selected', on ? 'true' : 'false'); if (on) li.classList.add('on');
+      li.addEventListener('mousedown', function(e){ e.preventDefault(); choose(n); });
+      list.appendChild(li); rows.push(li);
+    });
+    if (!rows.length) { var e = document.createElement('li'); e.className = 'cs-empty'; e.textContent = 'No match'; list.appendChild(e); }
+    var sel = rows.findIndex(function(li){ return li.classList.contains('on'); });
+    setActive(sel >= 0 ? sel : (q ? 0 : -1), true);
+  }
+  function setActive(i, center){
+    if (active >= 0 && rows[active]) rows[active].classList.remove('active');
+    active = i;
+    if (active >= 0 && rows[active]) {
+      rows[active].classList.add('active'); search.setAttribute('aria-activedescendant', rows[active].id);
+      rows[active].scrollIntoView({ block: center ? 'center' : 'nearest' });
+    } else search.removeAttribute('aria-activedescendant');
+  }
+  function open(){ if (!pop.hidden) return; pop.hidden = false; trigger.setAttribute('aria-expanded', 'true'); search.value = ''; render(''); search.focus(); }
+  function close(refocus){ if (pop.hidden) return; pop.hidden = true; trigger.setAttribute('aria-expanded', 'false'); if (refocus) trigger.focus(); }
+  function choose(name){ setValue(name); close(true); input.dispatchEvent(new Event('change', { bubbles: true })); }
+  trigger.addEventListener('click', function(){ pop.hidden ? open() : close(true); });
+  trigger.addEventListener('keydown', function(e){ if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); open(); } });
+  search.addEventListener('input', function(){ render(search.value); });
+  search.addEventListener('keydown', function(e){
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (rows.length) setActive(Math.min(active + 1, rows.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); if (rows.length) setActive(Math.max(active - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (active >= 0 && rows[active]) choose(rows[active].textContent); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(true); }
+    else if (e.key === 'Tab') close(false);
+  });
+  document.addEventListener('mousedown', function(e){ if (!wrap.contains(e.target)) close(false); });
+  input.focus = function(){ trigger.focus(); };   // validation errors focus the visible control
+  setValue(matchCountry(input.value) || '');
+}
 
 function matchCountry(value){
   var v = String(value || '').trim().toLowerCase();

@@ -191,8 +191,26 @@ p{margin:0 0 1em;}
 .field{margin-bottom:20px;}
 .field label{display:block;font-size:12.5px;font-weight:800;letter-spacing:.06em;
   text-transform:uppercase;color:var(--grey-text);margin-bottom:9px;}
-.field input,.field select,.field textarea{width:100%;padding:16px 18px;font-family:inherit;
+.field input,.field select,.field textarea,.field .cs-trigger{width:100%;padding:16px 18px;font-family:inherit;
   font-size:16px;font-weight:500;border:1.5px solid var(--line);border-radius:9px;background:#fff;color:var(--black);}
+/* searchable country dropdown (enhanced from the plain input) */
+.cs{position:relative;}
+.cs-trigger{display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;cursor:pointer;}
+.cs-trigger:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.cs-trigger[aria-expanded=true]{border-color:var(--accent);}
+.cs-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cs-value.ph{color:#9A9AA6;font-weight:500;}
+.cs-chev{flex:0 0 auto;width:10px;height:10px;border-right:2px solid var(--grey-text);border-bottom:2px solid var(--grey-text);transform:translateY(-3px) rotate(45deg);transition:transform .2s ease;}
+.cs-trigger[aria-expanded=true] .cs-chev{transform:translateY(2px) rotate(225deg);}
+.cs-pop{position:absolute;left:0;right:0;top:calc(100% + 6px);z-index:40;background:#fff;border:1.5px solid var(--line);border-radius:12px;box-shadow:0 14px 40px rgba(10,10,11,.10);padding:8px;}
+.cs-pop[hidden]{display:none;}
+.cs-search{width:100%;padding:12px 14px;font-family:inherit;font-size:15px;font-weight:500;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--black);}
+.cs-search:focus{outline:none;border-color:var(--accent);}
+.cs-list{list-style:none;margin:6px 0 0;padding:0;max-height:240px;overflow:auto;overscroll-behavior:contain;}
+.cs-list li{padding:10px 12px;border-radius:8px;font-size:15px;font-weight:500;cursor:pointer;color:var(--black);}
+.cs-list li.active,.cs-list li:hover{background:var(--accent-pale);}
+.cs-list li.on{color:var(--accent);font-weight:700;}
+.cs-list li.cs-empty{color:var(--grey-text);cursor:default;}
 .field textarea{min-height:110px;resize:vertical;}
 .form-hint{margin:8px 0 0;font-size:13.5px;color:var(--grey-text);font-weight:500;line-height:1.5;}
 .form-hint[hidden]{display:none;}
