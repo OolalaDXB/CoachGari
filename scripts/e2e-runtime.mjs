@@ -8,7 +8,8 @@
         reference, and no secret-shaped value is in the response;
      2. Aani / bank-transfer instructions are shown WITHOUT any payment being
         recorded (a second `view` still reports the pack unpaid);
-     3. (--pay) Stripe TEST Checkout: `pay_card` returns a checkout.stripe.com
+     3. (--pay) Stripe TEST Checkout: `pay_card` returns an embedded session (client secret);
+        the card form is mounted on the report page itself, not a checkout.stripe.com
         URL (or 503 payments_not_configured when no sk_test_ key is set);
         pay it with 4242 4242 4242 4242, then run with --wait: the Stripe
         webhook → BEAU PH normalized paid event → host ledger → pack projection
@@ -25,7 +26,7 @@
    Webhook signature/idempotency probes of the deployed function: `STRIPE_WEBHOOK_SECRET=… node scripts/test-webhook.mjs`. */
 
 const ENDPOINT = process.env.REPORT_ENDPOINT || 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/report';
-const ORIGIN = process.env.ORIGIN || 'https://coachgariv0.vercel.app';
+const ORIGIN = process.env.ORIGIN || 'https://coachgari28.com';
 const TOKEN = process.env.REPORT_TOKEN;
 const pay = process.argv.includes('--pay'); const wait = process.argv.includes('--wait');
 if (!/^[0-9a-f]{64}$/.test(TOKEN || '')) { console.error('Set REPORT_TOKEN (64 hex chars: admin → package → Share link).'); process.exit(2); }
@@ -62,10 +63,10 @@ if (pay) {
   const c = await call({ action: 'pay_card', token: TOKEN });
   if (c.status === 503) console.log(`INFO  pay_card → 503 ${c.body?.error} (owner action: set STRIPE_SECRET_KEY sk_test_… on Supabase; live keys are refused)`);
   else {
-    check('pay_card → 200 with a Stripe Checkout URL', c.status === 200 && /^https:\/\/checkout\.stripe\.com\//.test(c.body?.url || ''), `${c.status} ${c.body?.error || ''}`);
-    if (c.body?.url) console.log(`\nPay here with 4242 4242 4242 4242:\n${c.body.url}\n`);
+    check('pay_card → 200 with an EMBEDDED session (client_secret + publishable key, no hosted URL)', c.status === 200 && c.body?.ui === 'embedded' && /^cs_(test|live)_/.test(c.body?.client_secret || '') && /^pk_(test|live)_/.test(c.body?.publishable_key || '') && !c.body?.url, `${c.status} ${c.body?.error || ''}`);
+    if (c.body?.client_secret) console.log(`\nOpen the report page in a browser and pay there with 4242 4242 4242 4242 (the card form is mounted in the page):\n${ORIGIN}/r/${TOKEN}\n`);
     const c2 = await call({ action: 'pay_card', token: TOKEN });
-    check('second pay_card reuses the open attempt (no second Checkout Session)', c2.status === 200 && (c2.body?.reused === true || c2.body?.url === c.body?.url));
+    check('second pay_card re-opens the same Checkout Session (no second one)', c2.status === 200 && c2.body?.reused === true);
   }
 }
 if (wait) {

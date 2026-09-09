@@ -236,6 +236,10 @@ p{margin:0 0 1em;}
 .bk-form{max-width:640px;}
 .bk-done{background:#fff;border-radius:16px;padding:22px 24px;box-shadow:0 2px 3px rgba(10,10,11,.03);}
 .bk-done:empty{display:none;}
+.bk-checkout{margin-top:18px;background:#fff;border:1.5px solid var(--line);border-radius:16px;padding:16px;}
+.bk-checkout-mount{min-height:120px;}
+.bk-checkout-cancel{margin-top:12px;font:inherit;font-size:14px;font-weight:700;color:var(--grey-text);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px;}
+.bk-checkout-cancel:hover{color:var(--black);}
 .bk-status{margin:14px 0 0;font-size:14.5px;font-weight:600;min-height:1.2em;}
 .bk-status.err{color:#B00020;}
 .bk-status.ok{color:var(--accent);}

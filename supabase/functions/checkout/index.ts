@@ -1,25 +1,30 @@
 /* =============================================================
    CG-003 — checkout  (on BEAU PH since the productisation step)
    POST {ref, token} → held booking → trusted order (amount from the DB) →
-   BEAU PH payment request → Stripe Checkout Session via the Stripe adapter
-   → attempt recorded → {url}. The success redirect is NEVER authoritative:
-   only the signature-verified webhook (stripe-webhook) marks anything paid.
+   BEAU PH payment request → EMBEDDED Stripe Checkout Session via the Stripe
+   adapter → attempt recorded → {client_secret, publishable_key}. The page
+   mounts Stripe's surface in place (the customer stays on coachgari28.com).
+   Neither the browser's completion callback nor the return URL is
+   authoritative: only the signature-verified webhook (stripe-webhook) marks
+   anything paid; the page polls the booking state until then.
 
    Secrets / config (Supabase secrets, never in git):
      PAYMENTS_MODE       — test | live. The adapter refuses a key whose mode
                            differs, and refuses everything when it is unset.
      STRIPE_SECRET_KEY   — sk_test_… under test, sk_live_… under live.
-     SITE_URL            — where Stripe sends the customer back
-                           (default: the Vercel production alias).
+     STRIPE_PUBLISHABLE_KEY — pk_ of the same mode; public, mode-checked.
+     SITE_URL            — return origin for the rare redirect flows
+                           (default: https://coachgari28.com).
    The browser never supplies an amount; any such field is ignored.
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { providers, runtimeMap } from "../../../beau-ph/core/registry.ts";
-import { requestForBooking, attachCheckout } from "../../../beau-ph/host-adapters/coach-gari/adapter.ts";
+import type { CreateRequestResult } from "../../../beau-ph/contracts/provider.ts";
+import { requestForBooking, attachCheckout, siteUrl, HOST_APP, MERCHANT_KEY } from "../../../beau-ph/host-adapters/coach-gari/adapter.ts";
 import { originAllowed, corsHeaders as cors } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 
-const SITE_URL = (Deno.env.get("SITE_URL") ?? "https://coachgariv0.vercel.app").replace(/\/$/, "");
 const env = (name: string) => Deno.env.get(name);
+const SITE_URL = siteUrl(env);   // https://coachgari28.com unless SITE_URL overrides (dev / preview only)
 
 const json = (status: number, body: unknown, origin: string | null, allowed: boolean) => new Response(JSON.stringify(body), { status, headers: cors(origin, allowed) });
 const log = (event: string, data: Record<string, unknown> = {}) => console.log(JSON.stringify({ fn: "checkout", event, ...data }));
@@ -38,9 +43,9 @@ Deno.serve(async (req: Request) => {
 
   const runtime = runtimeMap(env);
   const rt = runtime.stripe!;
-  if (!rt.configured) {
-    // payment-mode gate: PAYMENTS_MODE unset, or a key whose mode differs from it — refuse, never guess
-    log("not_configured", { mode: rt.mode ?? null, reason: rt.reason ?? null });
+  if (!rt.configured || !rt.embedded) {
+    // payment-mode gate: PAYMENTS_MODE unset, a key whose mode differs from it, or no publishable key — refuse, never guess
+    log("not_configured", { mode: rt.mode ?? null, reason: rt.reason ?? null, embedded: !!rt.embedded });
     return json(503, { ok: false, error: "payments_not_configured", mode: rt.mode ?? null, reason: rt.reason ?? null }, origin, allowed);
   }
 
@@ -57,28 +62,35 @@ Deno.serve(async (req: Request) => {
   if (error || !rp) return rpcError(error ?? { code: "P0003", message: "unavailable" }, origin, allowed);
   const { request, order } = rp;
 
-  // Reuse a still-valid Checkout Session instead of creating a second one.
+  const reply = (c: Extract<CreateRequestResult, { kind: "embedded" }>, reused: boolean) =>
+    json(200, { ok: true, ui: "embedded", client_secret: c.clientSecret, publishable_key: c.publicConfig.publishable_key, expires_at: c.expiresAt, order: order.reference, reused }, origin, allowed);
+
+  // Re-open a still-valid Checkout Session instead of creating a second one.
   const a = request.attempt;
-  if (a?.redirect_url && a.expires_at && Date.parse(a.expires_at) - Date.now() > 60_000) {
-    return json(200, { ok: true, url: a.redirect_url, order: order.reference, reused: true }, origin, allowed);
+  if (a?.provider_reference && a.expires_at && Date.parse(a.expires_at) - Date.now() > 60_000) {
+    const resumed = await providers.stripe.resumePaymentRequest!(a.provider_reference, env);
+    if (resumed.kind === "embedded") { log("session_resumed", { order: order.reference, session: resumed.providerReference }); return reply(resumed, true); }
   }
 
+  const bref = order.booking?.reference ?? ref;
   const created = await providers.stripe.createPaymentRequest!({
     requestId: request.id, publicReference: request.public_reference, externalReference: request.external_reference,
     amount: request.amount, currency: request.currency,                                        // trusted, from the DB
-    description: `${order.booking?.service_title ?? "Coaching session"} (${order.booking?.reference ?? request.public_reference})`,
+    description: `${order.booking?.service_title ?? "Coaching session"} (${bref})`,
     customerEmail: order.customer_contact,
+    uiMode: "embedded", hostApp: HOST_APP, merchantKey: MERCHANT_KEY,
+    // only reached when Stripe itself must redirect (bank / 3DS flows); the page then polls the booking state
     returnUrls: {
-      success: `${SITE_URL}/?booking=${order.booking?.reference ?? ref}&t=${encodeURIComponent(token)}&paid=1#book`,
-      cancel:  `${SITE_URL}/?booking=${order.booking?.reference ?? ref}&t=${encodeURIComponent(token)}&cancelled=1#book`,
+      success: `${SITE_URL}/?booking=${bref}&t=${encodeURIComponent(token)}&paid=1&session_id={CHECKOUT_SESSION_ID}#book`,
+      cancel:  `${SITE_URL}/?booking=${bref}&t=${encodeURIComponent(token)}&cancelled=1#book`,
     },
     attempt: (request.attempts ?? 0) + 1,
   }, env);
-  if (created.kind !== "redirect") { log("stripe_failed", { reason: created.kind === "unavailable" ? created.reason : created.kind }); return json(502, { ok: false, error: "payment_provider_error" }, origin, allowed); }
+  if (created.kind !== "embedded") { log("stripe_failed", { reason: created.kind === "unavailable" ? created.reason : created.kind }); return json(502, { ok: false, error: "payment_provider_error" }, origin, allowed); }
 
-  const { error: attachErr } = await attachCheckout(supabase, order.reference, created.providerReference, created.url, created.expiresAt);
+  const { error: attachErr } = await attachCheckout(supabase, order.reference, created.providerReference, null, created.expiresAt);
   if (attachErr) return rpcError(attachErr, origin, allowed);
 
-  log("session_created", { order: order.reference, request_id: request.id, session: created.providerReference, mode: rt.mode });
-  return json(200, { ok: true, url: created.url, order: order.reference }, origin, allowed);
+  log("session_created", { order: order.reference, request_id: request.id, session: created.providerReference, mode: rt.mode, ui: "embedded" });
+  return reply(created, false);
 });

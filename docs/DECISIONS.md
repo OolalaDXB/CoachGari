@@ -23,6 +23,60 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Coach Gari / BEAU PH — Stripe V0 with EMBEDDED Checkout (2026-09-09)
+
+**Decision.** The card rail keeps Stripe Checkout but in its embedded mode:
+the report page (`/r/<token>`) and the booking flow mount Stripe's Checkout
+surface inside coachgari28.com (Stripe.js `initEmbeddedCheckout` with a
+session-scoped client secret). No Stripe custom domain is bought or
+configured. The customer leaves the page only when Stripe itself must run a
+bank / 3DS redirect (`redirect_on_completion=if_required`, `return_url` on
+the canonical origin with `{CHECKOUT_SESSION_ID}`).
+
+**Catalogue authority.** Coach Gari's database stays the only commercial
+catalogue. Every Checkout Session is priced dynamically from the BEAU PH
+payment-request snapshot (`line_items[].price_data` + `product_data.name`),
+which itself comes from the pack / booking snapshot. No permanent Stripe
+Product or Price was created and none is required. Permanent Prices are
+only justified later for subscriptions / Billing / recurring or specific tax
+reporting; none applies to V0. Stripe is payment infrastructure, not a
+catalogue.
+
+**Data sent to Stripe.** Line item: name, unit amount, currency, quantity 1.
+Customer email (for the receipt) when it looks like an email. Metadata,
+identifiers only: `order_reference`, `public_reference`,
+`beau_ph_request_id`, `host_app`, `merchant_key` (mirrored on the
+PaymentIntent). `client_reference_id` = order reference. Nothing from the
+CRM, notes, consent, measurements or health data can reach Stripe: the
+adapter builds the form body from the request snapshot and whitelists the
+metadata keys (proved by `scripts/test-stripe-embedded.mjs`).
+
+**Configuration.** `PAYMENTS_MODE` (test|live) and `STRIPE_SECRET_KEY` as
+before; new `STRIPE_PUBLISHABLE_KEY` (public by design, still mode-checked:
+a `pk_` of the other mode refuses everything, a missing `pk_` disables the
+embedded surface only). `SITE_URL` defaults to `https://coachgari28.com`
+and only overrides it for dev / previews. Secrets never leave the server;
+the browser receives the publishable key and one Checkout client secret.
+
+**Authority unchanged.** Amount and currency come from the order snapshot,
+resolved from the report token or the booking's manage token. The browser's
+completion callback and the return URL are never proof: the page re-reads
+the authoritative view / booking state until the verified webhook has moved
+it. Webhook: same seven events, same signature / mode / livemode /
+idempotency / evidence handling. A still-open session is re-opened
+(`resumePaymentRequest`) rather than duplicated; an attempt carries the
+session id with a null redirect URL.
+
+**BEAU PH boundary.** The adapter knows `uiMode`, `hostApp` and
+`merchantKey` as generic inputs; nothing about packs, coaches or contacts.
+Extraction of BEAU PH into a standalone service starts only after the live
+payment + refund gate is green.
+
+**Live gate:** PAUSED, owner configuration required (see the report of
+2026-09-09 for the exact Stripe Dashboard / Supabase checklist).
+
+---
+
 ## Coach Gari — lighter page, Padel + Corporate, motion polish (2026-09-09)
 
 **Padel and Corporate** live in one compact surface, `#together` ("Work

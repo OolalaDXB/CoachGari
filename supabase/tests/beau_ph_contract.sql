@@ -467,5 +467,50 @@ begin
      then ok := ok + 1; else fail := fail + 1; log := log || ' [mode: host live webhook ' || e1::text || ' ' || e2::text || ']'; end if;
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
 
+  -- §21 EMBEDDED CHECKOUT: an attempt has a provider reference but no redirect URL; attaching never pays; the
+  -- report token scopes exactly one pack; a completed session is paid only through the verified webhook path,
+  -- once, whatever the browser says; a paid request cannot be re-initialised.
+  update beau_ph.merchants set mode = 'live' where key = 'coach_gari';
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '1-session pack #embedded', 1, 1000, 'AED', 'unpaid', 'seed') returning id into p4;
+  j := public.cg_ph_request_for_pack(p4, 'stripe', '{"stripe":{"configured":true,"mode":"live","embedded":true}}'::jsonb); oref4 := j -> 'order' ->> 'reference';
+  if (j -> 'request' ->> 'amount') = '1000' and (j -> 'request' ->> 'currency') = 'AED' and (j -> 'order' ->> 'gross_amount') = '1000'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [emb: amount is the pack snapshot ' || j::text || ']'; end if;
+  perform public.attach_checkout(oref4, 'cs_live_emb1', null, now() + interval '30 min');
+  if (select count(*) from beau_ph.payment_attempts a join beau_ph.payment_requests r on r.id = a.request_id
+       where r.external_reference = oref4 and a.provider_reference = 'cs_live_emb1' and a.redirect_url is null and a.status = 'open') = 1
+     and (select status from beau_ph.payment_requests where external_reference = oref4) in ('created','pending','requires_action')
+     and (select payment_status from public.session_packs where id = p4) = 'unpaid'
+     and (select status from public.orders where reference = oref4) = 'pending_payment'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [emb: attempt without redirect url, nothing paid]'; end if;
+  -- the browser clicking again (or a "completed" callback) can only open another attempt, never pay
+  perform public.attach_checkout(oref4, 'cs_live_emb2', null, now() + interval '30 min');
+  if (select count(*) from beau_ph.payment_attempts a join beau_ph.payment_requests r on r.id = a.request_id where r.external_reference = oref4 and a.status = 'open') = 1
+     and (select count(*) from beau_ph.payment_attempts a join beau_ph.payment_requests r on r.id = a.request_id where r.external_reference = oref4) = 2
+     and (select payment_status from public.session_packs where id = p4) = 'unpaid'
+     and (select count(*) from public.payments p join public.orders o on o.id = p.order_id where o.reference = oref4) = 0
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [emb: second attempt supersedes, still unpaid]'; end if;
+  -- the report token resolves to exactly its own pack; an unknown token resolves to nothing
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  tok := public.report_issue_link(p4) ->> 'token';
+  execute 'reset role';
+  if public.report_pack_id(tok) = p4 and public.report_pack_id(tok) <> p1
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [emb: token scoped to its pack]'; end if;
+  begin perform public.report_pack_id(repeat('0', 64)); fail := fail + 1; log := log || ' [emb: unknown token resolved]'; exception when sqlstate 'P0002' or sqlstate 'P0003' then ok := ok + 1; end;
+  -- completion arrives only as a verified webhook: once paid, a second event for the same session (new event id) adds nothing
+  e1 := public.process_stripe_event(jsonb_build_object('id', 'evt_emb1', 'type', 'checkout.session.completed', 'livemode', true,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_live_emb2', 'payment_status', 'paid', 'amount_total', 1000, 'currency', 'aed', 'payment_intent', 'pi_emb1', 'client_reference_id', oref4))));
+  e2 := public.process_stripe_event(jsonb_build_object('id', 'evt_emb2', 'type', 'checkout.session.completed', 'livemode', true,
+          'data', jsonb_build_object('object', jsonb_build_object('id', 'cs_live_emb2', 'payment_status', 'paid', 'amount_total', 1000, 'currency', 'aed', 'payment_intent', 'pi_emb1', 'client_reference_id', oref4))));
+  if (e1 ->> 'status') = 'processed' and (select payment_status from public.session_packs where id = p4) = 'paid'
+     and (select count(*) from public.payments p join public.orders o on o.id = p.order_id where o.reference = oref4) = 1
+     and (select count(*) from public.partner_earnings pe join public.orders o on o.id = pe.order_id where o.reference = oref4) <= 1
+     and (select status from beau_ph.payment_requests where external_reference = oref4) = 'paid'
+     then ok := ok + 1; else fail := fail + 1; log := log || ' [emb: webhook pays once ' || e1::text || ' ' || e2::text || ']'; end if;
+  -- a paid request cannot be re-initialised by the embedded client
+  begin perform public.attach_checkout(oref4, 'cs_live_emb3', null, now() + interval '30 min'); fail := fail + 1; log := log || ' [emb: attach after paid]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
+
   raise exception 'BEAU_PH_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

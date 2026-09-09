@@ -107,6 +107,12 @@ Migadu mailboxes are set up separately when the domain is connected.
   submissions per 10 minutes per hashed IP, 16 KB body cap, server-side
   validation (`name` required; `contact` must look like an email or a phone
   number). Bot submissions get `200 {ok:true}` with no id.
+- **Card payments**: Stripe **Embedded** Checkout mounted in the page (report
+  `/r/<token>` and the booking flow); dynamic `price_data` from the order
+  snapshot, no Stripe Products / Prices; only the verified webhook marks paid.
+  Config (Supabase secrets): `PAYMENTS_MODE`, `STRIPE_SECRET_KEY`,
+  `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY` (public, mode-checked),
+  `SITE_URL` (default `https://coachgari28.com`).
 - **CORS**: `https://coachgari28.com` (canonical), `https://www.coachgari28.com`,
   `https://coachgari.com`, `https://www.coachgari.com`,
   `https://coachgariv0.vercel.app` + `coachgariv0-*` branch previews,
@@ -216,9 +222,9 @@ differs from it. Oolala's Stripe account is the merchant (no Connect).
 
 Secrets (Supabase, never committed): `STRIPE_SECRET_KEY` (mode must match
 `PAYMENTS_MODE`), `STRIPE_WEBHOOK_SECRET` (`whsec_…`), `PAYMENTS_MODE`
-(`test` | `live`; set with `supabase secrets set PAYMENTS_MODE=live`), optional
-`SITE_URL` (default `https://coachgariv0.vercel.app` — keep it until
-`coachgari.com` is attached to the Vercel project). Webhook endpoint:
+(`test` | `live`; set with `supabase secrets set PAYMENTS_MODE=live`), `STRIPE_PUBLISHABLE_KEY` (`pk_…` of the same mode; public, needed for the
+embedded card form), `SITE_URL` (default `https://coachgari28.com`, the
+canonical customer origin; set it only for a preview / dev fallback). Webhook endpoint:
 `https://<project-ref>.supabase.co/functions/v1/stripe-webhook`, events
 `checkout.session.completed`, `checkout.session.expired`, `refund.created`,
 `refund.updated`, `charge.dispute.created`, `charge.dispute.updated`,

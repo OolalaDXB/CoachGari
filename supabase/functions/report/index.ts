@@ -10,11 +10,16 @@
                       country × currency × adapter readiness). The page
                       renders exactly this list — no country logic in JS.
      POST {action:"pay_card", token}
-          → {ok, url}   BEAU PH request (amount from the DB order) → Stripe
-                        Checkout via the Stripe adapter (mode = PAYMENTS_MODE;
-                        a key of another mode, or no mode, is refused) →
-                        attempt recorded. The ?paid=1 return is NEVER
-                        authoritative: only the verified webhook marks paid.
+          → {ok, ui:"embedded", client_secret, publishable_key, expires_at}
+                        BEAU PH request (amount from the DB order) → EMBEDDED
+                        Stripe Checkout Session via the Stripe adapter (mode =
+                        PAYMENTS_MODE; a key of another mode, or no mode, is
+                        refused) → attempt recorded. The page mounts Stripe's
+                        surface in place; the customer stays on coachgari28.com.
+                        A still-open session is re-used, never duplicated.
+                        Neither the browser's completion callback nor the
+                        ?paid=1 return is authoritative: only the verified
+                        webhook marks paid; the page re-reads `view` until then.
    Authorisation = the report token only (256-bit, sha256 stored, revocable,
    expiring). No JWT, no CRM/admin access. This function never marks anything
    paid — only a verified Stripe webhook (card) or an authorised operator
@@ -22,11 +27,12 @@
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { providers, runtimeMap, assertPublic } from "../../../beau-ph/core/registry.ts";
-import { reportView, requestForPack, packIdForToken, attachCheckout } from "../../../beau-ph/host-adapters/coach-gari/adapter.ts";
+import type { CreateRequestResult } from "../../../beau-ph/contracts/provider.ts";
+import { reportView, requestForPack, packIdForToken, attachCheckout, siteUrl, HOST_APP, MERCHANT_KEY } from "../../../beau-ph/host-adapters/coach-gari/adapter.ts";
 import { originAllowed, corsHeaders as cors } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 
-const SITE_URL = (Deno.env.get("SITE_URL") ?? "https://coachgariv0.vercel.app").replace(/\/$/, "");
 const env = (name: string) => Deno.env.get(name);
+const SITE_URL = siteUrl(env);   // https://coachgari28.com unless SITE_URL overrides (dev / preview only)
 
 const json = (status: number, body: unknown, origin: string | null, allowed: boolean) => new Response(JSON.stringify(body), { status, headers: cors(origin, allowed) });
 const log = (event: string, data: Record<string, unknown> = {}) => console.log(JSON.stringify({ fn: "report", event, ...data }));
@@ -50,6 +56,8 @@ Deno.serve(async (req: Request) => {
   const token = String(body.token);
   const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
   const runtime = runtimeMap(env);   // adapter readiness (secret presence + mode) — never secret values
+  // the only card surface on this page is the embedded one: without its public configuration, card is not offered at all
+  if (runtime.stripe && !runtime.stripe.embedded) runtime.stripe = { configured: false, mode: runtime.stripe.mode, reason: runtime.stripe.reason ?? "embedded checkout not configured" };
 
   if (body.action === "view") {
     const { data, error } = await reportView(supabase, token, runtime);
@@ -65,36 +73,43 @@ Deno.serve(async (req: Request) => {
 
   if (body.action === "pay_card") {
     const rt = runtime.stripe!;
-    if (!rt.configured) {
-      log("not_configured", { mode: rt.mode ?? null, reason: rt.reason ?? null });
+    if (!rt.configured || !rt.embedded) {
+      // fail closed: no mode, a key of the wrong mode, or no publishable key for the in-page surface
+      log("not_configured", { mode: rt.mode ?? null, reason: rt.reason ?? null, embedded: !!rt.embedded });
       return json(503, { ok: false, error: "payments_not_configured", mode: rt.mode ?? null, reason: rt.reason ?? null }, origin, allowed);
     }
+    // the token scopes everything: it resolves to exactly one pack, whose order carries the authoritative amount
     const { data: packId, error: rErr } = await packIdForToken(supabase, token);
     if (rErr) return rpcError(rErr, origin, allowed);
     // BEAU PH request for the pack's order: amount/currency from the DB; eligibility enforced server-side
     const { data: rp, error: oErr } = await requestForPack(supabase, packId, "stripe", runtime);
     if (oErr || !rp) return rpcError(oErr ?? { code: "P0003", message: "unavailable" }, origin, allowed, 409);
     const { request, order } = rp;
+    const reply = (c: Extract<CreateRequestResult, { kind: "embedded" }>, reused: boolean) =>
+      json(200, { ok: true, ui: "embedded", client_secret: c.clientSecret, publishable_key: c.publicConfig.publishable_key, expires_at: c.expiresAt, reused }, origin, allowed);
 
-    // reuse a still-valid attempt instead of creating a second Checkout Session
+    // re-open a still-valid attempt (same Checkout Session) instead of creating a second one
     const a = request.attempt;
-    if (a?.redirect_url && a.expires_at && Date.parse(a.expires_at) - Date.now() > 60_000) {
-      return json(200, { ok: true, url: a.redirect_url, reused: true }, origin, allowed);
+    if (a?.provider_reference && a.expires_at && Date.parse(a.expires_at) - Date.now() > 60_000) {
+      const resumed = await providers.stripe.resumePaymentRequest!(a.provider_reference, env);
+      if (resumed.kind === "embedded") { log("session_resumed", { request_id: request.id, session: resumed.providerReference }); return reply(resumed, true); }
     }
     const created = await providers.stripe.createPaymentRequest!({
       requestId: request.id, publicReference: request.public_reference, externalReference: request.external_reference,
-      amount: request.amount, currency: request.currency,
+      amount: request.amount, currency: request.currency,                       // trusted: the order snapshot, never the browser
       description: `Coach Gari coaching package (${request.public_reference})`,
       customerEmail: order.customer_contact,
-      returnUrls: { success: `${SITE_URL}/r/${token}?paid=1`, cancel: `${SITE_URL}/r/${token}?cancelled=1` },
+      uiMode: "embedded", hostApp: HOST_APP, merchantKey: MERCHANT_KEY,
+      // only reached when Stripe itself must redirect (bank / 3DS flows); the page then re-reads the authoritative state
+      returnUrls: { success: `${SITE_URL}/r/${token}?paid=1&session_id={CHECKOUT_SESSION_ID}`, cancel: `${SITE_URL}/r/${token}?cancelled=1` },
       attempt: (request.attempts ?? 0) + 1,
     }, env);
-    if (created.kind !== "redirect") { log("stripe_failed", { reason: created.kind === "unavailable" ? created.reason : created.kind }); return json(502, { ok: false, error: "payment_provider_error" }, origin, allowed); }
+    if (created.kind !== "embedded") { log("stripe_failed", { reason: created.kind === "unavailable" ? created.reason : created.kind }); return json(502, { ok: false, error: "payment_provider_error" }, origin, allowed); }
 
-    const { error: aErr } = await attachCheckout(supabase, order.reference, created.providerReference, created.url, created.expiresAt);
+    const { error: aErr } = await attachCheckout(supabase, order.reference, created.providerReference, null, created.expiresAt);
     if (aErr) return rpcError(aErr, origin, allowed, 409);
-    log("session_created", { status: "ok", request_id: request.id, public_reference: request.public_reference, session: created.providerReference, mode: rt.mode });
-    return json(200, { ok: true, url: created.url }, origin, allowed);
+    log("session_created", { status: "ok", request_id: request.id, public_reference: request.public_reference, session: created.providerReference, mode: rt.mode, ui: "embedded" });
+    return reply(created, false);
   }
 
   return json(400, { ok: false, error: "validation", fields: ["action"] }, origin, allowed);

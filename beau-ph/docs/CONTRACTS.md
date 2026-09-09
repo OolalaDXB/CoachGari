@@ -9,7 +9,7 @@ One generic contract for every rail. Not every provider implements every capabil
 | `capabilities()` | kind, confirmation, readiness, countries, currencies, secrets needed | ✔ | ✔ | ✔ | ✔ (readiness `not_configured`) | ✔ (readiness `placeholder`) |
 | `runtime(env)` | deployment readiness: **presence** of secrets + mode — never values | ✔ (test key ⇒ configured; live key ⇒ refused) | ✔ (always, no credentials) | ✔ | ✔ (always `configured:false`) | ✔ (always `configured:false`) |
 | `eligibility()` | adapter-side extra rule (DB matrix stays the authority) | – | ✔ (AED only) | – | – | – |
-| `createPaymentRequest()` | online: redirect · manual: instructions | ✔ redirect (Checkout Session) | ✔ instructions | ✔ instructions | `unavailable` | `unavailable` |
+| `createPaymentRequest()` | online: embedded (client secret) or redirect · manual: instructions | ✔ embedded Checkout Session (`ui_mode=embedded`, dynamic `price_data`; hosted redirect still supported) | ✔ instructions | ✔ instructions | `unavailable` | `unavailable` |
 | `getStatus()` | poll the provider | ✔ | – | – | – | – |
 | `cancel()` | cancel/expire the provider-side attempt | ✔ | – | – | – | – |
 | `verifyWebhook()` | signature verification — only verified events reach the core | ✔ (Stripe scheme, raw body, 300 s, live-mode refused) | – | – | `ok:false provider_not_configured` | `ok:false provider_placeholder` |

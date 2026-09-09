@@ -14,6 +14,13 @@ import type { ProviderKey, RuntimeMap } from "../../contracts/provider.ts";
 import type { EligibleMethod, PaymentRequest } from "../../contracts/host.ts";
 
 export const MERCHANT_KEY = "coach_gari";
+export const HOST_APP = "coach_gari";
+
+/** Canonical customer origin. SITE_URL may override (a preview / dev fallback); production is the apex domain. */
+export const CANONICAL_SITE_URL = "https://coachgari28.com";
+export function siteUrl(env: (name: string) => string | undefined): string {
+  return (env("SITE_URL") ?? CANONICAL_SITE_URL).replace(/\/$/, "");
+}
 
 // deno-lint-ignore no-explicit-any
 type Rpc = { rpc: (fn: string, args?: Record<string, unknown>) => PromiseLike<{ data: any; error: { code?: string; message?: string } | null }> };
@@ -54,7 +61,7 @@ export async function requestForBooking(sb: Rpc, reference: string, manageToken:
 }
 
 /** Record the Checkout Session on the order and as a BEAU PH attempt (also aligns the booking hold). */
-export async function attachCheckout(sb: Rpc, orderReference: string, sessionId: string, url: string, expiresAt: string) {
+export async function attachCheckout(sb: Rpc, orderReference: string, sessionId: string, url: string | null, expiresAt: string) {
   return await sb.rpc("attach_checkout", { p_order_reference: orderReference, p_session_id: sessionId, p_url: url, p_expires_at: expiresAt });
 }
 

@@ -1,9 +1,18 @@
 /* =============================================================
    BEAU PH provider — Stripe (online, webhook-confirmed)
 
-   createPaymentRequest → hosted Checkout Session (redirect). The amount and
-   currency come from the BEAU PH request (i.e. the host's order); the payer
-   never supplies them.
+   createPaymentRequest → Checkout Session. uiMode "embedded" (default for
+   the Coach Gari customer surfaces) creates an `ui_mode=embedded` session
+   whose client secret the host page mounts with Stripe.js, so the payer
+   stays on the host domain; `redirect_on_completion=if_required` +
+   `return_url` cover the rare bank/3DS flows Stripe must redirect for.
+   uiMode "hosted" keeps the classic redirect session. Either way the
+   amount, currency and line item come from the BEAU PH request (i.e. the
+   host's order) as dynamic `price_data` + `product_data`: the host catalogue
+   stays authoritative and no Stripe Product/Price is required. Metadata
+   carries reconciliation identifiers only, never personal data.
+   resumePaymentRequest → re-open a still-open embedded session (same
+   Checkout Session, fresh client secret fetch) instead of creating another.
 
    PAYMENT MODE GATE (replaces CHECK-LICENCE-001's categorical live refusal):
      PAYMENTS_MODE=test  → sk_test_ allowed, sk_live_ refused
@@ -19,7 +28,9 @@
    livemode does not match the merchant's mode.
    enrich → adds the Stripe fee / charge / balance transaction as evidence
    before the DB normalizer (beau_ph.normalize_stripe_event) runs.
-   Secrets: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET; config: PAYMENTS_MODE.
+   Secrets: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET; config: PAYMENTS_MODE,
+   STRIPE_PUBLISHABLE_KEY (public by design, still mode-checked: a pk_ of the
+   wrong mode refuses; missing pk_ disables the embedded surface only).
    ============================================================= */
 import type { CreateRequestInput, CreateRequestResult, EnvReader, ProviderAdapter, ProviderCapabilities, RuntimeReadiness, VerifiedEvent } from "../../contracts/provider.ts";
 import { verifyStripeSignature } from "./signature.js";
@@ -36,6 +47,46 @@ function keyMode(key: string): "test" | "live" | null {
   if (key.startsWith("sk_test_") || key.startsWith("rk_test_")) return "test";
   if (key.startsWith("sk_live_") || key.startsWith("rk_live_")) return "live";
   return null;
+}
+function publishableMode(key: string): "test" | "live" | null {
+  if (key.startsWith("pk_test_")) return "test";
+  if (key.startsWith("pk_live_")) return "live";
+  return null;
+}
+
+/** Reconciliation-only metadata: identifiers, never names, contacts or notes. */
+const METADATA_KEYS = ["order_reference", "public_reference", "beau_ph_request_id", "host_app", "merchant_key"] as const;
+function metadata(input: CreateRequestInput): Record<string, string> {
+  const m: Record<string, string> = {
+    order_reference: input.externalReference, public_reference: input.publicReference, beau_ph_request_id: input.requestId,
+  };
+  if (input.hostApp) m.host_app = input.hostApp;
+  if (input.merchantKey) m.merchant_key = input.merchantKey;
+  for (const k of Object.keys(m)) if (!(METADATA_KEYS as readonly string[]).includes(k)) delete m[k];
+  return m;
+}
+
+/** The exact form body sent to POST /v1/checkout/sessions (exported so tests can assert it without a network). */
+export function checkoutSessionParams(input: CreateRequestInput, expiresAt: number): URLSearchParams {
+  const params = new URLSearchParams();
+  params.set("mode", "payment");
+  params.set("client_reference_id", input.externalReference);
+  params.set("line_items[0][quantity]", "1");
+  params.set("line_items[0][price_data][currency]", input.currency.toLowerCase());
+  params.set("line_items[0][price_data][unit_amount]", String(input.amount));            // trusted: from the BEAU PH request
+  params.set("line_items[0][price_data][product_data][name]", input.description);
+  for (const [k, v] of Object.entries(metadata(input))) { params.set(`metadata[${k}]`, v); params.set(`payment_intent_data[metadata][${k}]`, v); }
+  params.set("expires_at", String(expiresAt));
+  if (input.uiMode === "embedded") {
+    params.set("ui_mode", "embedded");
+    params.set("redirect_on_completion", "if_required");     // stay in-page; redirect only when a bank / 3DS flow demands it
+    params.set("return_url", input.returnUrls.success);
+  } else {
+    params.set("success_url", input.returnUrls.success);
+    params.set("cancel_url", input.returnUrls.cancel);
+  }
+  if (input.customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(input.customerEmail)) params.set("customer_email", input.customerEmail);
+  return params;
 }
 
 export const stripe: ProviderAdapter = {
@@ -62,42 +113,48 @@ export const stripe: ProviderAdapter = {
     const km = keyMode(key);
     if (!km) return { configured: false, mode, reason: "unrecognised key format" };
     if (km !== mode) return { configured: false, mode, reason: "key_mode_mismatch" };   // the key's mode ≠ PAYMENTS_MODE
-    return { configured: true, mode };
+    const pk = env("STRIPE_PUBLISHABLE_KEY") ?? "";
+    if (pk && publishableMode(pk) !== mode) return { configured: false, mode, reason: "publishable_key_mode_mismatch" };
+    return pk ? { configured: true, mode, embedded: true } : { configured: true, mode, embedded: false, reason: "STRIPE_PUBLISHABLE_KEY missing" };
   },
 
   async createPaymentRequest(input: CreateRequestInput, env: EnvReader): Promise<CreateRequestResult> {
     const rt = stripe.runtime(env);
     if (!rt.configured) return { kind: "unavailable", reason: rt.reason ?? "not configured" };
     const key = env("STRIPE_SECRET_KEY")!;
+    const embedded = input.uiMode === "embedded";
+    if (embedded && !rt.embedded) return { kind: "unavailable", reason: rt.reason ?? "embedded checkout not configured" };
     const expiresAt = Math.floor(Date.now() / 1000) + (input.expiresInSeconds ?? DEFAULT_EXPIRES_S);
-    const params = new URLSearchParams();
-    params.set("mode", "payment");
-    params.set("client_reference_id", input.externalReference);
-    params.set("line_items[0][quantity]", "1");
-    params.set("line_items[0][price_data][currency]", input.currency.toLowerCase());
-    params.set("line_items[0][price_data][unit_amount]", String(input.amount));            // trusted: from the BEAU PH request
-    params.set("line_items[0][price_data][product_data][name]", input.description);
-    params.set("metadata[order_reference]", input.externalReference);
-    params.set("metadata[public_reference]", input.publicReference);
-    params.set("metadata[beau_ph_request_id]", input.requestId);
-    params.set("payment_intent_data[metadata][order_reference]", input.externalReference);
-    params.set("payment_intent_data[metadata][beau_ph_request_id]", input.requestId);
-    params.set("expires_at", String(expiresAt));
-    params.set("success_url", input.returnUrls.success);
-    params.set("cancel_url", input.returnUrls.cancel);
-    if (input.customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(input.customerEmail)) params.set("customer_email", input.customerEmail);
+    const params = checkoutSessionParams(input, expiresAt);
 
     const res = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/x-www-form-urlencoded",
-                 "Idempotency-Key": `${input.externalReference}:${input.attempt}` },
+                 "Idempotency-Key": `${input.externalReference}:${input.attempt}:${embedded ? "embedded" : "hosted"}` },
       body: params.toString(),
     });
     const session = await res.json().catch(() => null);
-    if (!res.ok || !session?.url || !session?.id) {
-      return { kind: "unavailable", reason: `stripe ${res.status} ${session?.error?.type ?? ""}`.trim() };
+    if (!res.ok || !session?.id) return { kind: "unavailable", reason: `stripe ${res.status} ${session?.error?.type ?? ""}`.trim() };
+    const expiresIso = new Date(expiresAt * 1000).toISOString();
+    if (embedded) {
+      if (typeof session.client_secret !== "string") return { kind: "unavailable", reason: "stripe embedded session without client_secret" };
+      return { kind: "embedded", providerReference: session.id, clientSecret: session.client_secret, expiresAt: expiresIso,
+               publicConfig: { publishable_key: env("STRIPE_PUBLISHABLE_KEY")! } };
     }
-    return { kind: "redirect", providerReference: session.id, url: session.url, expiresAt: new Date(expiresAt * 1000).toISOString() };
+    if (!session.url) return { kind: "unavailable", reason: "stripe hosted session without url" };
+    return { kind: "redirect", providerReference: session.id, url: session.url, expiresAt: expiresIso };
+  },
+
+  async resumePaymentRequest(providerReference: string, env: EnvReader): Promise<CreateRequestResult> {
+    const rt = stripe.runtime(env);
+    if (!rt.configured || !rt.embedded) return { kind: "unavailable", reason: rt.reason ?? "not configured" };
+    const key = env("STRIPE_SECRET_KEY")!;
+    const r = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(providerReference)}`, { headers: { Authorization: `Bearer ${key}` } });
+    const s = await r.json().catch(() => null);
+    if (!r.ok || !s?.id) return { kind: "unavailable", reason: `stripe ${r.status}` };
+    if (s.status !== "open" || s.ui_mode !== "embedded" || typeof s.client_secret !== "string") return { kind: "unavailable", reason: `session ${s.status ?? "unknown"}` };
+    const exp = typeof s.expires_at === "number" ? new Date(s.expires_at * 1000).toISOString() : new Date(Date.now() + DEFAULT_EXPIRES_S * 1000).toISOString();
+    return { kind: "embedded", providerReference: s.id, clientSecret: s.client_secret, expiresAt: exp, publicConfig: { publishable_key: env("STRIPE_PUBLISHABLE_KEY")! } };
   },
 
   async getStatus(providerReference: string, env: EnvReader) {

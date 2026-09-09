@@ -1,7 +1,7 @@
 /* CG-003 — Stripe TEST-mode round trip from a laptop.
 
    Usage:
-     node scripts/test-checkout.mjs            # creates a hold + Checkout session, prints the URL
+     node scripts/test-checkout.mjs            # creates a hold + EMBEDDED Checkout session (client secret, no hosted URL)
      node scripts/test-checkout.mjs --wait     # …then polls until the booking is confirmed by the webhook
 
    Requires the owner-side secrets on Supabase: STRIPE_SECRET_KEY (sk_test_…),
@@ -46,13 +46,13 @@ console.log(`PASS  hold ${b.reference} at ${b.start_at} (${b.session_timezone}) 
 // forged amount fields must be ignored
 const co = await j(await fetch(CHECKOUT, { method: 'POST', headers: H, body: JSON.stringify({ ref: b.reference, token: b.manage_token, amount: 1, gross_amount: 1, currency: 'EUR' }) }));
 if (co.status === 503) { console.log(`INFO  checkout not configured yet (${co.body?.error}). Owner action: set STRIPE_SECRET_KEY (sk_test_…) on Supabase.`); process.exit(0); }
-if (co.status !== 200 || !co.body?.url) fail(`checkout ${co.status} ${JSON.stringify(co.body)}`);
+if (co.status !== 200 || co.body?.ui !== 'embedded' || !/^cs_(test|live)_/.test(co.body?.client_secret || '')) fail(`checkout ${co.status} ${JSON.stringify(co.body)}`);
 console.log(`PASS  Checkout session created for order ${co.body.order}`);
 
 const st = await j(await fetch(`${BOOKING}?action=state&ref=${b.reference}&token=${b.manage_token}`, { headers: H }));
 if (st.body?.booking?.order?.gross_amount !== svc.price_amount) fail(`order amount ${st.body?.booking?.order?.gross_amount} ≠ service price ${svc.price_amount}`);
 console.log(`PASS  order amount is the service price (${svc.price_amount} ${svc.currency}), forged fields ignored; booking is ${st.body.booking.status}`);
-console.log(`\nPay here with 4242 4242 4242 4242:\n${co.body.url}\n`);
+console.log(`\nEmbedded Checkout Session created (${co.body.client_secret.split('_secret_')[0]}). Pay in the page: open the site, book the same slot flow, or use the report page; card 4242 4242 4242 4242.\n`);
 
 if (wait) {
   process.stdout.write('Waiting for the webhook to confirm');

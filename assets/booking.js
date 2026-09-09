@@ -228,22 +228,51 @@ function init(){
     stepDone.appendChild(pay);
   }
 
+  // Stripe.js is loaded only when someone actually pays (never on page load).
+  function loadStripeJs(){
+    return new Promise(function(resolve, reject){
+      if (window.Stripe) return resolve(window.Stripe);
+      var s = document.createElement('script'); s.src = 'https://js.stripe.com/v3/'; s.async = true;
+      s.onload = function(){ window.Stripe ? resolve(window.Stripe) : reject(new Error('stripe_js')); };
+      s.onerror = function(){ reject(new Error('stripe_js')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  var embedded = null;   // the mounted Stripe Embedded Checkout, if any
+  function closeEmbedded(){ if (embedded) { try { embedded.destroy(); } catch (e) {} embedded = null; } var m = stepDone.querySelector('.bk-checkout'); if (m) m.remove(); }
+
+  // Embedded Checkout: the card form is mounted right here, under the held time.
+  // Completing it is NOT proof of payment: pollState() reads the server state,
+  // which only the verified Stripe webhook can move to "confirmed".
   function startCheckout(b, btn){
     if (!CONFIG.CHECKOUT_ENDPOINT) { say('Payment is not switched on yet. Coach Gari will confirm with you directly.', 'err'); return; }
-    btn.disabled = true; say('Taking you to secure payment…');
+    btn.disabled = true; say('Preparing secure payment…');
     fetch(CONFIG.CHECKOUT_ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ref: b.reference, token: b.manage_token }) })
       .then(function(r){ return r.json().then(function(j){ return { status: r.status, body: j }; }); })
       .then(function(res){
-        if (res.status === 200 && res.body.ok && res.body.url) { window.location.href = res.body.url; return; }
         if (res.status === 409) { say('This hold has expired. Pick a time again.', 'err'); return; }
-        throw new Error('status ' + res.status);
+        if (!(res.status === 200 && res.body.ok && res.body.client_secret && res.body.publishable_key)) throw new Error('status ' + res.status);
+        return loadStripeJs().then(function(Stripe){
+          var stripe = Stripe(res.body.publishable_key);
+          return stripe.initEmbeddedCheckout({ clientSecret: res.body.client_secret, onComplete: function(){ closeEmbedded(); pollState(b.reference, b.manage_token, true); } });
+        }).then(function(instance){
+          closeEmbedded(); embedded = instance;
+          var box = el('div', { class: 'bk-checkout' });
+          var mount = el('div', { class: 'bk-checkout-mount' });
+          var cancel = el('button', { type: 'button', class: 'bk-checkout-cancel', text: 'Cancel card payment' });
+          cancel.addEventListener('click', function(){ closeEmbedded(); btn.hidden = false; btn.disabled = false; say(''); });
+          box.appendChild(mount); box.appendChild(cancel); stepDone.appendChild(box);
+          instance.mount(mount); btn.hidden = true; say('');
+        });
       })
-      .catch(function(){ say('Could not start payment. Try again, or message on WhatsApp.', 'err'); btn.disabled = false; });
+      .catch(function(){ closeEmbedded(); say('Could not start payment. Try again, or message on WhatsApp.', 'err'); btn.disabled = false; btn.hidden = false; });
   }
 
-  // After Stripe returns: the redirect is never proof. Poll the server state.
-  function pollState(ref, token){
+  // After the card form completes (or Stripe returns from a bank redirect): never proof. Poll the server state.
+  function pollState(ref, token, paidHint){
+    var paid = paidHint || q.get('paid') === '1';
     var tries = 0;
     stepDone.innerHTML = '';
     stepDone.appendChild(el('h4', { text: 'Confirming your session…' }));
@@ -262,7 +291,7 @@ function init(){
         }
         if (b.status === 'cancelled' || b.status === 'expired') { line.textContent = 'This booking is ' + b.status + '. Pick a time again if you still want it.'; return; }
         // Came back without paying (cancel_url): the hold is still live — offer payment again.
-        if (q.get('paid') !== '1' && (b.status === 'hold' || b.status === 'pending_payment')) {
+        if (!paid && (b.status === 'hold' || b.status === 'pending_payment')) {
           stepDone.innerHTML = '';
           stepDone.appendChild(el('h4', { text: 'Your time is still held: ' + b.reference }));
           stepDone.appendChild(el('p', { class: 'bk-note', text: 'Payment wasn’t completed. Your time stays held until ' + fmtTime(b.hold_expires_at, tz) + '.' }));

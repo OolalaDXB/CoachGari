@@ -78,6 +78,8 @@ export interface RuntimeReadiness {
   configured: boolean;
   mode?: Mode;
   reason?: string;
+  /** Online providers with an in-page (embedded) checkout: true when the public client configuration is present and mode-consistent. */
+  embedded?: boolean;
 }
 export type RuntimeMap = Partial<Record<ProviderKey, RuntimeReadiness>>;
 
@@ -104,10 +106,17 @@ export interface CreateRequestInput {
   capability?: Capability;
   platform?: Platform | null;
   initiatedBy?: Initiator;
+  /** "embedded" keeps the payer inside the host page (provider surface mounted in-page); "hosted" redirects to the provider. Default hosted. */
+  uiMode?: "hosted" | "embedded";
+  /** Reconciliation identifiers only (no personal data): the host application and merchant key, copied into provider metadata. */
+  hostApp?: string;
+  merchantKey?: string;
 }
 
 export type CreateRequestResult =
   | { kind: "redirect"; providerReference: string; url: string; expiresAt: string }
+  /** In-page checkout: the browser mounts the provider surface with `clientSecret` (scoped to this one provider session) + `publicConfig` (publishable, non-secret values only). */
+  | { kind: "embedded"; providerReference: string; clientSecret: string; expiresAt: string; publicConfig: Record<string, string> }
   | { kind: "instructions"; instructions: Record<string, unknown> }
   | { kind: "unavailable"; reason: string };
 
@@ -129,6 +138,8 @@ export interface ProviderAdapter {
   eligibility?(input: EligibilityInput, runtime: RuntimeReadiness): EligibilityResult;
   /** Online rails: create the provider-side payment (redirect). Manual / handoff rails: describe instructions. */
   createPaymentRequest?(input: CreateRequestInput, env: EnvReader): Promise<CreateRequestResult>;
+  /** Embedded rails: re-open a still-valid provider session (same reference) instead of creating a second one. `unavailable` when it is no longer open. */
+  resumePaymentRequest?(providerReference: string, env: EnvReader): Promise<CreateRequestResult>;
   getStatus?(providerReference: string, env: EnvReader): Promise<StatusResult>;
   cancel?(providerReference: string, env: EnvReader): Promise<{ ok: boolean; reason?: string }>;
   /** Verify a provider callback. Only a verified event may reach beau_ph.ingest_provider_event. */
