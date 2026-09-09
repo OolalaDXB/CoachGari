@@ -243,7 +243,35 @@ node scripts/test-admin-workspace.mjs                                  # offline
 node scripts/test-booking-picker.mjs                                   # offline (Playwright, mocked booking API): picker hierarchy, availability timing, error/retry, 390 px, 40 checks
 psql "$DATABASE_URL" -f supabase/tests/beau_ph_contract.sql            # BEAU PH contract incl. rail configuration + FX, rolls back
 psql "$DATABASE_URL" -f supabase/tests/cg013_support.sql               # Support Coach Gari: server-side amount / rail authority, webhook-only paid, no side effects
+psql "$DATABASE_URL" -f supabase/tests/cg014_email.sql                 # email outbox: one row per event, replay-safe, send failure never touches booking / payment, 47 checks
+node scripts/test-email.mjs                                            # offline: Resend module (config presence, templates, Idempotency-Key, retry, no key in logs), 34 checks
+node scripts/test-anchors.mjs                                          # offline (Playwright): header / footer anchors, aliases, header-aware landing, reduced motion, 33 checks
 ```
+
+### Transactional email (Resend)
+
+One outbox, `public.email_events`, queued by the authoritative state change and
+drained by the Edge Functions (`supabase/functions/_shared/email.ts`):
+
+| Event | Queued by | Kind → recipient |
+|---|---|---|
+| booking paid (Stripe webhook, BEAU PH reconciled) | `process_stripe_event` → `email_on_order_paid` | `booking_confirmed` → customer · `payment_received` → letsgo@ |
+| pack paid (Stripe, or Aani / bank / cash / PSP receipt) | `process_stripe_event` / `payment_record_manual` | `payment_confirmed` → client (CRM email) · `payment_received` → letsgo@ |
+| Support Coach Gari paid | `process_stripe_event` | `support_thanks` → the email Stripe Checkout captured · `payment_received` → letsgo@ |
+| confirmed booking cancelled (customer or coach) | `cancel_booking` / `ops_set_booking_status` | `booking_cancelled` → customer |
+| the session of a confirmed booking moved in Schedule | trigger `sync_booking_from_session` | `reschedule` → customer (booking follows the session) |
+| enquiry stored | `contact` function → `email_on_enquiry` | `lead_notification` → letsgo@ (Reply-To the customer) · `enquiry_received` → customer |
+
+Every row carries a `dedupe_key` (`on conflict do nothing`), so a replayed
+webhook or a re-run never queues twice; the same key is Resend's
+`Idempotency-Key`. `stripe-webhook`, `contact` and `booking` drain their own
+rows right away; `email-outbox` (called every two minutes by pg_cron → pg_net
+with a database-issued key, `public.outbox_keys`) drains the rest and retries
+failures with exponential backoff (6 attempts → `failed`, retryable from
+`email_outbox_retry`). A send failure is only ever a row state. Delivery state:
+`status`, `attempts`, `provider_message_id`, `error` — no address in the
+operator view (`email_outbox_status`). Templates live in the shared module
+(`emails/` mirrors them for review).
 
 Signature verification is Stripe's own scheme, implemented in
 `supabase/functions/stripe-webhook/signature.js` and imported by the Edge
@@ -476,13 +504,14 @@ Project: `acrjrlgeeyseyolmofuq` (eu-central-1).
    injects automatically — do not set or copy them anywhere.
 3. **Secrets** — set by the operator, never committed:
    ```
-   supabase secrets set RESEND_API_KEY=re_...          # required for notifications
-   supabase secrets set LEAD_TO_EMAIL=letsgo@coachgari.com          # optional (default)
-   supabase secrets set MAIL_FROM="Coach Gari <yoursession@coachgari.com>"  # optional (default)
-   supabase secrets set IP_HASH_SALT=<random string>   # optional; changes the IP hash
+   supabase secrets set RESEND_API_KEY=re_...                                   # transactional email (Resend), server-side only
+   supabase secrets set EMAIL_FROM="Coach Gari <yoursession@coachgari28.com>"   # transactional sender
+   supabase secrets set EMAIL_REPLY_TO=letsgo@coachgari28.com                   # Reply-To on every customer email
+   supabase secrets set IP_HASH_SALT=<random string>                            # optional; changes the IP hash
    ```
-   Without `RESEND_API_KEY` the lead is still stored and the function logs
-   `notify_skipped`. Nothing breaks.
+   Without `RESEND_API_KEY` the lead is still stored, its emails wait in the
+   outbox (`public.email_events`) and the function logs `email_skipped`.
+   Nothing breaks. See "Transactional email" below.
 4. `config.js` → `FORM_ENDPOINT` = `https://<project-ref>.supabase.co/functions/v1/contact`.
 
 ## Deploy (Vercel, git-connected)

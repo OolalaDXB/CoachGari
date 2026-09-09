@@ -15,11 +15,11 @@
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
+import { drainOutbox } from "../_shared/email.ts";                  // lead notification to letsgo@ + acknowledgement to the customer
 
 /* ---- configuration (not secrets) -------------------------- */
-const LEAD_TO   = Deno.env.get("LEAD_TO_EMAIL") ?? "letsgo@coachgari.com";
-const MAIL_FROM = Deno.env.get("MAIL_FROM") ?? "Coach Gari <yoursession@coachgari.com>";
 const IP_SALT   = Deno.env.get("IP_HASH_SALT") ?? "coachgari-cg001";
+const env = (name: string) => Deno.env.get(name);
 
 const RATE_WINDOW_MIN = 10;   // per IP hash
 const RATE_MAX        = 5;    // submissions per window
@@ -83,73 +83,6 @@ function clientIp(req: Request): string {
 
 function log(event: string, data: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ fn: "contact", event, ...data }));
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
-}
-
-/* ---- Resend notification (optional) ----------------------- */
-type Row = {
-  id: string; name: string; contact: string; country: string | null; city: string | null;
-  location_raw: string | null; interest: string | null; message: string | null;
-  utm_source: string | null; utm_medium: string | null; utm_campaign: string | null;
-  referrer: string | null; landing_page: string | null; page: string | null; created_at: string;
-};
-
-async function notifyLead(row: Row): Promise<boolean> {
-  const key = Deno.env.get("RESEND_API_KEY");
-  if (!key) { log("notify_skipped", { id: row.id, reason: "RESEND_API_KEY not configured" }); return false; }
-
-  const where = [row.city, row.country].filter(Boolean).join(", ") || row.location_raw || "—";
-  const attribution = [
-    row.utm_source && `source: ${row.utm_source}`,
-    row.utm_medium && `medium: ${row.utm_medium}`,
-    row.utm_campaign && `campaign: ${row.utm_campaign}`,
-    row.referrer && `referrer: ${row.referrer}`,
-    row.landing_page && `landing: ${row.landing_page}`,
-  ].filter(Boolean).join(" · ") || "direct";
-
-  const subject = `New enquiry — ${row.interest ?? "General"} — ${row.name}`;
-  const lines = [
-    `Name: ${row.name}`,
-    `Contact: ${row.contact}`,
-    `Where: ${where}`,
-    `Interest: ${row.interest ?? "—"}`,
-    ``,
-    row.message ?? "(no message)",
-    ``,
-    `Attribution: ${attribution}`,
-    `Submitted from: ${row.page ?? "—"} at ${row.created_at}`,
-    `Record: ${row.id}`,
-  ];
-  const html = `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B">
-    <p style="margin:0 0 14px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6C6C78">New enquiry · coachgari.com</p>
-    <p><b>${escapeHtml(row.name)}</b><br>${escapeHtml(row.contact)}<br>${escapeHtml(where)}</p>
-    <p><b>Interest:</b> ${escapeHtml(row.interest ?? "—")}</p>
-    <p style="white-space:pre-wrap;border-left:3px solid #1540E8;padding-left:12px">${escapeHtml(row.message ?? "(no message)")}</p>
-    <p style="font-size:13px;color:#6C6C78">Attribution: ${escapeHtml(attribution)}<br>From ${escapeHtml(row.page ?? "—")} · ${escapeHtml(row.created_at)}<br>Record ${row.id}</p>
-  </div>`;
-
-  const payload: Record<string, unknown> = {
-    from: MAIL_FROM, to: [LEAD_TO], subject, text: lines.join("\n"), html,
-    headers: { "X-Entity-Ref-ID": row.id },
-  };
-  if (isEmail(row.contact)) payload.reply_to = row.contact;
-
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) { log("notify_failed", { id: row.id, status: res.status }); return false; }
-    log("notify_sent", { id: row.id });
-    return true;
-  } catch (e) {
-    log("notify_error", { id: row.id, error: (e as Error).message });
-    return false;
-  }
 }
 
 /* ---- handler ---------------------------------------------- */
@@ -259,7 +192,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: inserted, error: insErr } = await supabase
     .from("contacts").insert(row)
-    .select("id, name, contact, country, city, location_raw, interest, message, utm_source, utm_medium, utm_campaign, referrer, landing_page, page, created_at")
+    .select("id, interest, utm_source")
     .single();
 
   if (insErr) {
@@ -275,9 +208,17 @@ Deno.serve(async (req: Request) => {
 
   log("created", { id: inserted.id, interest: inserted.interest, has_utm: !!inserted.utm_source });
 
-  const notified = await notifyLead(inserted as Row);
-  if (notified) {
-    await supabase.from("contacts").update({ notified_at: new Date().toISOString() }).eq("id", inserted.id);
+  // Outbox: the database queues lead_notification (owner) + enquiry_received (customer); this request sends them now.
+  // notified_at records that the owner's copy left; a send failure stays a retryable outbox row and never fails the enquiry.
+  let notified = false;
+  const { error: qErr } = await supabase.rpc("email_on_enquiry", { p_contact_id: inserted.id });
+  if (qErr) log("email_queue_failed", { id: inserted.id, code: qErr.code });
+  else {
+    const r = await drainOutbox(supabase, env, { contact_id: inserted.id }, (event, data) => log(event, { id: inserted.id, ...data }));
+    const { data: lead } = await supabase.from("email_events").select("status").eq("contact_id", inserted.id).eq("kind", "lead_notification").maybeSingle();
+    notified = lead?.status === "sent";
+    if (notified) await supabase.from("contacts").update({ notified_at: new Date().toISOString() }).eq("id", inserted.id);
+    log(notified ? "notify_sent" : "notify_pending", { id: inserted.id, ...r });
   }
 
   // Server-issued upload credential (CG-006): 256-bit, 30 minutes, tied to this enquiry only.

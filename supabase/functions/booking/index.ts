@@ -20,6 +20,7 @@
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
+import { drainOutbox } from "../_shared/email.ts";                  // cancellation email (queued by cancel_booking for a confirmed booking)
 
 const IP_SALT = Deno.env.get("IP_HASH_SALT") ?? "coachgari-cg001";
 const HOLD_RATE_WINDOW_MIN = 10;
@@ -219,6 +220,11 @@ Deno.serve(async (req: Request) => {
     const { data, error } = await supabase.rpc("cancel_booking", { p_reference: ref, p_manage_token: token, p_reason: reason });
     if (error) return rpcError(error, origin, allowed);
     log("cancelled", { reference: ref });
+    // the cancellation email (queued only when the booking was confirmed) leaves now; a send failure is a retryable outbox row
+    try {
+      const { data: b } = await supabase.from("bookings").select("id").eq("reference", ref.toUpperCase()).maybeSingle();
+      if (b?.id) await drainOutbox(supabase, (n) => Deno.env.get(n), { booking_id: b.id, limit: 5 }, log);
+    } catch (e) { log("emails_error", { message: (e as Error).message.slice(0, 120) }); }
     return json(200, { ok: true, booking: data }, origin, allowed);
   }
 

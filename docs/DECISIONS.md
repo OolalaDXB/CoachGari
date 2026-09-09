@@ -23,6 +23,95 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Footer + anchors — 3 columns, Support row, normalised ids (2026-09-09)
+
+Footer: **Services** (The Programme, Online coaching, Live group sessions, The
+Conversation, Personal training, Padel) · **About & connect** (About Coach Gari,
+Contact, TikTok, Instagram) · **Next live session** (email box). "Support Coach
+Gari" sits in its own secondary row under the columns — visible, subordinate to
+the service CTAs. Removed from footer navigation: Zimbabwe & Southern Africa,
+Dubai one-to-one, Padel & corporate (they belong to the content / booking
+surfaces).
+
+Section ids normalised: `programme`, `online-coaching`, `conversation`,
+`group-sessions`, `padel`, `contact` (`about`, `book`, `top` unchanged). The old
+ids keep working as **aliases** declared once on `<body data-anchor-aliases>`:
+site.js normalises the hash in place (`/#enquiry` → `/#contact`) and the link
+checker accepts a declared alias only when its target exists.
+`#personal-training` resolves to `#book` with that family preselected in the
+picker. The Stripe return URLs (`#book`) are untouched.
+
+Scroll position: `scroll-margin-top: calc(var(--nav-h) + 20px)` on sections;
+`--nav-h` follows the real header height through a ResizeObserver (so the
+compact scrolled header and any viewport are honoured, nothing hard-coded).
+A deep link stays aligned while async sections (catalogue, picker) render, until
+the visitor scrolls. CSS smooth scrolling, history and reduced motion preserved;
+an alias landing moves focus to the section. `scripts/test-anchors.mjs` (33).
+
+---
+
+## Transactional email — Resend outbox (2026-09-09)
+
+**Shape.** One outbox, `public.email_events`, queued by the authoritative state
+change and drained by the Edge Functions through a shared module
+(`supabase/functions/_shared/email.ts`). The database decides *whether* an email
+is due; the module only renders and sends. Sender `Coach Gari
+<yoursession@coachgari28.com>` (`EMAIL_FROM`), Reply-To `letsgo@coachgari28.com`
+(`EMAIL_REPLY_TO`), key `RESEND_API_KEY` — Supabase secrets, never in the repo,
+never logged or returned.
+
+**Events wired.** Booking paid → confirmation (customer) + notice (owner);
+package paid on any rail (Stripe webhook or operator-confirmed Aani / bank /
+cash / PSP) → receipt (client's CRM email) + notice; Support Coach Gari paid →
+"Thank you for supporting Coach Gari" to the email Stripe Checkout captured
+(the order carries no identity) + notice; confirmed booking cancelled by the
+customer or the coach → cancellation (a cancelled hold sends nothing); the
+coaching session of a confirmed booking moved in Schedule → the booking follows
+and the customer gets the new details, once per actual change (trigger
+`sync_booking_from_session`; the reverse sync never fires it); enquiry → lead to
+letsgo@ with Reply-To the customer + acknowledgement to the customer.
+`reminder` / `session_link` stay unwired (no producer).
+
+**Idempotency.** Every row carries a `dedupe_key` (`order:<id>:<kind>`,
+`booking:<id>:booking_cancelled`, `booking:<id>:reschedule:<new start>`,
+`contact:<id>:<kind>`), queued `on conflict do nothing`; the old
+`unique (order_id, kind)` is dropped (it swallowed the second reschedule). The
+same key is Resend's `Idempotency-Key`. A replayed or re-delivered webhook, a
+double click or a re-run of the producer never queues or sends twice.
+
+**Failure.** Claim leases a row for two minutes (`for update skip locked`), so
+the webhook drain and the scheduled drain cannot both send it. A failed send is
+a row state — pending with exponential backoff, `failed` after six attempts,
+operator retry through `email_outbox_retry` (coach:operations) — never an
+exception in the booking / payment flow, and never a rollback of a reconciled
+payment. Delivery state kept: status, attempts, provider message id, a short
+error text. `email_outbox_status` shows counts and recent rows with masked
+addresses and no payload.
+
+**Scheduled drain.** pg_cron (`cg-email-outbox`, every two minutes) → pg_net →
+`email-outbox` function, authenticated with a 64-hex key the migration generated
+into `public.outbox_keys` (deny-all RLS; `email_outbox_authorize` is
+service_role only). No Supabase secret, nothing to paste. The same function
+answers `status`: configuration *presence* and the sending domain's state as
+Resend reports it — never a value.
+
+**Data minimisation.** The payload is the render data only: name, reference,
+service, time, timezone, duration, delivery, amount, currency, method. No notes,
+no manage token, no IP hash, no CRM content, no health data. Support rows carry
+no name and no message.
+
+**Auth email.** Supabase Auth still sends the admin magic link from the
+platform's default sender; switching it to Resend SMTP is an owner action in
+the dashboard (Authentication → SMTP settings: host `smtp.resend.com`, port
+`465`, user `resend`, password = the Resend API key, sender
+`yoursession@coachgari28.com`, name `Coach Gari`) once the domain is verified —
+not changed from code, so the current admin login cannot break.
+
+**Tests.** `supabase/tests/cg014_email.sql` (47) and `scripts/test-email.mjs`
+(34); cg003 / cg013 / cg012 / cg0025 re-run on the redefined functions.
+
+---
+
 ## Coach Gari — Support Coach Gari, Corporate CTA copy, CRM country picker (2026-09-09)
 
 **Support Coach Gari** is a generic BEAU PH payment with intent `support`

@@ -1,6 +1,6 @@
 Subject: New enquiry — {{interest}} — {{name}}
-From: Coach Gari <yoursession@coachgari.com>
-To: letsgo@coachgari.com
+From: Coach Gari <yoursession@coachgari28.com>
+To: letsgo@coachgari28.com
 Reply-To: {{contact_if_email}}
 
 Name: {{name}}
