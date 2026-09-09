@@ -23,6 +23,33 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
+## Coach Gari — lighter page, Padel + Corporate, motion polish (2026-09-09)
+
+**Padel and Corporate** live in one compact surface, `#together` ("Work
+together from anywhere"), in the slot the dark "In Dubai?" strip used to
+occupy: heading, one sentence, two editorial panels (Padel coaching /
+Coaching for teams). No price, package, duration, group size or claim was
+invented; both CTAs go to the existing enquiry form with the new "Padel
+coaching" / "Corporate session" categories preselected (free-text
+`interest`, no schema change). The programmes heading became "Four
+programmes" so "train with me" is not repeated three times on the page.
+Net page length: about +460 px desktop, +700 px mobile.
+
+**Scrolling** stays native (`scroll-behavior: smooth` for anchors). No
+Lenis or other library: the target feel is reached with a refined reveal
+easing, one staggered sequence and a calmer header, at zero dependency cost.
+Three signature treatments, nothing else animated: (A) section reveal,
+once, one block per section, `cubic-bezier(.2,.7,.2,1)`, staggered only
+inside `#together` (heading, copy, then the two panels, about 0.8 s total);
+(C) one ambient brand glow (accent tint radial) that fades in behind
+`#together`; (D) the sticky header turns compact and translucent with a
+light blur once the page has scrolled, driven by an IntersectionObserver
+sentinel rather than a scroll listener. Panel hover is a plain link hover
+(colour + 4 px arrow shift). `prefers-reduced-motion: reduce` removes every
+transition and shows all content immediately; nothing depends on motion.
+
+---
+
 ## Coach Gari — production domains added to CORS (2026-09-08)
 
 **Incident.** The public site is now served from `https://www.coachgari28.com`

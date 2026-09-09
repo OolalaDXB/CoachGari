@@ -35,6 +35,22 @@ import { CONFIG } from '/config.js';
   els.forEach(function(e){ io.observe(e); });
 })();
 
+/* ---- 1b. header state ------------------------------------- */
+/* A 1px sentinel at the top of the page; when it leaves the viewport
+   the sticky nav gets .scrolled (compact, translucent). Observer only,
+   no scroll listener, nothing to throttle.                        */
+(function header(){
+  var nav = document.querySelector('.nav');
+  if (!nav || !('IntersectionObserver' in window)) return;
+  var s = document.createElement('div');
+  s.setAttribute('aria-hidden', 'true');
+  s.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:1px;pointer-events:none;';
+  document.body.insertBefore(s, document.body.firstChild);
+  new IntersectionObserver(function(entries){
+    nav.classList.toggle('scrolled', !entries[0].isIntersecting);
+  }, { threshold: 0 }).observe(s);
+})();
+
 /* ---- 2. catalogue cards (CG-007) ----------------------------- */
 /* The programme cards render from the authoritative catalogue
    (services table, through the public booking function). Nothing
@@ -91,14 +107,7 @@ import { CONFIG } from '/config.js';
     var list = (j && j.services) || [];
     host.innerHTML = '';
     if (!list.length) { console.warn('catalogue_empty: no active, listed service'); host.appendChild(node('p', 'catalogue-wait', 'Programmes are being updated. Use the form below and Coach Gari will come back to you.')); return; }
-    list.forEach(function(s){ host.appendChild(card(s)); });
-    host.querySelectorAll('[data-preselect]').forEach(function(a){
-      a.addEventListener('click', function(){
-        var sel = document.querySelector('form[data-enquiry] select[name="interest"]');
-        if (!sel) return;
-        for (var i = 0; i < sel.options.length; i++) if (sel.options[i].text === a.dataset.preselect) { sel.selectedIndex = i; sel.dispatchEvent(new Event('change')); break; }
-      });
-    });
+    list.forEach(function(s){ host.appendChild(card(s)); });   // [data-preselect] clicks are handled once, below (categories)
   }).catch(function(e){
     console.error('catalogue_load_failed: ' + (e && e.message ? e.message : e) + ' — endpoint ' + CONFIG.BOOKING_ENDPOINT);
     host.innerHTML = '';
@@ -230,6 +239,8 @@ var CATEGORIES = {
   'Online coaching':        { hint: '', detail: 'What you train with, how much time is realistic, what you\'ve tried before.', media: false },
   'The 12-week programme':  { hint: '', detail: 'Home or gym, and what equipment you have.', media: false },
   'Live group sessions':    { hint: '', detail: 'Your timezone and the days that usually work.', media: false },
+  'Padel coaching':         { hint: '', detail: 'Your level, how often you play, and what you want to improve.', media: false },
+  'Corporate session':      { hint: '', detail: 'Roughly how many people, where, and what the session is for.', media: false },
   'A conversation':         { hint: 'No preparation needed. You can also pick a time directly in the Book section above.', detail: 'What\'s on your mind, in a line or two.', media: false },
   'Live event near me':     { hint: 'Tell Coach Gari where you are. If enough people ask for the same city, a session may happen there.', detail: 'Roughly when, how many of you, indoors or outdoors.', media: false },
   'In person in Dubai':     { hint: 'Say where in Dubai you train and when you\'re usually free.', detail: 'Your goal, your area, the days that work.', media: false }
@@ -252,6 +263,14 @@ var CATEGORIES = {
   interest.addEventListener('change', apply);
   apply();
   form.applyCategory = apply;
+  // any link carrying data-preselect="<option text>" (catalogue cards, padel / corporate panels) picks that category
+  document.addEventListener('click', function(e){
+    var a = e.target.closest('[data-preselect]');
+    if (!a) return;
+    for (var i = 0; i < interest.options.length; i++) {
+      if (interest.options[i].text === a.getAttribute('data-preselect')) { interest.selectedIndex = i; apply(); break; }
+    }
+  });
 })();
 
 /* ---- travel / waitlist CTAs -------------------------------- */

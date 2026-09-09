@@ -64,8 +64,13 @@ p{margin:0 0 1em;}
 .btn-sm{padding:12px 22px;font-size:14.5px;}
 .btn-full{width:100%;}
 
-.nav{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--line);}
-.nav-in{display:flex;align-items:center;gap:38px;height:78px;}
+.nav{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--line);
+  transition:background .35s ease,border-color .35s ease,box-shadow .35s ease;}
+.nav-in{display:flex;align-items:center;gap:38px;height:78px;transition:height .35s cubic-bezier(.2,.7,.2,1);}
+/* scrolled state (site.js toggles .scrolled from an IntersectionObserver sentinel; no scroll listener) */
+.nav.scrolled{background:rgba(255,255,255,.84);border-bottom-color:rgba(230,230,234,.75);box-shadow:0 1px 0 rgba(10,10,11,.02);
+  -webkit-backdrop-filter:saturate(1.4) blur(12px);backdrop-filter:saturate(1.4) blur(12px);}
+.nav.scrolled .nav-in{height:66px;}
 .logo{font-size:1.3rem;font-weight:800;letter-spacing:-.045em;text-decoration:none;white-space:nowrap;}
 .logo i{color:var(--accent);font-style:normal;}
 .nav-links{display:flex;gap:28px;font-size:14px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;margin-left:auto;}
@@ -148,6 +153,27 @@ p{margin:0 0 1em;}
 .strip .btn{background:#fff;color:var(--black);}
 .strip .btn:hover{background:#E9E9ED;}
 @media(max-width:640px){.strip{padding:30px 24px;}.strip .btn{width:100%;}}
+
+/* work together: padel + corporate (route C) */
+.together{position:relative;isolation:isolate;overflow:hidden;background:#fff;border-radius:26px;padding:64px 56px 48px;
+  box-shadow:0 2px 3px rgba(10,10,11,.03);}
+.together::before{content:"";position:absolute;inset:-40% -20% auto auto;width:70%;aspect-ratio:1;z-index:-1;pointer-events:none;
+  background:radial-gradient(closest-side,var(--accent-tint),rgba(233,237,253,0) 72%);
+  opacity:0;transform:translate3d(6%,4%,0);transition:opacity 1.4s ease,transform 2.2s cubic-bezier(.2,.7,.2,1);}
+.together.in::before{opacity:1;transform:none;}
+.together .sub{margin-top:18px;}
+.ways{display:grid;grid-template-columns:1fr 1fr;gap:0 64px;margin-top:40px;}
+.way{padding:30px 0 6px;border-top:1px solid var(--line);display:flex;flex-direction:column;}
+.way-eyebrow{font-size:12.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:14px;}
+.way h3{font-size:clamp(1.35rem,2vw,1.65rem);}
+.way p{font-size:15.5px;color:var(--grey-text);font-weight:500;margin:12px 0 0;max-width:46ch;}
+.way .way-cred{font-size:14px;font-weight:700;color:var(--black);margin-top:14px;}
+.way-cta{display:inline-flex;align-items:center;gap:8px;margin-top:auto;padding-top:26px;font-weight:700;font-size:15.5px;text-decoration:none;
+  color:var(--black);transition:color .2s ease;}
+.way-cta span{display:inline-block;transition:transform .25s cubic-bezier(.2,.7,.2,1);}
+.way:hover .way-cta,.way-cta:focus-visible{color:var(--accent);}
+.way:hover .way-cta span,.way-cta:focus-visible span{transform:translateX(4px);}
+@media(max-width:860px){.together{padding:40px 24px 28px;border-radius:20px;}.ways{grid-template-columns:1fr;gap:0;margin-top:28px;}.way{padding:26px 0 4px;}.way-cta{padding-top:20px;margin-bottom:22px;}}
 
 /* enquiry form (routes B & C) */
 .enquiry{background:#fff;border-radius:26px;padding:52px 48px;max-width:760px;margin:52px auto 0;
@@ -259,9 +285,21 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 
 @media(max-width:900px){.f-top{grid-template-columns:1fr 1fr;gap:32px;}}
 
-.reveal{opacity:0;transform:translateY(18px);transition:opacity .6s ease,transform .6s ease;}
+/* reveal on scroll: once, on entering the viewport (site.js). One block per section, not per paragraph. */
+.reveal{opacity:0;transform:translateY(16px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);}
 .reveal.in{opacity:1;transform:none;}
+/* staggered sequence inside one revealed block: heading, then copy, then the panels */
+.reveal-seq>*{opacity:0;transform:translateY(14px);transition:opacity .55s cubic-bezier(.2,.7,.2,1),transform .55s cubic-bezier(.2,.7,.2,1);}
+.reveal-seq.in>*{opacity:1;transform:none;}
+.reveal-seq.in>:nth-child(2){transition-delay:.06s;}
+.reveal-seq.in>:nth-child(3){transition-delay:.14s;}
+.reveal-seq>.ways{opacity:1;transform:none;transition:none;}   /* the grid itself is static; its two panels stagger in */
+.reveal-seq .way{opacity:0;transform:translateY(12px);transition:opacity .45s cubic-bezier(.2,.7,.2,1),transform .45s cubic-bezier(.2,.7,.2,1);}
+.reveal-seq.in .way{opacity:1;transform:none;transition-delay:.26s;}
+.reveal-seq.in .way:nth-child(2){transition-delay:.38s;}
 @media(prefers-reduced-motion:reduce){
   html{scroll-behavior:auto;}
-  .reveal{opacity:1;transform:none;transition:none;}
+  .reveal,.reveal-seq>*,.reveal-seq .way{opacity:1;transform:none;transition:none;}
+  .together::before{opacity:1;transform:none;transition:none;}
+  .nav,.nav-in,.way-cta span{transition:none;}
 }
