@@ -23,7 +23,7 @@ This rule drives the schema, the RLS policies and the permission model.
 
 ---
 
-## Shoot photos + Zimbabwe Bird signature (2026-09-09, awaiting the binaries)
+## Shoot photos + Zimbabwe Bird signature (2026-09-09)
 
 Three approved photos, one section each — never a gallery: the smiling cardio
 portrait is the About Coach Gari image (4:5, editorial, beside the copy on
@@ -45,10 +45,10 @@ the source allows) and a JPEG fallback to `assets/img/shoot/`, `<picture>` with
 explicit width / height, `sizes`, lazy loading (none of the three is in the
 initial viewport), no JS. The link checker now resolves every `srcset`
 candidate and refuses a `<source>` without type / srcset or a responsive
-`<img>` without dimensions or alt. The photos and the SVG were supplied in the
-conversation only, so the branch carries the integration and the pipeline;
-`main` moves once the four files land in `assets/img/source/` and the
-derivatives are built.
+`<img>` without dimensions or alt. Sources 1122×1402 (portraits) and 1448×1086
+(movement): ladders 640 / 960 and 640 / 960 / 1280; 2.1 MB of derivatives for
+6.4 MB of PNG, the SVG served as delivered (33 KB, no viewBox — sized by its
+width / height attributes).
 
 ---
 
