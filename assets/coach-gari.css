@@ -320,7 +320,8 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .oo-follow img{width:20px;height:20px;display:block;}
 .oo-follow:hover{color:var(--accent);}
 
-@media(max-width:900px){.f-top{grid-template-columns:1fr 1fr;gap:32px;}}
+@media(max-width:900px){.f-top{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px;}}
+@media(max-width:560px){.f-top{grid-template-columns:minmax(0,1fr);gap:30px;}}
 
 /* reveal on scroll: once, on entering the viewport (site.js). One block per section, not per paragraph. */
 .reveal{opacity:0;transform:translateY(16px);transition:opacity .7s cubic-bezier(.2,.7,.2,1),transform .7s cubic-bezier(.2,.7,.2,1);}
