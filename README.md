@@ -5,18 +5,40 @@ enquiry form. Two design systems, one shared config, no secrets in the repo.
 
 Sprint log and blockers: [`docs/DECISIONS.md`](docs/DECISIONS.md).
 
-**Status — CG-001 code complete / production-domain pending; CG-002 booking,
-CG-003 Stripe test payments and CG-002.5 back-office built and tested on the
-Vercel production alias + Supabase.** The open gates are `GATE-DOMAIN-001`
-(DNS, Resend domain, mailboxes, CORS tightening, re-test on `coachgari.com`),
-the Stripe test secrets and the first back-office grants — all owner actions
-listed in `docs/DECISIONS.md`.
+**Status — what the code implements.** Canonical customer origin
+`https://coachgari28.com` (`supabase/functions/_shared/cors.ts`, the `SITE_URL`
+default of every payment function); `coachgari.com` / `www` are kept in the
+CORS allowlist as the earlier / future apex, to be served as a redirect to the
+canonical host. Payments run through Stripe Embedded Checkout with the mode
+declared by `PAYMENTS_MODE` (`test` | `live`): the key's mode must match it,
+a webhook whose `livemode` differs is refused, an unset mode refuses
+everything — the code never guesses. Booking, back-office, CRM, calendar,
+reports, BEAU PH payment hub and the transactional-email outbox are built and
+covered by the suites listed below.
+
+**What only the owner can confirm** (infrastructure, not visible in this
+repo — nothing below is asserted as done):
+
+- Vercel domains: `coachgari28.com` + `www` attached to `coachgari_v0`, and
+  `coachgari.com` + `www` attached as a redirect to the canonical host.
+- The value of `PAYMENTS_MODE` and the Stripe key pair on the Supabase project
+  (secrets are write-only; the deployed function reports only
+  `{configured, mode, reason}`).
+- Resend sender domain verified, with SPF / DKIM / DMARC published; the
+  sender domain itself (see "Emails" below).
+- The mailboxes behind `letsgo@` and `yoursession@`.
+- The first back-office grants (`platform:admin` for the owner, see
+  "Back-office").
+
+The historical gates `GATE-DOMAIN-001` and `CHECK-LICENCE-001` in
+`docs/DECISIONS.md` are superseded by the above; they are kept there as the
+decision trail.
 
 ## Structure
 
 ```
 /
-├── index.html                    → the site (Route C) — served at coachgari.com/
+├── index.html                    → the site (Route C) — served at coachgari28.com/ (canonical)
 ├── p/studio-mt-4e7a/index.html   → Studio MT proposal — unlinked, noindex, public by URL
 ├── routes/
 │   ├── a/index.html              → archived Route A (noindex, still served)
@@ -38,7 +60,7 @@ listed in `docs/DECISIONS.md`.
 │   ├── test-contact.mjs          → CG-001 gate test against the deployed function
 │   ├── test-booking.mjs          → CG-002 API test incl. the capacity race
 │   ├── test-booking-picker.mjs   → booking picker: 3 families → child → availability (Playwright, offline)
-│   └── test-checkout.mjs         → CG-003 Stripe test-mode round trip
+│   └── test-checkout.mjs         → CG-003 Stripe Checkout round trip (in the project's PAYMENTS_MODE)
 ├── docs/DECISIONS.md             → decisions & documented blockers
 ├── vercel.json                   → clean URLs, redirects, security headers, noindex headers
 └── .github/workflows/ci.yml
@@ -55,7 +77,7 @@ export const CONFIG = {
   WHATSAPP: '971521365065',              // digits only → wa.me links with a pre-filled message
   FORM_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/contact',
   BOOKING_ENDPOINT: '…/functions/v1/booking',   // CG-002 public booking API
-  CHECKOUT_ENDPOINT: '…/functions/v1/checkout', // CG-003 Stripe Checkout (test mode); '' = payment step off
+  CHECKOUT_ENDPOINT: '…/functions/v1/checkout', // CG-003 Stripe Checkout (mode = PAYMENTS_MODE secret); '' = payment step off
   UPLOAD_ENDPOINT: '…/functions/v1/upload',     // CG-004 signed uploads for enquiry attachments; '' = field hidden
   SUPABASE_URL: 'https://acrjrlgeeyseyolmofuq.supabase.co',   // back-office
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_…',               // public by design; RLS protects every row
@@ -84,17 +106,28 @@ a service role. All secrets live in the Supabase Edge Function environment.
 
 | Address | Role |
 |---|---|
-| `letsgo@coachgari.com` | Leads and every human exchange. Shown on the site. Reply-To on all mail. |
-| `yoursession@coachgari.com` | Transactional sender: confirmations, reminders, changes, session links. |
+| `letsgo@` | Leads and every human exchange. Shown on the site. Reply-To on all mail. |
+| `yoursession@` | Transactional sender: confirmations, cancellations, reschedules, receipts. |
 
-Templates in `emails/`. Only the lead notification is live; the `session-*`
-templates are prepared for the booking sprint. Resend DNS verification and the
-Migadu mailboxes are set up separately when the domain is connected.
+**Sender domain — to be confirmed by the owner.** The repo is not
+self-consistent on it: the code defaults use `@coachgari28.com`
+(`supabase/functions/_shared/email.ts`, `email_owner_address()` in
+`20261009_cg_email_outbox.sql`) while the site's `mailto:` link and the older
+migrations still say `@coachgari.com`. The address that actually sends is the
+one behind the `EMAIL_FROM` / `EMAIL_REPLY_TO` secrets, on a domain the owner
+has verified in Resend (SPF / DKIM / DMARC); neither the verification nor the
+mailboxes can be checked from this repo.
+
+Templates and rendering live in `supabase/functions/_shared/email.ts` (the
+`emails/` folder holds the original HTML drafts). Which kinds are wired is
+listed under "Transactional email" below.
 
 ## The enquiry form (CG-001)
 
 **Browser** (`assets/site.js`) → **Edge Function** `contact` → **`public.contacts`**
-→ optional **Resend** notification to `letsgo@coachgari.com`.
+→ **Resend** lead notification to `letsgo@` and acknowledgement to the
+customer through the email outbox (sent when `RESEND_API_KEY` is configured,
+queued otherwise).
 
 - **Attribution**: on first visit the browser stores UTM parameters,
   `document.referrer`, the landing page and a first-visit timestamp in
@@ -236,7 +269,7 @@ canonical customer origin; set it only for a preview / dev fallback). Webhook en
 ```
 node scripts/test-webhook-signature.mjs                                # offline, CI: Stripe signature scheme, 24 cases
 STRIPE_WEBHOOK_SECRET=whsec_… node scripts/test-webhook.mjs            # laptop: signed probes against the deployed function
-REPORT_TOKEN=<64-hex> node scripts/e2e-runtime.mjs [--pay] [--wait]    # laptop: BEAU PH runtime E2E on the deployed /r page (view, Aani/bank without payment, Stripe TEST checkout, webhook → pack)
+REPORT_TOKEN=<64-hex> node scripts/e2e-runtime.mjs [--pay] [--wait]    # laptop: BEAU PH runtime E2E on the deployed /r page (view, Aani/bank without payment, Stripe checkout in the project's PAYMENTS_MODE — --pay charges a real card when the mode is live, webhook → pack)
 psql "$DATABASE_URL" -f supabase/tests/cg003_payments.sql              # ledger / idempotency, rolls back
 node scripts/test-checkout.mjs --wait                                  # real Stripe round trip
 node scripts/test-admin-workspace.mjs                                  # offline (Playwright, mocked Supabase): Finance / BEAU PH workspace lazy loading, 34 checks
@@ -354,8 +387,9 @@ no `content:*` permission: the website is edited in Git.
   write `app_users` / `app_permissions` directly through the API. Revoke by
   unticking a permission or deactivating the user; effect is immediate.
 - **Auth set-up** (owner, Supabase dashboard → Authentication → URL
-  configuration): add `https://coachgariv0.vercel.app/admin/` and, later, the
-  `https://coachgari.com` equivalent to *Redirect URLs*. Sign-in always lands
+  configuration): add `https://coachgari28.com/admin/` (canonical) and, while
+  still in use, `https://coachgariv0.vercel.app/admin/` to *Redirect URLs* —
+  owner to confirm which are present. Sign-in always lands
   on `/admin/` now; `/finance` is a Vercel redirect to `/admin#finance`, not a
   sign-in target. Magic links use Supabase's built-in mailer until a custom
   SMTP (Resend) is configured there.
@@ -512,8 +546,8 @@ Project: `acrjrlgeeyseyolmofuq` (eu-central-1).
 3. **Secrets** — set by the operator, never committed:
    ```
    supabase secrets set RESEND_API_KEY=re_...                                   # transactional email (Resend), server-side only
-   supabase secrets set EMAIL_FROM="Coach Gari <yoursession@coachgari28.com>"   # transactional sender
-   supabase secrets set EMAIL_REPLY_TO=letsgo@coachgari28.com                   # Reply-To on every customer email
+   supabase secrets set EMAIL_FROM="Coach Gari <yoursession@<sender domain>>"  # transactional sender — a domain verified in Resend (owner)
+   supabase secrets set EMAIL_REPLY_TO=letsgo@<sender domain>                  # Reply-To on every customer email
    supabase secrets set IP_HASH_SALT=<random string>                            # optional; changes the IP hash
    ```
    Without `RESEND_API_KEY` the lead is still stored, its emails wait in the
@@ -529,30 +563,36 @@ The repo is linked to the Vercel project **`coachgari_v0`**
 
 | URL | What |
 |---|---|
-| `https://coachgariv0.vercel.app` | production alias (follows the production branch) |
+| `https://coachgari28.com` | canonical customer origin (the code's `SITE_URL` default and CORS canonical) |
+| `https://coachgari.com` (+ `www`) | earlier / future apex — kept in CORS; intended as a redirect to the canonical host |
+| `https://coachgariv0.vercel.app` | Vercel production alias (follows the production branch) |
 | `https://coachgariv0-git-claude-coach-325c7d-mickaels-projects-6a9e3bf2.vercel.app` | stable alias of the dev branch |
 
-Three project settings only the owner can change (the MCP token gets `403`):
+Project settings only the owner can see or change (the MCP token gets `403`),
+so their state is **not** asserted here:
 
-1. **Deployment Protection → Vercel Authentication → Off.** It is currently on
-   for all deployment URLs (`all_except_custom_domains`), so every preview
-   redirects to a Vercel login — nobody outside the team can open the link, and
-   the browser gate test cannot be run. (Custom domains are never affected.)
-2. **Git → Production Branch → `main`** (currently `claude/coach-gari-repo-setup-e4d7ep`).
-3. **Domains → `coachgari.com` + `www`** once DNS is ready.
+1. **Deployment Protection → Vercel Authentication → Off** for preview URLs
+   (custom domains are never affected).
+2. **Git → Production Branch → `main`** (the site auto-deploys from `main`).
+3. **Domains** — `coachgari28.com` + `www` attached and serving;
+   `coachgari.com` + `www` attached as a redirect to `coachgari28.com`; DNS
+   finalised at the registrar.
 
 The CSP in `vercel.json` only allows `connect-src` to the Supabase project host.
 If the project ref ever changes, update it there too.
 
 ## CG-001 gates
 
-Three separate gates — only the last depends on the production domain.
+Three separate gates. `GATE-DOMAIN-001` as originally written (everything on
+`coachgari.com`) is superseded: the canonical origin is `coachgari28.com` and
+the CORS allowlist is already the shared `_shared/cors.ts` (no wildcard). What
+remains of it is owner infrastructure, listed under "Status" at the top.
 
 | Gate | Proves | Status |
 |---|---|---|
 | `GATE-HTTP-001` | frontend → Edge Function → validation → `contacts`; idempotent; attribution kept | API steps passed 2026-09-03 (7/7); browser double-click step: run below |
-| `GATE-EMAIL-001` | Resend configured, sender validated, real mail to `letsgo@`, `notified_at` set | owner config (`RESEND_API_KEY`) |
-| `GATE-DOMAIN-001` | all of the above on `coachgari.com`, CORS tightened, Plausible verified | owner config (DNS, Vercel domain, Migadu, SPF/DKIM) |
+| `GATE-EMAIL-001` | Resend configured, sender validated, real mail to `letsgo@`, `notified_at` set | code path built (outbox, `scripts/test-email.mjs`); delivery depends on owner config (`RESEND_API_KEY`, verified sender domain) — to confirm |
+| `GATE-DOMAIN-001` | *superseded* — the same run on the canonical origin `https://coachgari28.com`; Plausible verified | owner to confirm (DNS, Vercel domains, mailboxes, SPF/DKIM/DMARC) |
 
 ### GATE-HTTP-001 — how to run it
 
@@ -623,9 +663,11 @@ Clean-up of the test row: `delete from public.contacts where interest = 'TEST �
 - **Step B (browser, visible success state, double-click)**: needs the Vercel
   preview to be reachable, i.e. *Deployment Protection → Vercel Authentication
   → Off* (owner-only setting). Not domain-dependent.
-- **Step D / GATE-DOMAIN-001**: the same run on `https://coachgari.com`, after
-  DNS, Resend domain verification, mailboxes and CORS tightening. See
-  `docs/DECISIONS.md`.
+- **Step D** (formerly `GATE-DOMAIN-001`): the same run on
+  `https://coachgari28.com` — `CONTACT_ORIGIN=https://coachgari28.com node
+  scripts/test-contact.mjs` from a laptop — once the owner confirms DNS, the
+  Vercel domains, the Resend sender domain and the mailboxes. Not recorded as
+  run in this repo.
 
 ## Local checks
 

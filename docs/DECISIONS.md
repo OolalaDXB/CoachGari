@@ -728,6 +728,10 @@ a key or a prefix, only `{configured, mode, reason}`.
   configured value cannot be read from here (secrets are write-only);
   the code default is `https://coachgariv0.vercel.app`. Decision: **do not
   change it** until the domain is attached and serves the app (GATE-DOMAIN-001).
+  *Superseded (2026-09-09): GATE-DOMAIN-001 is replaced by the canonical origin
+  `https://coachgari28.com` — the code default of `SITE_URL` and the CORS
+  canonical (`_shared/cors.ts`). Whether the domain is attached on Vercel is
+  owner infrastructure, listed under "Status" in the README, not asserted.*
 - **Owner actions (no secret ever displayed)**: set `PAYMENTS_MODE=live` on the
   Supabase project (`supabase secrets set PAYMENTS_MODE=live --project-ref
   acrjrlgeeyseyolmofuq`) — it cannot be written from this session (no secrets
@@ -958,7 +962,9 @@ findings raised on CG-011 were fixed (see below). `report` Edge Function
 deployed (`verify_jwt=false`, token-authorised). `/r/<token>` client page and
 admin UI shipped. Forward migration `20260912_cg012_reports_payments.sql`;
 existing booking→order behaviour preserved. Stripe stays TEST mode
-(CHECK-LICENCE-001).**
+(CHECK-LICENCE-001).** *Superseded: CHECK-LICENCE-001 is replaced by
+`PAYMENTS_MODE` (test | live, key mode and webhook `livemode` gated, never
+guessed) — see "Stripe LIVE cut-over (2026-09-08)" above.*
 
 ### Financial architecture (unchanged, enforced)
 
@@ -1131,7 +1137,8 @@ authenticated calendar can't be exercised by the sandbox's tooling.
 
 Session recap / shareable client report, secure `/r/<token>` report page,
 Stripe payment-request flow (order → Checkout → webhook → pack paid), renewal
-UI. Stripe stays **test mode** (CHECK-LICENCE-001).
+UI. Stripe stays **test mode** (CHECK-LICENCE-001). *Superseded: replaced by
+`PAYMENTS_MODE` — see "Stripe LIVE cut-over (2026-09-08)".*
 
 ### Financial architecture guardrail (canonical — applies to CG-012)
 
@@ -1753,6 +1760,11 @@ the build on any `fail>0`.
   is not `sk_test_…` (`live_mode_blocked`) and `stripe-webhook` refuses any
   event with `livemode: true`. Switching to live requires a code change on top
   of CHECK-LICENCE-001 — not just a secret.
+  *Superseded (2026-09-08): that code change was made — the categorical
+  refusal is replaced by `PAYMENTS_MODE` (test | live); the key's mode must
+  match it and the webhook's `livemode` must match it, both ways. See "Stripe
+  LIVE cut-over (2026-09-08)". The mode actually set on the project is an
+  owner secret, not asserted here.*
 - **No Stripe Connect.** Stripe = Oolala's account. Gari's share is computed in
   our ledger and paid by manual bank transfer, tracked in `partner_settlements`.
 - **Server-side Checkout, trusted amount.** The browser sends `{ref, token}`
@@ -1951,6 +1963,14 @@ absent). Owner action: `supabase secrets set RESEND_API_KEY=…`.
 
 ### GATE-DOMAIN-001 — tomorrow's production-domain work
 
+*Superseded (2026-09-09): the canonical production origin became
+`https://coachgari28.com` (`_shared/cors.ts`, `SITE_URL` default);
+`coachgari.com` / `www` stay in the allowlist as the earlier / future apex, to
+be served as a redirect. The CORS tightening below is done (shared allowlist,
+no wildcard). DNS, Vercel domains, mailboxes, SPF/DKIM/DMARC and Resend domain
+verification remain owner infrastructure — listed in the README "Status" as
+actions to confirm, never asserted as done. Kept as written for the trail.*
+
 `coachgari.com` on Vercel, DNS, Migadu mailboxes, SPF/DKIM, Resend domain
 validation, final CORS tightening (replace the `*.vercel.app` wildcard in
 `supabase/functions/contact/index.ts` and `booking`), production form and email
@@ -1987,8 +2007,14 @@ remains the conversion source.
 - **Anti-spam**: honeypot, 2 s minimum fill time, 5 submissions / 10 min per
   hashed IP, 16 KB body cap, server-side validation.
 - **CORS**: `coachgari.com`, `www.coachgari.com`, `*.vercel.app`, localhost.
+  *Superseded: shared allowlist in `_shared/cors.ts` — `coachgari28.com`
+  canonical, `coachgari.com` kept, `coachgariv0(-*)?.vercel.app` only.*
 - **Emails**: `letsgo@coachgari.com` receives leads and human replies;
   `yoursession@coachgari.com` is the transactional sender.
+  *Note: the code defaults now use `@coachgari28.com`
+  (`_shared/email.ts`, `email_owner_address()`); the sending domain is the one
+  behind the `EMAIL_FROM` / `EMAIL_REPLY_TO` secrets and verified in Resend —
+  owner to confirm.*
 - **Location** stays one field; stored verbatim + best-effort split.
 - **IP handling**: salted SHA-256 hash only, for rate limiting.
 - **Old file-name redirects** use clean-URL-aware sources (`cleanUrls` strips
@@ -1999,6 +2025,13 @@ remains the conversion source.
 ## Blockers (documented, not implemented)
 
 ### CHECK-LICENCE-001 — LIVE payment collection only
+
+*Superseded (2026-09-08): the categorical live refusal in code is replaced by
+`PAYMENTS_MODE` (test | live) — key mode and webhook `livemode` must match the
+declared mode, an unset mode refuses everything. See "Stripe LIVE cut-over
+(2026-09-08)". The licence question itself is the owner's; the mode set on the
+project is an owner secret and is not asserted here. Kept as written for the
+trail.*
 
 Live collection of payments for Coach Gari services by **Oolala Next FZ-LLC**
 is blocked until the activities authorised under UAE licence **47017963** are
