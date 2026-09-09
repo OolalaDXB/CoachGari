@@ -76,9 +76,10 @@ p{margin:0 0 1em;}
 .nav-links{display:flex;gap:28px;font-size:14px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;margin-left:auto;}
 /* tonal navigation: the current section is near-black, the others soft grey; hover only shifts tone (site.js marks .is-active from an observer) */
 .nav-links a{text-decoration:none;color:var(--grey-text);transition:color .28s ease;}
-.nav-links a:hover,.nav-links a:focus-visible{color:#3A3A44;}
 .nav-links a.is-active{color:var(--black);}
-.nav-links a.is-active:hover,.nav-links a.is-active:focus-visible{color:#2A2A31;}
+/* hover: every link dims, the current section included; only the one under the pointer is black */
+.nav-links:hover a,.nav-links:focus-within a{color:#B4B4BE;}
+.nav-links:hover a:hover,.nav-links:focus-within a:focus-visible{color:var(--black);}
 .nav-right{margin-left:auto;display:flex;align-items:center;gap:20px;}
 .nav-right .plain{font-size:14px;font-weight:700;text-transform:uppercase;text-decoration:none;}
 
