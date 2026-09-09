@@ -33,7 +33,7 @@
     .nav-right{gap:6px;}
     .nav-right .btn{padding:8px 9px;font-size:12px;}
   }
-  .pale-grid{grid-template-columns:1.1fr .9fr;gap:50px;}
+  @media(min-width:861px){.pale-grid{grid-template-columns:1.1fr .9fr;gap:50px;}}   /* desktop only: the stylesheet collapses it to one column below 860px */
   .pale-media img{object-position:50% 8%;}
 
   .dates{list-style:none;padding:0;margin:44px 0 0;}
