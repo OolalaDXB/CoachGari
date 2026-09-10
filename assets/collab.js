@@ -26,15 +26,13 @@ form.addEventListener('submit', async (e) => {
   if (!name) { say('Please add your name.', 'err'); form.elements.name.focus(); return; }
   if (!email && !phone) { say('Add an email or phone so Coach Gari can reply.', 'err'); form.elements.email.focus(); return; }
 
-  const budgetRaw = val('budget');
-  const budget = budgetRaw ? Math.round(Number(budgetRaw) * 100) : null;   // major units → minor
+  // Commercial context (budget, what's on the table) is intentionally NOT collected here —
+  // it belongs to the negotiation in the private room, once Coach Gari decides to go further.
   const payload = {
     action: 'intake', ts: pageLoadedAt, website: val('website'),
     name, company: val('company'), email, phone, url: val('url'),
     type: val('type'), title: val('title'), initial_request: val('initial_request'),
     date_from: val('date_from'), date_to: val('date_to'), location: val('location'),
-    budget_amount: Number.isFinite(budget) && budget >= 0 ? budget : null,
-    budget_currency: val('budget_currency') || null, offer: val('offer'),
   };
 
   inFlight = true; say('Sending…');
