@@ -2,7 +2,7 @@
 
    Usage:
      node scripts/test-booking.mjs
-     BOOKING_ENDPOINT=https://... BOOKING_ORIGIN=https://coachgari.com node scripts/test-booking.mjs
+     BOOKING_ENDPOINT=https://... BOOKING_ORIGIN=https://coachgari28.com node scripts/test-booking.mjs
 
    Proves against the live API: services list, slots for the next bookable day,
    hold creation, idempotent retry, the concurrent capacity-1 race (two parallel
@@ -14,7 +14,7 @@ import { CONFIG } from '../config.js';
 import { randomUUID } from 'node:crypto';
 
 const ENDPOINT = process.env.BOOKING_ENDPOINT || CONFIG.BOOKING_ENDPOINT;
-const ORIGIN = process.env.BOOKING_ORIGIN || 'https://coachgari.com';
+const ORIGIN = process.env.BOOKING_ORIGIN || 'https://coachgari28.com';
 const SERVICE = process.env.BOOKING_SERVICE || 'conversation';
 let passed = 0;
 function check(name, cond, detail) {
@@ -51,7 +51,7 @@ check('slot carries session timezone + local time', !!slots[0].session_timezone 
 // 3. forged fields are ignored: price/duration/capacity come from the server
 const key1 = randomUUID();
 const h1 = await post({ action: 'hold', service: SERVICE, start_at: slots[0].start_at, idempotency_key: key1,
-  name: 'Test Runner', contact: 'test-booking@coachgari.com', notes: 'CG-002 API test — safe to cancel',
+  name: 'Test Runner', contact: 'test-booking@coachgari28.com', notes: 'CG-002 API test — safe to cancel',
   price_amount: 1, duration_minutes: 5, participants: 1, capacity: 99 });
 check('hold created', h1.status === 200 && h1.body?.ok && h1.body.booking?.status === 'hold', `ref ${h1.body?.booking?.reference}`);
 const b1 = h1.body.booking;
@@ -59,20 +59,20 @@ check('price comes from the service, not the request', b1.price_amount === svc.p
 check('duration comes from the service, not the request', (new Date(b1.end_at) - new Date(b1.start_at)) / 60000 === svc.duration_minutes, `${svc.duration_minutes} min`);
 
 // 4. idempotent retry
-const h1b = await post({ action: 'hold', service: SERVICE, start_at: slots[0].start_at, idempotency_key: key1, name: 'Test Runner', contact: 'test-booking@coachgari.com' });
+const h1b = await post({ action: 'hold', service: SERVICE, start_at: slots[0].start_at, idempotency_key: key1, name: 'Test Runner', contact: 'test-booking@coachgari28.com' });
 check('retry with same idempotency_key returns the same booking', h1b.status === 200 && h1b.body.booking.reference === b1.reference);
 
 // 5. the held slot is gone; another visitor cannot take it
 const again = await get(`action=slots&service=${SERVICE}&from=${from}&to=${from}&tz=Africa/Johannesburg`);
 check('held slot no longer listed', !again.body.slots.some((x) => x.start_at === slots[0].start_at));
-const steal = await post({ action: 'hold', service: SERVICE, start_at: slots[0].start_at, idempotency_key: randomUUID(), name: 'Other Person', contact: 'other@coachgari.com' });
+const steal = await post({ action: 'hold', service: SERVICE, start_at: slots[0].start_at, idempotency_key: randomUUID(), name: 'Other Person', contact: 'other@coachgari28.com' });
 check('second hold on a held slot refused (409)', steal.status === 409, `status ${steal.status}`);
 
 // 6. concurrent race on the second free slot: exactly one winner
 const target = slots[1].start_at;
 const [ra, rb] = await Promise.all([
-  post({ action: 'hold', service: SERVICE, start_at: target, idempotency_key: randomUUID(), name: 'Racer A', contact: 'racer-a@coachgari.com' }),
-  post({ action: 'hold', service: SERVICE, start_at: target, idempotency_key: randomUUID(), name: 'Racer B', contact: 'racer-b@coachgari.com' }),
+  post({ action: 'hold', service: SERVICE, start_at: target, idempotency_key: randomUUID(), name: 'Racer A', contact: 'racer-a@coachgari28.com' }),
+  post({ action: 'hold', service: SERVICE, start_at: target, idempotency_key: randomUUID(), name: 'Racer B', contact: 'racer-b@coachgari28.com' }),
 ]);
 const winners = [ra, rb].filter((r) => r.status === 200 && r.body?.ok);
 check('concurrent race: exactly one hold wins', winners.length === 1 && [ra, rb].some((r) => r.status === 409), `statuses ${ra.status}/${rb.status}`);

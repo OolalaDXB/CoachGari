@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto';
 
 const BOOKING = process.env.BOOKING_ENDPOINT || CONFIG.BOOKING_ENDPOINT;
 const CHECKOUT = process.env.CHECKOUT_ENDPOINT || CONFIG.CHECKOUT_ENDPOINT;
-const ORIGIN = process.env.BOOKING_ORIGIN || 'https://coachgari.com';
+const ORIGIN = process.env.BOOKING_ORIGIN || 'https://coachgari28.com';
 const SERVICE = process.env.BOOKING_SERVICE || 'conversation';
 const wait = process.argv.includes('--wait');
 const H = { 'Content-Type': 'application/json', Origin: ORIGIN };
@@ -38,7 +38,7 @@ if (!slot) fail('no slot in the next 14 days');
 
 const hold = await j(await fetch(BOOKING, { method: 'POST', headers: H, body: JSON.stringify({
   action: 'hold', service: SERVICE, start_at: slot.start_at, idempotency_key: randomUUID(),
-  name: 'Checkout Test', contact: process.env.TEST_EMAIL || 'checkout-test@coachgari.com', notes: 'CG-003 test — safe to cancel' }) }));
+  name: 'Checkout Test', contact: process.env.TEST_EMAIL || 'checkout-test@coachgari28.com', notes: 'CG-003 test — safe to cancel' }) }));
 if (hold.status !== 200) fail(`hold ${hold.status} ${JSON.stringify(hold.body)}`);
 const b = hold.body.booking;
 console.log(`PASS  hold ${b.reference} at ${b.start_at} (${b.session_timezone}) — ${b.price_amount} ${b.currency}`);

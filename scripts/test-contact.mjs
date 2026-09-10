@@ -3,7 +3,7 @@
    Usage:
      node scripts/test-contact.mjs                 # uses FORM_ENDPOINT from config.js
      CONTACT_ENDPOINT=https://... node scripts/test-contact.mjs
-     CONTACT_ORIGIN=https://coachgari.com node scripts/test-contact.mjs
+     CONTACT_ORIGIN=https://coachgari28.com node scripts/test-contact.mjs
 
    What it proves (the technical gate, minus the row check which is done in SQL):
      1. a valid submission reaches the function and is accepted (200, ok, id)
@@ -19,7 +19,7 @@ import { CONFIG } from '../config.js';
 import { randomUUID } from 'node:crypto';
 
 const ENDPOINT = process.env.CONTACT_ENDPOINT || CONFIG.FORM_ENDPOINT;
-const ORIGIN = process.env.CONTACT_ORIGIN || 'https://coachgari.com';
+const ORIGIN = process.env.CONTACT_ORIGIN || 'https://coachgari28.com';
 if (!ENDPOINT) { console.error('No endpoint. Set CONTACT_ENDPOINT or CONFIG.FORM_ENDPOINT.'); process.exit(1); }
 
 const results = [];
@@ -45,7 +45,7 @@ const base = {
   submission_id: submissionId,
   ts: Date.now() - 10_000,                 // "page loaded 10 s ago" → passes the timing check
   name: 'Test Runner',
-  contact: `test+${submissionId.slice(0, 8)}@coachgari.com`,
+  contact: `test+${submissionId.slice(0, 8)}@coachgari28.com`,
   location: 'Harare, Zimbabwe',
   interest: 'TEST — safe to delete',
   message: 'Automated CG-001 gate test. Safe to delete.',
