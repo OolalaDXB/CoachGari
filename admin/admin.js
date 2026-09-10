@@ -402,9 +402,11 @@ function bookingRow(b, tz, withActions = true) {
     if (['hold', 'pending_payment', 'confirmed'].includes(b.status)) acts.push(`<button class="btn btn-line btn-xs" data-act="cancelled" data-ref="${b.reference}">Cancel</button>`);
     if (b.status === 'confirmed' && new Date(b.start_at) <= new Date()) acts.push(`<button class="btn btn-dark btn-xs" data-act="completed" data-ref="${b.reference}">Completed</button>`, `<button class="btn btn-line btn-xs" data-act="no_show" data-ref="${b.reference}">No-show</button>`);
     if (b.status === 'hold' && b.price_amount == null) acts.push(`<button class="btn btn-accent btn-xs" data-act="confirmed" data-ref="${b.reference}">Confirm</button>`);
-    // On-request / any open booking with a known client: open that client's Sessions tab, where a priced
-    // hours package is created and a payment link issued. This is how a price is proposed and collected.
-    if (b.crm_contact_id && has('client_profile:view') && ['hold', 'pending_payment', 'confirmed'].includes(b.status))
+    // Open booking with a known client: jump to that client's Sessions tab to build a priced hours package
+    // and issue a pay link. Only where pricing a fresh commercial offer still makes sense — an open hold or a
+    // confirmed session. Never for a booking already in payment (pending_payment) or a final one
+    // (completed, no_show, cancelled, expired).
+    if (b.crm_contact_id && has('client_profile:view') && ['hold', 'confirmed'].includes(b.status))
       acts.push(`<button class="btn btn-line btn-xs" data-pack-crm="${b.crm_contact_id}">Price &amp; package</button>`);
   }
   const where = b.tour_stops ? `${b.tour_stops.city}, ${b.tour_stops.country}` : b.delivery_mode;
