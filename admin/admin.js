@@ -219,6 +219,31 @@ function go(sectionKey, subKey) {
 /* =============================== CRM · LEADS =============================== */
 // Leads are enquiry submissions. Each row is clickable and opens the client
 // profile popup, focused on that enquiry. Coach:operations only.
+
+/* ---- CRM quick actions (non-destructive: status-only, review-flag only) ---- */
+async function crmSetStatus(id, status, msg, after) {
+  const { error } = await sb.rpc('crm_set_status', { p_id: id, p_status: status });
+  if (error) return fail(error);
+  toast(msg || `Moved to ${status}`); if (after) after();
+}
+async function crmClearReview(id, after) {
+  const { error } = await sb.rpc('crm_clear_review', { p_id: id });
+  if (error) return fail(error);
+  toast('Marked as not a duplicate'); if (after) after();
+}
+async function leadSetStatus(id, status, msg, after) {
+  const { error } = await sb.from('contacts').update({ status }).eq('id', id);
+  if (error) return fail(error);
+  toast(msg || `Lead ${status}`); if (after) after();
+}
+// Convert an enquiry to a client: the linked CRM person becomes active, the enquiry is qualified.
+async function convertLead(enquiryId, crmId, after) {
+  if (crmId) { const { error } = await sb.rpc('crm_set_status', { p_id: crmId, p_status: 'active' }); if (error) return fail(error); }
+  const { error: e2 } = await sb.from('contacts').update({ status: 'qualified' }).eq('id', enquiryId);
+  if (e2) return fail(e2);
+  toast('Converted to client'); if (after) after();
+}
+
 async function leads() {
   const status = view.dataset.leadStatus || '';
   const search = (view.dataset.leadSearch || '').trim();
@@ -243,11 +268,13 @@ async function leads() {
       <td>${esc(c.interest || '—')}</td>
       <td class="msg">${esc((c.message || '').slice(0, 140))}${(c.message || '').length > 140 ? '…' : ''}</td>
       <td>${st(c.status)}</td>
-      <td class="ad-muted">${mediaCount[c.id] ? ('📎 ' + mediaCount[c.id]) : ''}</td>
+      <td class="acts">${mediaCount[c.id] ? `<span class="ad-muted" style="font-size:12px">📎 ${mediaCount[c.id]}</span> ` : ''}${has('coach:operations') ? `${c.status !== 'qualified' ? `<button class="btn btn-accent btn-xs" data-lead-convert="${c.id}" data-lead-crm="${esc(c.crm_contact_id || '')}">Make client</button>` : ''}${!['closed', 'spam'].includes(c.status) ? `<button class="btn btn-line btn-xs" data-lead-archive="${c.id}">Archive</button>` : ''}` : ''}</td>
     </tr>`), 'No leads match.')}</div>`;
   $('#lead-status').onchange = (e) => { view.dataset.leadStatus = e.target.value; leads().catch(fail); };
   $('#lead-search').onchange = (e) => { view.dataset.leadSearch = e.target.value.trim(); leads().catch(fail); };
   view.querySelectorAll('tr.clik').forEach((tr) => tr.onclick = () => openProfile(tr.dataset.crm || null, tr.dataset.enquiry, 'enquiries'));
+  view.querySelectorAll('[data-lead-convert]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); convertLead(b.dataset.leadConvert, b.dataset.leadCrm || null, () => leads().catch(fail)); });
+  view.querySelectorAll('[data-lead-archive]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); leadSetStatus(b.dataset.leadArchive, 'closed', 'Lead archived', () => leads().catch(fail)); });
 }
 
 /* =============================== CRM · CONTACTS =============================== */
@@ -269,7 +296,7 @@ async function crmContacts() {
         ${has('client_profile:manage') ? '<button class="btn btn-accent btn-sm" id="c-new">New contact</button>' : ''}
       </div></div>
     ${reviewOnly ? '<p class="ad-note">These people were auto-created from an ambiguous match (a shared email or phone) and were never merged automatically. Open a profile to review, correct, or merge it into the right person.</p>' : ''}
-    <div class="ad-panel">${table(['Name', 'Where', 'Contact', 'Interest', 'Enquiries', 'Bookings', 'Last activity', 'Status'], rows.map((c) => `<tr class="clik" data-crm="${c.id}">
+    <div class="ad-panel">${table(['Name', 'Where', 'Contact', 'Interest', 'Enquiries', 'Bookings', 'Last activity', 'Status', ''], rows.map((c) => `<tr class="clik" data-crm="${c.id}">
       <td><b>${esc(c.display_name || '—')}</b>${c.needs_review ? ' <span class="ad-badge-rev">review</span>' : ''}</td>
       <td>${esc([c.city, c.country].filter(Boolean).join(', ') || '—')}</td>
       <td class="ad-muted" style="font-size:12px">${esc(c.email || c.phone || '—')}</td>
@@ -278,25 +305,41 @@ async function crmContacts() {
       <td class="num">${c.booking_count}</td>
       <td>${fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td>
       <td>${st(c.status)}</td>
+      <td class="acts">${has('client_profile:manage') ? `${c.needs_review ? `<button class="btn btn-line btn-xs" data-c-merge="${c.id}">Merge</button><button class="btn btn-line btn-xs" data-c-keep="${c.id}">Not a duplicate</button>` : ''}${c.status === 'lead' ? `<button class="btn btn-accent btn-xs" data-c-status="${c.id}" data-to="active">Make client</button>` : ''}${c.status === 'archived' ? `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="active">Restore</button>` : `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="archived">Archive</button>`}` : ''}</td>
     </tr>`), reviewOnly ? 'Nothing needs review.' : 'No contacts match.')}</div>`;
   $('#c-status').onchange = (e) => { view.dataset.cStatus = e.target.value; crmContacts().catch(fail); };
   $('#c-search').onchange = (e) => { view.dataset.cSearch = e.target.value.trim(); crmContacts().catch(fail); };
   $('#c-review').onclick = () => { view.dataset.cReview = reviewOnly ? '' : '1'; crmContacts().catch(fail); };
   const nb = $('#c-new'); if (nb) nb.onclick = () => openContactEditor(null);
   view.querySelectorAll('tr.clik').forEach((tr) => tr.onclick = () => openProfile(tr.dataset.crm, null, 'overview'));
+  const reload = () => crmContacts().catch(fail);
+  view.querySelectorAll('[data-c-status]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); const to = b.dataset.to; crmSetStatus(b.dataset.cStatus, to, to === 'active' ? 'Now a client' : to === 'archived' ? 'Archived' : 'Updated', reload); });
+  view.querySelectorAll('[data-c-keep]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); crmClearReview(b.dataset.cKeep, reload); });
+  view.querySelectorAll('[data-c-merge]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); openProfile(b.dataset.cMerge, null, 'overview'); });
 }
 
 /* =============================== OVERVIEW =============================== */
+// The Overview is the daily cockpit: what needs action first (leads to handle, duplicates
+// to resolve), then the sessions ahead, then headline numbers that jump to their list.
 async function overview() {
   const { data, error } = await sb.rpc('admin_overview'); if (error) throw error;
   const o = data.operations, f = data.finance, c = data.crm;
-  const cards = [];
-  if (o) cards.push(['New leads · 7 days', o.new_leads_7d], ["Today's sessions", o.today_sessions], ['Upcoming bookings', o.upcoming_bookings]);
-  if (f) cards.push(['Orders awaiting payment', f.pending_payment_orders], ['Unsettled Gari payable', money(f.unsettled_payable)]);
-  if (c) cards.push(['CRM contacts', c.total_contacts], ['Flagged for review', c.needs_review]);
-  // next session (coach operations) — the most useful thing on a phone
-  let upcoming = [];
-  if (has('coach:operations')) { const { data: u } = await sb.rpc('sessions_upcoming', { p_limit: 6 }); upcoming = u || []; }
+
+  // action lists + next sessions, each fetched only with a permission that allows it
+  let upcoming = [], newLeads = [], review = [];
+  if (has('coach:operations')) {
+    const [uR, lR] = await Promise.all([
+      sb.rpc('sessions_upcoming', { p_limit: 6 }),
+      sb.from('contacts').select(CONTACT_COLS).eq('status', 'new').order('created_at', { ascending: false }).limit(6),
+    ]);
+    upcoming = uR.data || []; newLeads = lR.data || [];
+  }
+  if (has('client_profile:view')) {
+    const { data: r } = await sb.rpc('crm_list_contacts', { p_search: null, p_review_only: true });
+    review = (r || []).slice(0, 6);
+  }
+  const canManage = has('client_profile:manage');
+
   const nextCard = (s) => {
     const t = lp(s.start_at); const ml = mapLinks(s); const online = s.delivery_mode === 'online';
     const pack = s.pack ? `<span class="ov-pack">${s.pack.used}/${s.pack.total_sessions}</span>` : '';
@@ -308,14 +351,48 @@ async function overview() {
       <div class="cg-actions"><button class="btn btn-accent btn-sm" data-open>Open</button>
         ${online && s.meeting_url ? `<a class="btn btn-line btn-sm" href="${esc(s.meeting_url)}" target="_blank" rel="noopener">Join</a>` : (!online && (s.location_name || s.location_address) ? `<a class="btn btn-line btn-sm" href="${ml.gmaps}" target="_blank" rel="noopener">Directions</a>` : '')}</div></div>`;
   };
+  const leadItem = (c) => `<div class="ov-item" data-enq="${c.id}" data-crm="${esc(c.crm_contact_id || '')}">
+    <div class="ov-item-main"><b>${esc(c.name)}</b> <span class="ad-muted" style="font-size:12px">${esc(c.interest || 'enquiry')} · ${fmt(c.created_at, 'Asia/Dubai', { dateStyle: 'medium' })}</span>
+      <div class="ad-muted" style="font-size:12px">${esc(c.contact)}</div>${c.message ? `<div class="msg">${esc(c.message.slice(0, 110))}${c.message.length > 110 ? '…' : ''}</div>` : ''}</div>
+    <div class="ov-item-acts"><button class="btn btn-accent btn-xs" data-ov-convert>Make client</button><button class="btn btn-line btn-xs" data-ov-archive>Archive</button><button class="btn btn-line btn-xs" data-ov-open>Open</button></div></div>`;
+  const reviewItem = (c) => `<div class="ov-item" data-crmrev="${c.id}">
+    <div class="ov-item-main"><b>${esc(c.display_name || '—')}</b> <span class="ad-badge-rev">review</span>
+      <div class="ad-muted" style="font-size:12px">${esc(c.email || c.phone || '—')} · ${c.enquiry_count} enq / ${c.booking_count} bk</div></div>
+    <div class="ov-item-acts">${canManage ? '<button class="btn btn-line btn-xs" data-ov-keep>Not a duplicate</button>' : ''}<button class="btn btn-accent btn-xs" data-ov-open2>Open &amp; merge</button></div></div>`;
+
+  const kpis = [];
+  if (o) kpis.push(['New leads · 7 days', o.new_leads_7d, () => { view.dataset.leadStatus = ''; go('crm', 'leads'); }], ["Today's sessions", o.today_sessions, () => go('schedule')], ['Upcoming bookings', o.upcoming_bookings, () => go('bookings')]);
+  if (f) kpis.push(['Orders awaiting payment', f.pending_payment_orders, () => go('finance', 'transactions')], ['Unsettled Gari payable', money(f.unsettled_payable), () => go('finance', 'commissions')]);
+  if (c) kpis.push(['CRM contacts', c.total_contacts, () => { view.dataset.cReview = ''; go('crm', 'contacts'); }], ['Flagged for review', c.needs_review, () => { view.dataset.cReview = '1'; go('crm', 'contacts'); }]);
+
+  const panel = (title, items, render) => items.length ? `<div class="ad-panel ov-panel"><div class="ov-lbl">${esc(title)} (${items.length})</div>${items.map(render).join('')}</div>` : '';
+  const anyAction = newLeads.length || review.length;
+
   view.innerHTML = `
-    <div class="ad-head"><div><h1>Overview</h1><p class="ad-muted">A quick read on what needs attention. Only what you're allowed to see.</p></div></div>
+    <div class="ad-head"><div><h1>Overview</h1><p class="ad-muted">What needs you now — leads to handle, duplicates to resolve, sessions ahead. Only what you're allowed to see.</p></div></div>
     ${upcoming.length ? `<div class="ov-nextwrap"><div class="ov-lbl">Next session${upcoming.length > 1 ? 's' : ''}</div>
       <div class="ov-nextrow">${upcoming.map(nextCard).join('')}</div></div>` : ''}
-    <div class="ad-kpis">${cards.map(([l, v]) => `<div class="ad-kpi"><b>${v}</b><span>${esc(l)}</span></div>`).join('') || '<p class="ad-empty">Nothing to show yet.</p>'}</div>`;
-  // clicking a next-session card opens it (seed calData so the popup summary resolves)
+    ${anyAction ? `<div class="ov-cols">${panel('New leads', newLeads, leadItem)}${panel('To review — possible duplicates', review, reviewItem)}</div>` : '<p class="ad-empty" style="margin-bottom:18px">You\'re all caught up — no new leads or duplicates waiting.</p>'}
+    <div class="ad-kpis">${kpis.map(([l, v], i) => `<button class="ad-kpi${kpis[i][2] ? ' ov-kpi-click' : ''}" data-kpi="${i}"><b>${v}</b><span>${esc(l)}</span></button>`).join('') || '<p class="ad-empty">Nothing to show yet.</p>'}</div>`;
+
+  // next-session cards
   calData = { sessions: upcoming, blocks: [] };
   view.querySelectorAll('.ov-next').forEach((el) => { const openBtn = el.querySelector('[data-open]'); const go2 = () => openSession(el.dataset.sess); el.onclick = go2; if (openBtn) openBtn.onclick = (e) => { e.stopPropagation(); go2(); }; el.querySelectorAll('a').forEach((a) => a.onclick = (e) => e.stopPropagation()); });
+  // lead action items
+  view.querySelectorAll('.ov-item[data-enq]').forEach((el) => {
+    const enq = el.dataset.enq, crm = el.dataset.crm || null;
+    const cv = el.querySelector('[data-ov-convert]'); if (cv) cv.onclick = () => convertLead(enq, crm, () => overview().catch(fail));
+    const ar = el.querySelector('[data-ov-archive]'); if (ar) ar.onclick = () => leadSetStatus(enq, 'closed', 'Lead archived', () => overview().catch(fail));
+    const op = el.querySelector('[data-ov-open]'); if (op) op.onclick = () => openProfile(crm, enq, 'enquiries');
+  });
+  // duplicate-review items
+  view.querySelectorAll('.ov-item[data-crmrev]').forEach((el) => {
+    const crm = el.dataset.crmrev;
+    const kp = el.querySelector('[data-ov-keep]'); if (kp) kp.onclick = () => crmClearReview(crm, () => overview().catch(fail));
+    const op = el.querySelector('[data-ov-open2]'); if (op) op.onclick = () => openProfile(crm, null, 'overview');
+  });
+  // headline numbers jump to their list
+  view.querySelectorAll('[data-kpi]').forEach((b) => { const fn = kpis[+b.dataset.kpi][2]; if (fn) b.onclick = fn; });
 }
 
 /* =============================== BOOKINGS / CALENDAR =============================== */
