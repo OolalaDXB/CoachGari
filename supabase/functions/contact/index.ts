@@ -22,6 +22,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 import { drainOutbox } from "../_shared/email.ts";                  // lead notification to letsgo@ + acknowledgement to the customer
+import { clientIp, xffHops, sha256hex } from "../_shared/client-ip.ts";   // trusted-hop IP derivation, shared with consent
 
 /* ---- configuration (not secrets) -------------------------- */
 const IP_SALT   = Deno.env.get("IP_HASH_SALT") ?? "coachgari-cg001";
@@ -78,36 +79,9 @@ function splitLocation(raw: string | null): { city: string | null; country: stri
   return { city, country };
 }
 
-async function sha256hex(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/* Which IP can be trusted here — verified, not assumed (2026-09-09):
-   - Supabase Edge Functions sit behind Cloudflare and the Supabase gateway. Supabase staff
-     confirmed the platform populates X-Forwarded-For with the client IP
-     (github.com/orgs/supabase/discussions/7884, laktek). Nothing in the Supabase docs
-     promises a header the client cannot influence.
-   - A client-sent X-Forwarded-For is NOT replaced: the platform APPENDS the connecting IP,
-     so the value becomes "<spoofed>, <real>" (observed in discussions/34647, and the standard
-     Cloudflare behaviour). The LEFT-most hop is therefore attacker-controlled; the RIGHT-most
-     hop is the one the trusted edge added.
-   - cf-connecting-ip is set by Cloudflare from the TCP connection and cannot be supplied by
-     the caller: a probe against this function that carried its own CF-Connecting-IP header was
-     refused at the edge with Cloudflare error 1000 before reaching the function.
-   Order of trust: cf-connecting-ip → right-most X-Forwarded-For hop → x-real-ip → "unknown".
-   The original left-most XFF value is kept only as a diagnostic hash, never as identity.
-   This stays best-effort (no documented guarantee), hence the global back-stop below. */
-function clientIp(req: Request): string {
-  const cf = req.headers.get("cf-connecting-ip")?.trim();
-  if (cf) return cf;
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) {
-    const hops = xff.split(",").map((h) => h.trim()).filter(Boolean);
-    if (hops.length) return hops[hops.length - 1];              // the hop appended by the trusted edge, not the client's
-  }
-  return req.headers.get("x-real-ip")?.trim() || "unknown";
-}
+/* IP trust order (cf-connecting-ip → right-most X-Forwarded-For hop → x-real-ip → "unknown")
+   and the evidence behind it live in _shared/client-ip.ts. It stays best-effort (no documented
+   guarantee), hence the global back-stop below. */
 
 function log(event: string, data: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ fn: "contact", event, ...data }));
@@ -159,7 +133,7 @@ Deno.serve(async (req: Request) => {
   const { city, country } = splitLocation(location);
   const ipHash = await sha256hex(IP_SALT + clientIp(req));
   // diagnostic only: whether the caller supplied its own X-Forwarded-For chain (never the value, never an identity)
-  const xffHops = (req.headers.get("x-forwarded-for") ?? "").split(",").filter((h) => h.trim()).length;
+  const hops = xffHops(req);
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
@@ -174,7 +148,7 @@ Deno.serve(async (req: Request) => {
     .eq("ip_hash", ipHash).gte("created_at", since);
   if (rlErr) log("rate_limit_query_failed", { code: rlErr.code });
   if ((recent ?? 0) >= RATE_MAX) {
-    log("rate_limited", { submission_id: submissionId, xff_hops: xffHops });
+    log("rate_limited", { submission_id: submissionId, xff_hops: hops });
     return json(429, { ok: false, error: "rate_limited" }, origin, allowed);
   }
   // Global back-stop, independent of any identity the caller presents: total inserts in a short window, all callers.
@@ -185,7 +159,7 @@ Deno.serve(async (req: Request) => {
     .from("contacts").select("id", { count: "exact", head: true }).gte("created_at", gSince);
   if (gErr) log("global_limit_query_failed", { code: gErr.code });
   if ((globalRecent ?? 0) >= GLOBAL_MAX) {
-    log("rate_limited_global", { submission_id: submissionId, window_min: GLOBAL_WINDOW_MIN, xff_hops: xffHops });
+    log("rate_limited_global", { submission_id: submissionId, window_min: GLOBAL_WINDOW_MIN, xff_hops: hops });
     return json(429, { ok: false, error: "rate_limited" }, origin, allowed);
   }
 

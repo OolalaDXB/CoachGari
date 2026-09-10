@@ -15,20 +15,21 @@
    as service_role and expose nothing beyond a first name and the
    public notice text. Evidence captured on submit = a salted hash
    of the client IP, a truncated user-agent and a timestamp — never
-   the raw IP. Logs carry only the action and status, never the
+   the raw IP. The IP is the trusted-edge hop (_shared/client-ip.ts:
+   cf-connecting-ip → right-most X-Forwarded-For → x-real-ip), never
+   the client-supplied left-most value; the salt is the dedicated
+   CONSENT_IP_SALT secret (owner-set) — when it is absent the hash is
+   recorded as null and a log line says so, the consent itself is
+   still recorded. Logs carry only the action and status, never the
    contact id or any measurement value.
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { originAllowed, corsHeaders as cors } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
+import { clientIp, sha256hex } from "../_shared/client-ip.ts";            // same IP derivation as contact
 
 const json = (status: number, body: unknown, origin: string | null, allowed: boolean) => new Response(JSON.stringify(body), { status, headers: cors(origin, allowed) });
 const log = (event: string, data: Record<string, unknown> = {}) => console.log(JSON.stringify({ fn: "consent", event, ...data }));
 const isToken = (s: unknown) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
-
-async function sha256hex(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 // Map DB error codes to client-safe responses. Never echo internals.
 function rpcError(e: { code?: string; message?: string }, origin: string | null, allowed: boolean) {
@@ -62,12 +63,14 @@ Deno.serve(async (req: Request) => {
     const decision = body.decision === "accept" ? "accept" : body.decision === "decline" ? "decline" : null;
     if (!decision) return json(400, { ok: false, error: "validation", fields: ["decision"] }, origin, allowed);
     // Evidence: salted IP hash + truncated UA + timestamp. Never the raw IP.
-    const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim();
-    const salt = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+    // IP = trusted-edge hop (shared derivation); salt = dedicated CONSENT_IP_SALT, never the service-role key.
+    const ip = clientIp(req);
+    const salt = (Deno.env.get("CONSENT_IP_SALT") ?? "").trim();
+    if (!salt) log("consent_ip_salt_missing");
     const ua = (req.headers.get("user-agent") || "").slice(0, 200);
     const evidence = {
       method: "client_link",
-      ip_hash: ip ? await sha256hex(salt + "|" + ip) : null,
+      ip_hash: salt && ip !== "unknown" ? await sha256hex(salt + "|" + ip) : null,
       user_agent: ua || null,
       submitted_at: new Date().toISOString(),
     };
