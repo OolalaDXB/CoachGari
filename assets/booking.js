@@ -70,7 +70,9 @@ function init(){
      does not add a top-level choice. */
   var FAMILIES = [
     { key: 'conversation',      label: 'The Conversation', context: 'Online', service: 'conversation' },
-    { key: 'personal-training', label: 'Personal training', context: 'Dubai',  service: 'personal-training-dubai' },
+    { key: 'personal-training', label: 'Personal training', children: [
+        { key: 'personal-training-in-person', label: 'In person', context: 'Dubai', service: 'personal-training-dubai' },
+        { key: 'personal-training-online',    label: 'Online',                     service: 'personal-training-online' } ] },
     { key: 'padel',             label: 'Padel',            context: 'Dubai',  children: [
         { key: 'padel-one-to-one', label: 'One-to-one',   service: 'padel-one-to-one' },
         { key: 'padel-group',      label: 'Group session', service: 'padel-group-session' } ] },

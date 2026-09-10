@@ -4,7 +4,7 @@
    request it receives, then proves the information architecture and the loading discipline:
      initial step        → exactly The Conversation · Personal training · Padel, in that order, no price, no currency
      The Conversation    → availability loads (one slots request, for `conversation`)
-     Personal training   → availability loads for `personal-training-dubai`
+     Personal training   → In person / Online children; In person → `personal-training-dubai`, Online → `personal-training-online`
      Padel               → NO slots request; the other two choices leave the layout; One-to-one / Group session appear
      Padel › One-to-one  → slots for `padel-one-to-one`;  Padel › Group session → `padel-group-session`
      ← Back              → the three top-level choices are back, no reload, the picked date survives
@@ -40,6 +40,7 @@ const check = (name, cond, extra = '') => { if (cond) ok++; else { fail++; log.p
 const BOOKABLE = [
   { slug: 'conversation', title: 'The Conversation', duration_minutes: 60, price_amount: 10000, currency: 'USD', delivery_mode: 'online', default_capacity: 1, sort_order: 10 },
   { slug: 'personal-training-dubai', title: 'Personal training in Dubai', duration_minutes: 60, price_amount: null, currency: 'USD', delivery_mode: 'onsite', default_capacity: 1, sort_order: 40 },
+  { slug: 'personal-training-online', title: 'Personal training online', duration_minutes: 60, price_amount: null, currency: 'USD', delivery_mode: 'online', default_capacity: 1, sort_order: 39 },
   { slug: 'padel-one-to-one', title: 'Padel one-to-one', duration_minutes: 60, price_amount: null, currency: 'USD', delivery_mode: 'onsite', default_capacity: 1, sort_order: 41 },
   { slug: 'padel-group-session', title: 'Padel group session', duration_minutes: 60, price_amount: null, currency: 'USD', delivery_mode: 'onsite', default_capacity: 1, sort_order: 42 },
 ];
@@ -101,14 +102,23 @@ const noOverflow = (page) => page.evaluate(() => document.documentElement.scroll
   const summary = await page.$eval('[data-booking] .bk-summary', (e) => e.textContent);
   check(`${tag}: the details step names the service and time, not the price`, /The Conversation/.test(summary) && !/USD|100/.test(summary), summary);
 
-  // Back, then Personal training → availability for the canonical Dubai service
+  // Back, then Personal training → a family: In person / Online, no availability until a child is picked
   await page.click('[data-booking] .bk-back');
   await page.waitForFunction(() => document.querySelectorAll('[data-booking] .bk-level .bk-service:not([hidden])').length === 3 && !document.querySelector('[data-booking] .bk-children'));
   check(`${tag}: Back after a final choice restores the three and clears the steps below`, !(await page.$('[data-booking] .bk-slot')) && !(await page.$('[data-booking] .bk-form')));
+  const ptBefore = slotsCalls().length;
   await page.click('[data-choice="personal-training"]');
-  await page.waitForFunction(() => document.querySelectorAll('[data-booking] .bk-slot').length === 3);
-  check(`${tag}: Personal training loads availability for personal-training-dubai`, slotsCalls().length === 2 && slotsCalls()[1].service === 'personal-training-dubai');
-  check(`${tag}: Personal training collapses the others too`, JSON.stringify(await visibleChoices(page)) === JSON.stringify(['Personal training']));
+  await page.waitForSelector('[data-booking] .bk-children .bk-service');
+  await page.waitForFunction(() => !document.querySelector('[data-booking] .bk-children').classList.contains('bk-enter'));
+  check(`${tag}: Personal training expands to In person / Online, no availability yet`, slotsCalls().length === ptBefore && !(await page.$('[data-booking] .bk-slot')) && JSON.stringify(await visibleChoices(page)) === JSON.stringify(['Personal training', 'In person', 'Online']));
+  // In person → the canonical Dubai (onsite) service
+  await page.click('[data-choice="personal-training-in-person"]');
+  await page.waitForSelector('[data-booking] .bk-slot');
+  check(`${tag}: Personal training › In person loads availability for personal-training-dubai`, slotsCalls().slice(-1)[0].service === 'personal-training-dubai');
+  // Online → the online service
+  await page.click('[data-choice="personal-training-online"]');
+  await page.waitForFunction((n) => document.querySelectorAll('[data-booking] .bk-slot').length === 3 && window.__x !== n, slotsCalls().length);
+  check(`${tag}: Personal training › Online loads availability for personal-training-online`, slotsCalls().slice(-1)[0].service === 'personal-training-online');
   await page.click('[data-booking] .bk-back');
   await page.waitForFunction(() => document.querySelectorAll('[data-booking] .bk-level .bk-service:not([hidden])').length === 3 && !document.querySelector('[data-booking] .bk-children'));
 
