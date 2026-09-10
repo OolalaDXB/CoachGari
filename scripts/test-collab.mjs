@@ -3,13 +3,28 @@
    Reads the edge function, RPC migration, public pages and email templates as text
    and asserts the invariants that don't need a database (the DB suite cg015 covers
    the negotiation logic). Run: node scripts/test-collab.mjs */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
 let ok = 0, fail = 0;
 const check = (name, cond, extra = '') => { if (cond) ok++; else fail++; console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond ? '' : ' ' + extra}`); };
 
 const edge = read('../supabase/functions/collab/index.ts');
-const mig = read('../supabase/migrations/20261013_cg_collaborations.sql');
+
+/* Every collaboration migration is loaded, not just the foundation: the schema is
+   forward-only, so a later migration can supersede an earlier guarantee and a suite
+   that reads only 20261013 would keep passing on a rule that no longer exists. */
+const MIG_DIR = new URL('../supabase/migrations/', import.meta.url);
+const migFiles = readdirSync(MIG_DIR).filter((f) => /collab/i.test(f) && f.endsWith('.sql')).sort();
+const M = Object.fromEntries(migFiles.map((f) => [f, readFileSync(new URL(f, MIG_DIR), 'utf8')]));
+const mig = M['20261013_cg_collaborations.sql'];
+const COVERED = [
+  '20261013_cg_collaborations.sql', '20261014_cg_finance_collab_label.sql', '20261015_cg_collab_room_link.sql',
+  '20261016_cg_collab_token_at_rest.sql', '20261017_cg_collab_operator_grant.sql', '20261019_cg_collab_link_retrieval.sql',
+  '20261021_cg_collab_pay_start_resume.sql', '20261022_cg_collab_payment_bound_to_accepted.sql',
+];
+check('the foundation migration is present', !!mig);
+check('every collaboration migration on disk is covered by this suite', migFiles.every((f) => COVERED.includes(f)),
+  'uncovered: ' + migFiles.filter((f) => !COVERED.includes(f)).join(', '));
 const page = read('../collab.html');
 const room = read('../c.html');
 const pageJs = read('../assets/collab.js');
@@ -21,7 +36,7 @@ for (const [n, src] of [['collab.html', page], ['c.html', room], ['collab.js', p
   check(`${n} never uses the forbidden prompt`, !FORBIDDEN.test(src));
 check('collab.html uses the canonical prompt "What would you like to explore together?"', /What would you like to explore together\?/.test(page));
 check('collab.html headline is "Collaborate with Coach Gari"', /Collaborate with Coach Gari/.test(page));
-check('public copy always writes "Coach Gari", never a bare first name as the brand', !/\bGari\b(?!\s*[<·])/.test(page.replace(/Coach Gari/g, '')) || true);
+check('public copy always writes "Coach Gari", never a bare first name as the brand', !/\bGari\b(?!\s*[<·])/.test(page.replace(/Coach Gari/g, '')));
 
 /* ---- edge function security ---- */
 check('every non-intake action is token-gated before it runs', /if \(!isToken\(body\.token\)\) return json\(400/.test(edge) && edge.indexOf('isToken(body.token)') < edge.indexOf('action === "room"'));
@@ -47,6 +62,38 @@ check('the room view hides admin internals for a non-admin viewer', /case when p
 check('acceptance is explicit and idempotent (returns already, refuses a superseded/expired version)', /'already', true/.test(mig) && /a newer version exists/.test(mig) && /this proposal has expired/.test(mig));
 check('every write RPC checks a permission or a token, never open', /has_permission\('collab:manage'\)/.test(mig) && /collab_deal_by_token/.test(mig));
 check('non-cash consideration is never turned into a payment (payment_request needs an agreed monetary amount only)', /agree the terms before requesting a payment/.test(mig) && /collaboration_payments/.test(mig));
+
+/* ---- the migrations AFTER the foundation: each superseding rule, asserted where it now lives ---- */
+{
+  const m15 = M['20261015_cg_collab_room_link.sql'], m16 = M['20261016_cg_collab_token_at_rest.sql'];
+  const m17 = M['20261017_cg_collab_operator_grant.sql'], m19 = M['20261019_cg_collab_link_retrieval.sql'];
+  const m20 = M['20261020_cg_definer_grants_lockdown.sql'] ?? read('../supabase/migrations/20261020_cg_definer_grants_lockdown.sql');
+  const m21 = M['20261021_cg_collab_pay_start_resume.sql'], m22 = M['20261022_cg_collab_payment_bound_to_accepted.sql'];
+
+  check('20261015 introduced the room link in the counterparty emails', /room_url/.test(m15) && /email_queue\('collab_ack'/.test(m15));
+  check('20261016 encrypts the room token at rest and drops the plaintext column',
+    /pgp_sym_encrypt/.test(m16) && /room_token_enc/.test(m16) && /drop column if exists room_token/.test(m16)
+    && /revoke all on function public\.collab_room_key\(\)/.test(m16));
+  check('20261017 grants the operator SELECT column by column, excluding both secrets',
+    /revoke select on public\.collaboration_deals from authenticated/.test(m17) && /grant select \(/.test(m17)
+    && !/\broom_token_enc\b|\baccess_token_hash\b/.test(m17.split('grant select (')[1].split(') on public.collaboration_deals')[0]));
+  check('20261019 gates link retrieval behind an audited collab:manage RPC',
+    /function public\.collab_copy_room_link/.test(m19) && /has_permission\('collab:manage'\)/.test(m19) && /'room_link_access'/.test(m19));
+  check('20261019 stops persisting a live link: producers store collab_id, the drain builds the URL',
+    /'collab_id', d\.id/.test(m19) && !/'room_url', 'https:\/\/coachgari28\.com/.test(m19)
+    && /payload \? 'collab_id'/.test(m19) && /collab_room_url\(/.test(m19));
+  check('20261020 revokes the internal SECURITY DEFINER helpers from public/anon/authenticated',
+    ['collab_deal_json', 'collab_deal_by_token', 'collab_new_ref', 'email_payload_booking']
+      .every((f) => new RegExp(`revoke all on function public\\.${f}\\b[\\s\\S]*?from public, anon, authenticated`).test(m20)));
+  check('20261021 resumes a live checkout instead of minting a second order',
+    /resumed', true/.test(m21) && /beau_ph\.cancel_request/.test(m21) && /already settled/.test(m21)
+    && /checkout_expires_at is null or o\.checkout_expires_at > now\(\)/.test(m21));
+  check('20261022 binds a payment to the accepted proposal (non-cash refused, currency pinned, cumulative cap)',
+    /no cash component; non-cash consideration is never charged/.test(m22)
+    && /payment currency must match the accepted proposal/.test(m22)
+    && /would exceed the agreed amount/.test(m22)
+    && /proposal_id = d\.accepted_proposal_id and status <> 'cancelled'/.test(m22));
+}
 
 /* ---- email templates ---- */
 const { render } = await import('../supabase/functions/_shared/email.ts');

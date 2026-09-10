@@ -23,32 +23,51 @@ jobs:
 
       - name: Stripe webhook signature verification (offline, Stripe's scheme)
         run: node scripts/test-webhook-signature.mjs
+      # --experimental-strip-types: these suites import the shared .ts modules directly,
+      # so they assert the code that actually ships instead of a copy. The flag is explicit
+      # rather than relying on the default type stripping of a particular Node 22 patch.
       - name: Collaborations — functional/security checks (offline)
-        run: node scripts/test-collab.mjs
+        run: node --experimental-strip-types scripts/test-collab.mjs
+      - name: Bearer tokens never reach a URL, history or stored attribution (offline)
+        run: node scripts/test-url-scrub.mjs
+      - name: IP identity — trusted hop, fail-closed salt, no PII in logs (offline)
+        run: node scripts/test-contact-ip.mjs
+      - name: Transactional email rendering and outbox drain (offline)
+        run: node --experimental-strip-types scripts/test-email.mjs
+      - name: Back-office workspace — RPC surface and secret hygiene (offline)
+        run: node scripts/test-admin-workspace.mjs
+      - name: Back-office PWA shell (offline)
+        run: node scripts/test-admin-pwa.mjs
+      - name: Booking picker (offline)
+        run: node scripts/test-booking-picker.mjs
       - name: Stripe adapter — embedded Checkout contract (offline)
         run: node --experimental-strip-types scripts/test-stripe-embedded.mjs
 
       - name: Verify config is valid ES module
         run: node --input-type=module -e "import('./config.js').then(m => { if (!m.CONFIG) { console.error('CONFIG export missing'); process.exit(1); } console.log('config.js OK'); })"
 
-  # Database boundary tests — booking, payments/ledger, permissions/RLS.
-  # Runs only when the SUPABASE_DB_URL secret is set (session-pooler URI);
-  # every suite is a rollback transaction, nothing is persisted. A violated
-  # access boundary fails the build.
+  # Database boundary tests — booking, payments/ledger, permissions/RLS, collaborations.
+  # Every suite is a rollback transaction, nothing is persisted. A violated access
+  # boundary fails the build.
+  #
+  # This job must never pass silently: if the harness cannot run (no SUPABASE_DB_URL)
+  # it FAILS, because a green build would otherwise claim RLS and permission coverage
+  # that was never executed. Mark it a required check on main so a broken boundary
+  # cannot be merged.
   db-boundary-tests:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
     steps:
       - uses: actions/checkout@v4
-      - name: Skipped (no SUPABASE_DB_URL secret)
+      - name: Require the database harness (no silent skip)
         if: env.DATABASE_URL == ''
-        run: echo "::notice::SUPABASE_DB_URL not set — database boundary tests skipped. Add the secret to enforce them."
+        run: |
+          echo "::error::SUPABASE_DB_URL is not set, so the database boundary suites (RLS, permissions, collaborations) did not run. This build cannot vouch for them — add the secret."
+          exit 1
       - name: Install psql
-        if: env.DATABASE_URL != ''
         run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
       - name: Run rollback suites
-        if: env.DATABASE_URL != ''
         run: bash scripts/db-tests.sh
 
   # Edge Functions — deployed from main with the same multi-file bundles the
@@ -57,7 +76,7 @@ jobs:
   # contains a changed file are redeployed. Never on pull requests or branches.
   deploy-edge-functions:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: static-checks
+    needs: [static-checks, db-boundary-tests]   # a red access boundary must never reach production
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
