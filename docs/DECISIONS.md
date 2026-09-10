@@ -5,6 +5,42 @@ documented but deliberately **not** implemented. Newest sprint first.
 
 ---
 
+## Collaborations V1 — deal room (2026-09-10)
+
+Public intake (`/collab`) → private token room (`/c/<token>`) → immutable,
+versioned proposals and counter-offers → explicit acceptance → optional
+monetary payment through the existing BEAU PH rails → Finance visibility.
+Migration `20261013_cg_collaborations.sql`; edge function `collab`; admin
+Collaborations workspace; suites `cg015_collaborations.sql` (24) and
+`scripts/test-collab.mjs` (38).
+
+- **No new payment rails, no BEAU PH extraction.** A collaboration payment is
+  a target-less order (`order_reason = 'collaboration'`, both FKs null, like
+  `support`), driven through `cg_ph_request_for_order` → `beau_ph.create_request`
+  (intent `other`, which the Coach Gari Stripe rail now lists) and confirmed by
+  the same Stripe webhook. Non-cash consideration is stored on the immutable
+  proposal and is **never** turned into a payment.
+- **Commission = the standard 10%, confirmed (owner, 2026-09-10).** A monetary
+  collaboration payment accrues Oolala's flat commission via the existing
+  kind-agnostic `recompute_earning` (`v_rate` default `0.1000`). No
+  collaboration-specific rate was invented; the owner confirmed collaborations
+  carry the same 10% as coaching income, so **no code change was needed** — the
+  existing engine already yields 10% and writes `partner_earnings` normally.
+- **Access.** `collab:view` / `collab:manage`. Gari is granted by the migration
+  (launch coach); **Mickaël (`mickael@thestudio.mt`) was granted operationally**
+  on 2026-09-10 (provisioning is operational data, never a migration), audited
+  under `admin_audit(area='permission', action='grant')`.
+- **Finance label.** Collaboration payments show in Finance as type `other`
+  (the existing derivation CASE fallback) with the collaboration reference in
+  the payment-request metadata / transaction detail. A distinct `Collaboration`
+  label would mean extending the finance read CASEs; left out of V1 to avoid
+  touching the working Finance surface.
+- **Token.** 32 random bytes, only the SHA-256 stored; invalid or revoked
+  tokens reveal nothing; the room view exposes no admin internals or private
+  notes. Revoke / regenerate from the admin.
+
+---
+
 ## Canonical product rule (applies to every sprint)
 
 - **People belong to Gari.** Enquiries, messages, client communication,
