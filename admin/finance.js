@@ -166,7 +166,11 @@ async function openTransaction(reference) {
     ${req && req.fx_quote ? `<div class="cg-sec"><div class="cg-sec-t">FX quote</div>${kv([['Rate', `${esc(req.fx_quote.customer_rate)} (reference ${esc(req.fx_quote.reference_rate)}, ${esc(req.fx_quote.source)})`], ['Freshness', esc(req.fx_quote.freshness)], ['Quoted', when(req.fx_quote.created_at)], ['Status', esc(req.fx_quote.status)]])}</div>` : ''}
     ${d.booking ? `<div class="cg-sec"><div class="cg-sec-t">Related session</div>${kv([['Booking', esc(d.booking.reference) + ' · ' + st(d.booking.status)], ['When', when(d.booking.start_at)], ['Service', esc(d.booking.service_title || '')]])}</div>` : ''}
     ${d.pack ? `<div class="cg-sec"><div class="cg-sec-t">Related package</div>${kv([['Package', esc(d.pack.reference) + ' · ' + st(d.pack.payment_status)], ['Title', esc(d.pack.title || '')], ['Sessions', esc(String(d.pack.total_sessions || ''))]])}</div>` : ''}
-    ${d.earning ? `<div class="cg-sec"><div class="cg-sec-t">Ledger</div>${kv([['Gross', money(d.earning.gross_amount, d.earning.currency)], ['Fee', money(d.earning.stripe_fee, d.earning.currency)], ['Refunds', money(d.earning.refund_amount, d.earning.currency)], ['Net', money(d.earning.net_collected, d.earning.currency)], ['Commission', money(d.earning.oolala_commission, d.earning.currency)], ['Payable to Gari', money(d.earning.gari_payable, d.earning.currency)], ['Earning', st(d.earning.status)]])}</div>` : ''}
+    ${d.earning ? `<div class="cg-sec"><div class="cg-sec-t">Ledger</div>${kv([['Gross', money(d.earning.gross_amount, d.earning.currency)], ['Fee', money(d.earning.stripe_fee, d.earning.currency)], ['Refunds', money(d.earning.refund_amount, d.earning.currency)], ['Net', money(d.earning.net_collected, d.earning.currency)], ['Commission', money(d.earning.oolala_commission, d.earning.currency)],
+          ['Collected by', d.earning.collection_origin === 'direct' ? 'Coach Gari, directly' : d.earning.collection_origin === 'platform' ? 'Oolala' : undefined],
+          ['Payable to Gari', d.earning.direction === 'receivable' ? undefined : money(d.earning.gari_payable, d.earning.currency)],
+          ['Receivable by Studio', d.earning.direction === 'receivable' ? money(d.earning.studio_receivable, d.earning.currency) : undefined],
+          ['Earning', st(d.earning.status)]])}</div>` : ''}
     ${(d.refunds || []).length ? `<div class="cg-sec"><div class="cg-sec-t">Refunds</div>${d.refunds.map((r) => `<div>${money(r.amount, r.currency)} · ${st(r.status)} · ${when(r.created_at)}${r.reason ? ` · ${esc(r.reason)}` : ''}</div>`).join('')}</div>` : ''}
     ${(d.chargebacks || []).length ? `<div class="cg-sec"><div class="cg-sec-t">Disputes</div>${d.chargebacks.map((r) => `<div>${money(r.amount, r.currency)} · ${st(r.status)} · ${when(r.created_at)}</div>`).join('')}</div>` : ''}
     <details class="pf-tech"><summary>Timeline (${(d.requests || []).reduce((n, r) => n + (r.events || []).length, 0)} events)</summary>
@@ -187,8 +191,9 @@ async function ledgerPanel(host, manage) {
   const today = new Date(); const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
   const isoDate = (d) => d.toISOString().slice(0, 10);
   host.innerHTML = `
-    <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Net after fees, refunds and chargebacks; the Oolala commission (${esc(C.config.COMMISSION_RATE)}); what is payable to Gari. Each line is in the currency it was collected in.</p>
-    <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Payable to Gari, not yet settled: <b>${Object.entries(open.reduce((m, o) => { m[o.ledger_currency] = (m[o.ledger_currency] || 0) + (o.gari_payable || 0); return m; }, {})).map(([c, v]) => money(v, c)).join(' · ') || '—'}</b></p>
+    <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Net after fees, refunds and chargebacks, and the Oolala commission at the rate of the origin (see Commissions). A settlement moves money Oolala collected and holds; what Gari collected himself is a receivable and is never swept into one. Each line is in the currency it was collected in.</p>
+    <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Payable to Gari, not yet settled: <b>${Object.entries(open.filter((o) => o.direction !== 'receivable').reduce((m, o) => { m[o.ledger_currency] = (m[o.ledger_currency] || 0) + (o.gari_payable || 0); return m; }, {})).map(([c, v]) => money(v, c)).join(' · ') || '—'}</b>
+      · receivable by Studio on money Gari collected: <b>${Object.entries(open.filter((o) => o.direction === 'receivable').reduce((m, o) => { m[o.ledger_currency] = (m[o.ledger_currency] || 0) + (o.studio_receivable || 0); return m; }, {})).map(([c, v]) => money(v, c)).join(' · ') || '—'}</b></p>
     <h2 style="font-size:15px">Settlements</h2>
     ${C.table(['Ref', 'Period', 'Items', 'Gross', 'Fees', 'Refunds/CB', 'Net', 'Commission', 'Payable', 'Status', ''], (settlements || []).map((s) => `<tr>
       <td>${esc(s.reference)}</td><td>${s.period_start} → ${s.period_end}</td><td class="num">${(orders.filter((o) => o.settlement_id === s.id)).length}</td>
@@ -204,7 +209,8 @@ async function ledgerPanel(host, manage) {
       <td>${o.booking_reference ? esc(o.booking_reference) + '<br>' + st(o.booking_status) : o.pack_reference ? esc(o.pack_reference) + '<br><span class="ad-muted" style="font-size:12px">Package</span>' : '—'}</td>
       <td>${esc(o.service_title || '—')}</td>
       <td class="num">${money(o.gross_amount, o.currency)}</td><td class="num">${o.earning_status && o.fee_known === false ? '<span class="ad-muted">pending</span>' : money(o.stripe_fee, o.ledger_currency)}</td><td class="num">${money(o.refund_amount, o.ledger_currency)}</td><td class="num">${money(o.chargeback_amount, o.ledger_currency)}</td>
-      <td class="num">${money(o.net_collected, o.ledger_currency)}</td><td class="num">${money(o.oolala_commission, o.ledger_currency)}</td><td class="num"><b>${money(o.gari_payable, o.ledger_currency)}</b></td>
+      <td class="num">${money(o.net_collected, o.ledger_currency)}</td><td class="num">${money(o.oolala_commission, o.ledger_currency)}${o.direction === 'receivable' ? '<div class="msg" style="font-size:12px">receivable</div>' : ''}</td>
+      <td class="num">${o.direction === 'receivable' ? '<span class="ad-muted">—</span>' : `<b>${money(o.gari_payable, o.ledger_currency)}</b>`}</td>
       <td>${o.earning_status ? st(o.earning_status) : '—'}${o.adjusted_at ? '<div class="msg">adjusted after settlement</div>' : ''}</td></tr>`), 'No orders yet.')}`;
   const reload = () => ledgerPanel(host, manage).catch(C.fail);
   host.querySelectorAll('[data-paid]').forEach((b) => b.onclick = async () => {
@@ -224,23 +230,44 @@ async function ledgerPanel(host, manage) {
 }
 
 /* =============================== FINANCE · COMMISSIONS =============================== */
-/* The Oolala commission on money Oolala collected (Stripe), month × currency × type — service, package,
-   support. Manual rails (Aani, bank transfer, cash) never carry a commission: that money never passed
-   through Oolala. Settled = included in a settlement to Gari; open = not yet. Never summed across currencies. */
+/* The Oolala commission on every payment, month × currency × origin × type. The rate follows the
+   ORIGIN of the money, never the technical rail:
+     · platform  — Oolala collected it (Stripe). Oolala holds the cash, keeps its commission and OWES
+                   Gari the net. Direction: payable.
+     · direct    — Gari collected it himself (cash, Aani, bank transfer, in-person terminal). Gari holds
+                   the cash; Studio's commission is a RECEIVABLE, money Gari owes Studio. Nothing here
+                   is Studio's to pay out.
+   The two directions are never mixed: money Oolala owes Gari is not money Gari owes Studio, and a single
+   blended figure would invent a balance that exists nowhere. Settled = included in a settlement to Gari;
+   open = not yet. Never summed across currencies either. */
+const DIRECTION_LABEL = { payable: 'Payable to Gari', receivable: 'Receivable by Studio' };
+const ORIGIN_LABEL = { platform: 'Oolala collected', direct: 'Gari collected' };
+
 export async function financeCommissions() {
   const { esc, money, view } = C;
   const d = await rpc('finance_commissions');
-  const rows = d.rows || [], totals = d.totals || [];
-  const pct = Math.round(Number(d.rate || 0.1) * 10000) / 100;
+  const rows = d.rows || [], totals = d.totals || [], rates = d.rates || [];
+  const pct = (v) => Math.round(Number(v || 0) * 10000) / 100;
+  const rateLine = rates.length
+    ? rates.map((r) => `${esc(String(pct(r.rate)))} % ${esc(ORIGIN_LABEL[r.origin] || r.origin)}`).join(' · ')
+    : 'no rate configured';
+  const kpi = (dir) => totals.filter((t) => t.direction === dir).map((t) => `<div class="ad-kpi"><b>${money(t.commission, t.currency)}</b><span>${esc(DIRECTION_LABEL[dir] || dir)} · ${esc(t.currency)} · settled ${money(t.commission_settled, t.currency)} · open ${money(t.commission_open, t.currency)} · on ${money(t.net, t.currency)} net from ${t.payments} payment${t.payments === 1 ? '' : 's'}</span></div>`).join('');
+  const payable = kpi('payable'), receivable = kpi('receivable');
   view.innerHTML = `
-    <div class="ad-head"><div><h1>Oolala commissions</h1><p class="ad-muted">The ${esc(String(pct))} % commission on every payment Oolala collected for Coach Gari — sessions, packages and support alike — after Stripe fees, refunds and chargebacks. Aani, bank transfer and cash carry no commission: that money never passed through Oolala. Figures stay in the currency collected.</p></div></div>
-    <div class="ad-kpis">${totals.map((t) => `<div class="ad-kpi"><b>${money(t.commission, t.currency)}</b><span>Commission (${esc(t.currency)}) · settled ${money(t.commission_settled, t.currency)} · open ${money(t.commission_open, t.currency)} · on ${money(t.net, t.currency)} net from ${t.payments} payment${t.payments === 1 ? '' : 's'}</span></div>`).join('') || '<div class="ad-kpi"><b>—</b><span>No commission yet</span></div>'}</div>
+    <div class="ad-head"><div><h1>Oolala commissions</h1><p class="ad-muted">Commission by origin of the money — ${rateLine} — after Stripe fees, refunds and chargebacks. What Oolala collected it owes Gari net of commission; what Gari collected himself leaves Studio with a receivable, not funds to pay out. Figures stay in the currency collected.</p></div></div>
+    <h2 style="font-size:15px;margin-top:4px">Oolala collected — commission kept, net payable to Gari</h2>
+    <div class="ad-kpis">${payable || '<div class="ad-kpi"><b>—</b><span>Nothing collected by Oolala yet</span></div>'}</div>
+    <h2 style="font-size:15px;margin-top:20px">Gari collected — commission receivable by Studio</h2>
+    <div class="ad-kpis">${receivable || '<div class="ad-kpi"><b>—</b><span>Nothing collected directly yet</span></div>'}</div>
     <div class="ad-panel">
-      ${C.table(['Month', 'Currency', 'Type', 'Payments', 'Gross', 'Stripe fees', 'Refunds / chargebacks', 'Net', 'Commission', 'Settled', 'Open', 'Gari payable'], rows.map((r) => `<tr>
-        <td><b>${esc(r.month)}</b></td><td>${esc(r.currency)}</td><td>${esc(TYPE_LABEL[r.type] || r.type)}</td><td class="num">${r.payments}</td>
+      ${C.table(['Month', 'Currency', 'Origin', 'Type', 'Payments', 'Gross', 'Stripe fees', 'Refunds / chargebacks', 'Net', 'Commission', 'Settled', 'Open', 'Gari payable', 'Studio receivable'], rows.map((r) => `<tr>
+        <td><b>${esc(r.month)}</b></td><td>${esc(r.currency)}</td>
+        <td>${esc(ORIGIN_LABEL[r.origin] || r.origin || '—')}<div class="ad-muted" style="font-size:12px">${esc(DIRECTION_LABEL[r.direction] || r.direction || '')}</div></td>
+        <td>${esc(TYPE_LABEL[r.type] || r.type)}</td><td class="num">${r.payments}</td>
         <td class="num">${money(r.gross, r.currency)}</td><td class="num">${money(r.fees, r.currency)}</td><td class="num">${money((r.refunds || 0) + (r.chargebacks || 0), r.currency)}</td>
         <td class="num">${money(r.net, r.currency)}</td><td class="num"><b>${money(r.commission, r.currency)}</b></td><td class="num">${money(r.commission_settled, r.currency)}</td><td class="num">${money(r.commission_open, r.currency)}</td>
-        <td class="num">${money(r.gari_payable, r.currency)}${r.adjusted ? `<div class="msg" style="font-size:12px">${r.adjusted} adjusted after settlement</div>` : ''}</td></tr>`), 'No commission yet.')}
+        <td class="num">${r.direction === 'payable' ? money(r.gari_payable, r.currency) : '—'}${r.adjusted ? `<div class="msg" style="font-size:12px">${r.adjusted} adjusted after settlement</div>` : ''}</td>
+        <td class="num">${r.direction === 'receivable' ? `<b>${money(r.studio_receivable, r.currency)}</b>` : '—'}</td></tr>`), 'No commission yet.')}
     </div>`;
 }
 
