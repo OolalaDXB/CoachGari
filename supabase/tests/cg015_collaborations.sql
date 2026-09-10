@@ -173,5 +173,22 @@ begin
   reset role;
   perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
 
+  -- 19. the internal SECURITY DEFINER helpers are not callable directly by anon, nor by a
+  --     signed-in operator: they are reached only through other definer functions (owner).
+  set local role anon;
+  begin perform public.collab_deal_json(did, true); fail := fail + 1; log := log || ' [anon-deal_json]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin perform public.collab_deal_by_token(tok); fail := fail + 1; log := log || ' [anon-by_token]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin perform public.collab_new_ref(); fail := fail + 1; log := log || ' [anon-new_ref]'; exception when insufficient_privilege then ok := ok + 1; end;
+  reset role;
+  set local role authenticated;
+  perform set_config('request.jwt.claims', '{"email":"collabviewer@test.dev","role":"authenticated"}', true);
+  begin perform public.collab_deal_json(did, true); fail := fail + 1; log := log || ' [authed-deal_json]'; exception when insufficient_privilege then ok := ok + 1; end;
+  begin perform public.collab_deal_by_token(tok); fail := fail + 1; log := log || ' [authed-by_token]'; exception when insufficient_privilege then ok := ok + 1; end;
+  reset role;
+  perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
+  -- and the flow that legitimately uses them still works (they run as owner)
+  if (public.collab_room(tok) ->> 'public_ref') = ref and (public.collab_admin_get(did) ->> 'contact_email') = 'brand@example.com'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [definer-flow-broke]'; end if;
+
   raise exception 'CG015_TESTS ok=% fail=% %', ok, fail, log;
 end $$;
