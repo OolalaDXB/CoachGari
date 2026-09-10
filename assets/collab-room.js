@@ -85,7 +85,9 @@ function renderPayment() {
   const shown = paid || pending;
   $('pay-amt').textContent = money(shown.amount, shown.currency);
   $('pay-label').textContent = shown.label || 'Agreed collaboration payment';
-  if (paid || q.get('paid') === '1') { $('pay-live').hidden = true; $('card-panel').hidden = true; $('pay-done').hidden = false; }
+  // "Paid" is a server state only: the verified Stripe webhook moves the order to paid and
+  // the room re-reads it. A ?paid=1 in the URL is a return marker, never proof of payment.
+  if (paid) { $('pay-live').hidden = true; $('card-panel').hidden = true; $('pay-confirming').hidden = true; $('pay-done').hidden = false; }
   else { $('pay-live').hidden = false; $('pay-done').hidden = true; }
 }
 
@@ -160,7 +162,7 @@ async function startPayment() {
     if (checkoutInstance) { try { checkoutInstance.destroy(); } catch { /* ignore */ } }
     checkoutInstance = await stripe.initEmbeddedCheckout({
       clientSecret: data.client_secret,
-      onComplete: () => { setTimeout(load, 1500); },
+      onComplete: () => { $('card-panel').hidden = true; confirmPaid(); },
     });
     $('pay-live').hidden = true; $('card-panel').hidden = false;
     checkoutInstance.mount('#card-mount');
@@ -169,5 +171,29 @@ async function startPayment() {
   }
 }
 
-load();
-if (q.get('paid') === '1') setTimeout(load, 2000);
+/* Completion in the browser is NOT proof of payment: re-read `room` until the verified
+   webhook has moved the order to paid. Same rule as the secure report page (/r). */
+let confirming = false;
+async function confirmPaid() {
+  if (confirming) return; confirming = true;
+  const b = $('pay-confirming'); $('pay-card').hidden = false; b.hidden = false;
+  const waiting = () => { $('pay-live').hidden = true; $('card-panel').hidden = true; b.hidden = false; };
+  b.textContent = 'Thank you. Your payment is being confirmed. This page will update shortly.';
+  waiting();
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, i < 5 ? 2000 : 4000));
+    const { res, data } = await api('room');
+    if (res.ok && data && data.ok) {
+      deal = data; render();
+      if ((deal.payments || []).some((p) => (p.order_status || p.status) === 'paid')) { b.hidden = true; confirming = false; return; }
+      waiting();   // render() re-shows the pay form; keep it hidden while we wait on the webhook
+    }
+  }
+  b.textContent = 'Still confirming your payment. You can close this page: it updates as soon as Stripe reports the payment, and Coach Gari sees it too.';
+  confirming = false;
+}
+
+load().then(() => {
+  // Returned from Stripe: show "confirming" and poll the server; never a URL-driven paid state.
+  if (q.get('paid') === '1' && !(deal && (deal.payments || []).some((p) => (p.order_status || p.status) === 'paid'))) confirmPaid();
+});

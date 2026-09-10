@@ -36,6 +36,7 @@ const logLines = [...edge.matchAll(/log\("[^"]+",\s*\{([^}]*)\}\)/g)].map((m) =>
 check('no log line carries a name, email, message or contact (PII)', logLines.every((l) => !/\bname\b|email|message|contact|initial_request|company/.test(l)), JSON.stringify(logLines.filter((l) => /\bname\b|email|message|contact/.test(l))));
 check('analytics events carry only event names, no amounts or PII', [pageJs, roomJs].every((s) => [...s.matchAll(/plausible\(([^)]*)\)/g)].every((m) => !/amount|name|email|currency|,/.test(m[1]))));
 check('card payment reuses BEAU PH through collab_pay_start + attach_checkout (no new rail)', /collab_pay_start/.test(edge) && /attach_checkout/.test(edge) && /createPaymentRequest/.test(edge) && !/new .*Provider|addProvider|register.*rail/i.test(edge));
+check('the room never derives a paid state from the URL — only a server-confirmed order', !/paid \|\| q\.get\('paid'\)/.test(roomJs) && /if \(paid\)/.test(roomJs) && /confirmPaid/.test(roomJs) && /\(p\.order_status \|\| p\.status\) === 'paid'/.test(roomJs));
 
 /* ---- migration invariants ---- */
 check('the room token is stored hashed, never in the clear', /access_token_hash/.test(mig) && /encode\(extensions\.digest\(tok, ?'sha256'\), ?'hex'\)/.test(mig) && /gen_random_bytes\(32\)/.test(mig));
