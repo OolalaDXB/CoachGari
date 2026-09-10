@@ -29,6 +29,7 @@
    ============================================================= */
 import { CONFIG } from '/config.js';
 import { initFinance, financeTransactions, financeCommissions, financePaymentMethods, phRails, phFx } from '/admin/finance.js';
+import { initCollab, collabList } from '/admin/collab.js';
 
 const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUBLISHABLE_KEY, { auth: { flowType: 'pkce', persistSession: true } });
 
@@ -128,6 +129,7 @@ function navModel() {
               { key: 'tours', label: 'Tour stops', show: () => true, run: tours } ] },
     { key: 'bookings', label: 'Bookings', icon: '▤', show: () => has('coach:operations'), run: bookings },
     { key: 'services', label: 'Services', icon: '❖', show: () => has('catalog:view'), run: catalogue },
+    { key: 'collab', label: 'Collaborations', icon: '⇄', show: () => has('collab:view'), run: collabList },
     // Finance = the daily business surface (Transactions first, never the infrastructure). BEAU PH = the temporary embedded
     // payment-infrastructure workspace (Rails, FX); both gated on the finance permissions, never on platform:admin.
     { key: 'finance', label: 'Finance', icon: '$', show: () => has('finance:view'),
@@ -153,6 +155,7 @@ async function render(session) {
     const { data, error } = await sb.rpc('my_permissions'); if (error) throw error;
     me = data;
     initFinance({ sb, $, esc, money, st, fmt, table, toast, fail, has, view, config: CONFIG, openProfile });
+    initCollab({ sb, $, esc, money, st, fmt, table, toast, fail, has, view, config: CONFIG });
     const model = navModel();
     const others = model.filter((s) => s.key !== 'overview' && s.show());
     NAV = model.filter((s) => s.key === 'overview' ? others.length > 0 : s.show())

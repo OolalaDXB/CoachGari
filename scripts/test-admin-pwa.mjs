@@ -68,12 +68,12 @@ await page.goto(`${base}/admin/`);
 const reg = await page.evaluate(async () => { const r = await navigator.serviceWorker.ready; return { scope: r.scope, active: !!r.active }; });
 check('service worker registered with scope /admin/', reg.active && reg.scope === `${base}/admin/`, JSON.stringify(reg));
 check('manifest linked from the admin page', await page.$eval('link[rel=manifest]', (l) => l.getAttribute('href')) === '/admin/manifest.webmanifest');
-await page.waitForFunction(async () => { const c = await caches.open('cg-admin-v2'); return (await c.keys()).length >= 8; });
-const cached = await page.evaluate(async () => { const c = await caches.open('cg-admin-v2'); return (await c.keys()).map((k) => new URL(k.url).pathname); });
+await page.waitForFunction(async () => { const c = await caches.open('cg-admin-v3'); return (await c.keys()).length >= 8; });
+const cached = await page.evaluate(async () => { const c = await caches.open('cg-admin-v3'); return (await c.keys()).map((k) => new URL(k.url).pathname); });
 check('shell cached after install (html, css, js, config, manifest, icons)', ['/admin/index.html', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/config.js', '/assets/coach-gari.css', '/admin/manifest.webmanifest'].every((p) => cached.includes(p)), cached.join(' '));
 // a data request through the page: fetched, never stored
 await page.evaluate(() => fetch('https://acrjrlgeeyseyolmofuq.supabase.co/rest/v1/contacts?select=id').catch(() => {}));
-const dataCached = await page.evaluate(async () => { const c = await caches.open('cg-admin-v2'); return (await c.keys()).some((k) => k.url.includes('supabase.co')); });
+const dataCached = await page.evaluate(async () => { const c = await caches.open('cg-admin-v3'); return (await c.keys()).some((k) => k.url.includes('supabase.co')); });
 check('Supabase responses are never cached', !dataCached);
 // offline: the shell still opens
 await ctx.setOffline(true);
