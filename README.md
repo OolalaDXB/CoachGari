@@ -46,7 +46,7 @@ decision trail.
 ├── assets/
 │   ├── coach-gari.css            → Coach Gari design system (white / #1540E8 / Manrope)
 │   ├── studio-mt.css             → Studio MT design system (platinum / #1A3832 / Cormorant)
-│   ├── site.js                   → reveal · COMMERCE toggle · WhatsApp · attribution · form · config injection
+│   ├── site.js                   → reveal · catalogue (SHOW_PUBLIC_ENQUIRY_PRICES) · WhatsApp · attribution · form · config injection
 │   └── img/                      → gari.jpg (placeholder photo), oo-icon-*.svg
 ├── admin/                        → back-office (noindex): magic-link sign-in, tabs by permission
 ├── config.js                     → single source of truth for public values (never secrets)
@@ -73,7 +73,7 @@ decision trail.
 
 ```js
 export const CONFIG = {
-  COMMERCE: false,                       // prices hidden, CTAs go to the form / WhatsApp
+  SHOW_PUBLIC_ENQUIRY_PRICES: false,     // enquiry-only product prices hidden ("On request"), CTAs go to the form / WhatsApp; true = prices + data-checkout buttons. Not a commerce switch: booking + Checkout run regardless
   WHATSAPP: '971521365065',              // digits only → wa.me links with a pre-filled message
   FORM_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/contact',
   BOOKING_ENDPOINT: '…/functions/v1/booking',   // CG-002 public booking API
@@ -506,7 +506,7 @@ in Git. No CMS, no `site_content` table.
   charged exactly that amount at Checkout; `enquiry` = a card whose button
   opens the enquiry form with the matching interest preselected. An
   enquiry-only product can never be held (`create_hold` refuses it). Prices
-  of enquiry-only products are shown only while `COMMERCE: true` in
+  of enquiry-only products are shown only while `SHOW_PUBLIC_ENQUIRY_PRICES: true` in
   `config.js`; a bookable service always shows its price.
 - **Writes** go only through `catalog_save_service(jsonb)` (requires
   `catalog:manage`; `authenticated` has no insert / update / delete grant on

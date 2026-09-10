@@ -6,9 +6,15 @@
    service role) live only in the Supabase Edge Function env.
    ============================================================= */
 export const CONFIG = {
-  // false = prices hidden, every CTA goes to the enquiry form / WhatsApp.
-  // true  = prices shown, buy buttons use each item's data-checkout.
-  COMMERCE: false,
+  // Public price display for enquiry-only products (not a commerce on/off switch —
+  // booking and Checkout run regardless of this flag).
+  //   false = the price of an enquiry-only product is hidden ("On request");
+  //           every CTA goes to the enquiry form / WhatsApp.
+  //   true  = prices shown, buy buttons use each item's data-checkout and the
+  //           main CTA points to the programme grid instead of the form.
+  // Bookable (slot) services never show a price on their card either way: it is
+  // disclosed in the booking recap once a time is held.
+  SHOW_PUBLIC_ENQUIRY_PRICES: false,
 
   // wa.me format, digits only. Buttons build
   // https://wa.me/<WHATSAPP>?text=<pre-filled message>.

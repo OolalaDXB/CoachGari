@@ -989,7 +989,7 @@ async function catalogue() {
           <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="featured" ${editing.featured ? 'checked' : ''}> Highlighted card</label></div>
         <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button><button class="btn btn-line btn-sm" type="button" data-cancel-edit>Cancel</button></div>
       </form>
-      <p class="ad-note">A bookable service with a price is charged exactly this amount at Checkout. Prices of enquiry-only products are shown on the website only when commerce is switched on in config.js.</p></div>` : ''}
+      <p class="ad-note">A bookable service with a price is charged exactly this amount at Checkout. Prices of enquiry-only products are shown on the website only when SHOW_PUBLIC_ENQUIRY_PRICES is true in config.js.</p></div>` : ''}
     <div class="ad-panel"><h2>Change log</h2>${table(['When', 'Who', 'Service', 'Action', 'Fields'], (audit || []).map((a) => `<tr><td>${fmt(a.changed_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'short' })}</td><td>${esc(a.changed_by)}</td><td>${esc(a.slug)}</td><td>${st(a.action === 'create' ? 'new' : 'contacted')}</td><td class="msg">${esc((a.changed_fields || []).join(', '))}</td></tr>`), 'No change recorded yet.')}</div>`;
   view.querySelector('[data-new-svc]')?.addEventListener('click', () => { view.dataset.editSvc = 'new'; catalogue().catch(fail); });
   view.querySelectorAll('[data-edit-svc]').forEach((b) => b.onclick = () => { view.dataset.editSvc = b.dataset.editSvc; catalogue().catch(fail); });

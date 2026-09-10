@@ -135,7 +135,7 @@ import { CONFIG } from '/config.js';
      booking_mode 'enquiry' → CTA goes to the enquiry form, interest preselected
    Prices: a bookable service shows NO price on its card (the price
    is disclosed in the booking recap once a time is held). Enquiry-only
-   products show their price only when CONFIG.COMMERCE is true,
+   products show their price only when CONFIG.SHOW_PUBLIC_ENQUIRY_PRICES is true,
    otherwise "On request".                                             */
 (function catalogue(){
   var host = document.querySelector('[data-catalogue]');
@@ -146,7 +146,7 @@ import { CONFIG } from '/config.js';
   var INTEREST = { 'online-coaching': 'Online coaching', 'programme-12w': 'The 12-week programme', 'live-group': 'Live group sessions', 'conversation': 'A conversation' };
   function price(s){
     if (s.price_amount === null || s.price_amount === undefined) return null;
-    if (s.booking_mode !== 'slot' && !CONFIG.COMMERCE) return null;
+    if (s.booking_mode !== 'slot' && !CONFIG.SHOW_PUBLIC_ENQUIRY_PRICES) return null;
     var units = s.price_amount / 100;
     var num = (units % 1 === 0) ? String(units) : units.toFixed(2);
     return SYMBOL[s.currency] ? SYMBOL[s.currency] + num : num + ' ' + s.currency;
@@ -193,7 +193,7 @@ import { CONFIG } from '/config.js';
     host.appendChild(node('p', 'catalogue-wait', 'The programmes are taking a moment to load. Use the form below or message Coach Gari on WhatsApp.'));
   });
 
-  if (CONFIG.COMMERCE) {
+  if (CONFIG.SHOW_PUBLIC_ENQUIRY_PRICES) {
     document.querySelectorAll('[data-cta-main]').forEach(function(a){
       if (a.getAttribute('href') === '#contact') a.setAttribute('href', '#programme');
     });
