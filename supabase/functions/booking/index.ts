@@ -21,10 +21,13 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 import { drainOutbox } from "../_shared/email.ts";                  // cancellation email (queued by cancel_booking for a confirmed booking)
+import { clientIp, xffHops, sha256hex } from "../_shared/client-ip.ts";   // trusted-hop IP derivation, shared with contact / consent
 
 const IP_SALT = Deno.env.get("IP_HASH_SALT") ?? "coachgari-cg001";
-const HOLD_RATE_WINDOW_MIN = 10;
-const HOLD_RATE_MAX = 10;
+const HOLD_RATE_WINDOW_MIN = 10;   // per IP hash
+const HOLD_RATE_MAX = 10;          // holds per window per identity
+const GLOBAL_HOLD_WINDOW_MIN = 10; // back-stop, all callers together (identity-independent)
+const GLOBAL_HOLD_MAX = 40;        // a single coach's calendar sees a few holds a day; 40 in 10 min is a flood
 const MAX_BODY_BYTES = 8 * 1024;
 
 const cors = (origin: string | null, allowed: boolean): HeadersInit => corsHeaders(origin, allowed, "GET, POST, OPTIONS");
@@ -44,15 +47,9 @@ const isDate = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{
 const isSlug = (s: unknown): s is string => typeof s === "string" && /^[a-z0-9-]{2,80}$/.test(s);
 const isTz = (s: unknown): s is string => typeof s === "string" && /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$|^UTC$/.test(s);
 
-async function sha256hex(s: string) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-function clientIp(req: Request) {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? "unknown";
-}
+/* IP trust order (cf-connecting-ip → right-most X-Forwarded-For hop → x-real-ip → "unknown")
+   and the evidence behind it live in _shared/client-ip.ts, shared with contact / consent. It
+   stays best-effort (no documented guarantee), hence the global hold back-stop below. */
 const log = (event: string, data: Record<string, unknown> = {}) =>
   console.log(JSON.stringify({ fn: "booking", event, ...data }));
 
@@ -200,10 +197,17 @@ Deno.serve(async (req: Request) => {
     if (fields.length) return json(400, { ok: false, error: "validation", fields }, origin, allowed);
 
     const ipHash = await sha256hex(IP_SALT + clientIp(req));
+    const hops = xffHops(req);
     const since = new Date(Date.now() - HOLD_RATE_WINDOW_MIN * 60_000).toISOString();
     const { count } = await supabase.from("bookings").select("id", { count: "exact", head: true })
       .eq("ip_hash", ipHash).gte("created_at", since);
-    if ((count ?? 0) >= HOLD_RATE_MAX) { log("rate_limited"); return json(429, { ok: false, error: "rate_limited" }, origin, allowed); }
+    if ((count ?? 0) >= HOLD_RATE_MAX) { log("rate_limited", { xff_hops: hops }); return json(429, { ok: false, error: "rate_limited" }, origin, allowed); }
+
+    // Identity-independent back-stop: even if a caller rotates its X-Forwarded-For, the total
+    // hold rate across all callers is capped over a short window so the calendar can't be flooded.
+    const gSince = new Date(Date.now() - GLOBAL_HOLD_WINDOW_MIN * 60_000).toISOString();
+    const { count: gCount } = await supabase.from("bookings").select("id", { count: "exact", head: true }).gte("created_at", gSince);
+    if ((gCount ?? 0) >= GLOBAL_HOLD_MAX) { log("rate_limited_global", { window_min: GLOBAL_HOLD_WINDOW_MIN, xff_hops: hops }); return json(429, { ok: false, error: "rate_limited" }, origin, allowed); }
 
     const { data, error } = await supabase.rpc("create_hold", {
       p_service_slug: service, p_start_at: startAt, p_participants: participants, p_idempotency_key: key,

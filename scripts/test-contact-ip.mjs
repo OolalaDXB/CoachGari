@@ -11,6 +11,7 @@ const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
 const shared = read('../supabase/functions/_shared/client-ip.ts');
 const src = read('../supabase/functions/contact/index.ts');
 const consent = read('../supabase/functions/consent/index.ts');
+const booking = read('../supabase/functions/booking/index.ts');
 let ok = 0, fail = 0;
 const check = (name, cond, extra = '') => { if (cond) ok++; else fail++; console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond ? '' : ' ' + extra}`); };
 
@@ -23,6 +24,11 @@ check('consent no longer reads the left-most X-Forwarded-For hop', !/x-forwarded
 check('consent salts evidence with CONSENT_IP_SALT, never the service-role key', /Deno\.env\.get\("CONSENT_IP_SALT"\)/.test(consent) && !/const salt = Deno\.env\.get\("SUPABASE_SERVICE_ROLE_KEY"\)/.test(consent) && /sha256hex\(salt \+ "\|" \+ ip\)/.test(consent));
 check('consent: missing salt → ip_hash null + log line, the consent is still submitted', /consent_ip_salt_missing/.test(consent) && /salt && ip !== "unknown" \? await sha256hex/.test(consent) && /rpc\("consent_submit", \{ p_token: token, p_decision: decision, p_evidence: evidence \}\)/.test(consent));
 check('consent flow unchanged: view + submit RPCs, token model, evidence fields', /rpc\("consent_view", \{ p_token: token \}\)/.test(consent) && /\/\^\[0-9a-f\]\{64\}\$\//.test(consent) && /method: "client_link"/.test(consent) && /user_agent: ua \|\| null/.test(consent) && /submitted_at: new Date\(\)\.toISOString\(\)/.test(consent));
+check('booking imports clientIp from the shared module and defines none of its own', /from "\.\.\/_shared\/client-ip\.ts"/.test(booking) && !/function clientIp\(/.test(booking) && !/async function sha256hex\(/.test(booking));
+check('booking no longer reads the left-most X-Forwarded-For hop', !/x-forwarded-for/.test(booking) && !/split\(","\)\[0\]/.test(booking));
+check('booking hold rate-limit hashes the shared trusted-hop IP', /const ipHash = await sha256hex\(IP_SALT \+ clientIp\(req\)\)/.test(booking) && /\.eq\("ip_hash", ipHash\)\.gte\("created_at", since\)/.test(booking));
+check('booking has a global hold back-stop, identity-independent, above legitimate traffic', /GLOBAL_HOLD_WINDOW_MIN/.test(booking) && /from\("bookings"\)\.select\("id", \{ count: "exact", head: true \}\)\.gte\("created_at", gSince\)/.test(booking) && /rate_limited_global/.test(booking) && (() => { const m = booking.match(/GLOBAL_HOLD_MAX\s*=\s*(\d+)/); const w = booking.match(/GLOBAL_HOLD_WINDOW_MIN\s*=\s*(\d+)/); return m && w && Number(m[1]) >= 30 && Number(w[1]) <= 15; })());
+check('booking flow unchanged: hold → create_hold RPC + cancel, ip_hash still passed to the RPC', /rpc\("create_hold", \{/.test(booking) && /p_ip_hash: ipHash/.test(booking) && /body\.action === "cancel"/.test(booking));
 const req = (h) => ({ headers: { get: (k) => h[k.toLowerCase()] ?? null } });
 
 check('forged left-most XFF + edge-appended real hop → the real (right-most) hop', clientIp(req({ 'x-forwarded-for': '203.0.113.77, 198.51.100.9' })) === '198.51.100.9');
@@ -36,8 +42,8 @@ check('the left-most hop is never returned when a chain is present', clientIp(re
 
 check('global back-stop: identity-independent count over a short window', /GLOBAL_WINDOW_MIN/.test(src) && /GLOBAL_MAX/.test(src) && /from\("contacts"\)\.select\("id", \{ count: "exact", head: true \}\)\.gte\("created_at", gSince\)/.test(src) && /rate_limited_global/.test(src));
 check('global back-stop sits above legitimate traffic', (() => { const m = src.match(/GLOBAL_MAX\s*=\s*(\d+)/); const w = src.match(/GLOBAL_WINDOW_MIN\s*=\s*(\d+)/); return m && w && Number(m[1]) >= 30 && Number(w[1]) <= 15; })());
-const logLines = [...(src + consent).matchAll(/log\("[^"]+",\s*\{([^}]*)\}\)/g)].map((m) => m[1]);
-check('no log line (contact or consent) carries a raw IP, the XFF value or the ip hash', logLines.every((l) => !/clientIp|x-forwarded-for|ipHash|ip_hash|cf-connecting|x-real-ip|\bip\b/.test(l)), JSON.stringify(logLines.filter((l) => /clientIp|x-forwarded-for|ipHash|\bip\b/.test(l))));
+const logLines = [...(src + consent + booking).matchAll(/log\("[^"]+",\s*\{([^}]*)\}\)/g)].map((m) => m[1]);
+check('no log line (contact, consent or booking) carries a raw IP, the XFF value or the ip hash', logLines.every((l) => !/clientIp|x-forwarded-for|ipHash|ip_hash|cf-connecting|x-real-ip|\bip\b/.test(l)), JSON.stringify(logLines.filter((l) => /clientIp|x-forwarded-for|ipHash|\bip\b/.test(l))));
 check('honeypot / too_fast / duplicate paths unchanged', /log\("honeypot"\); return json\(200/.test(src) && /log\("too_fast"\); return json\(200/.test(src) && /duplicate_submission_id/.test(src) && /duplicate_content/.test(src) && /duplicate_race/.test(src));
 check('outbox + upload token unchanged', /email_on_enquiry/.test(src) && /drainOutbox\(supabase, env, \{ contact_id: inserted\.id \}/.test(src) && /issue_upload_token/.test(src));
 
