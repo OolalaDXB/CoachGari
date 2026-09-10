@@ -62,12 +62,22 @@ Deno.serve(async (req: Request) => {
     const path = typeof body.path === "string" ? body.path : "";
     if (!/^contacts\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.[a-z0-9]{1,8}$/.test(path)) return json(400, { ok: false, error: "validation", fields: ["path"] }, origin, allowed);
     const dir = path.slice(0, path.lastIndexOf("/")); const name = path.slice(path.lastIndexOf("/") + 1);
+    /* Existence is not integrity: read what Storage actually holds and hand the observed
+       size and MIME type to the database, which compares them against what was reserved.
+       Otherwise a caller reserves a small jpeg and uploads something else entirely. */
     const { data: list } = await supabase.storage.from(BUCKET).list(dir, { search: name, limit: 5 });
-    const exists = !!list?.some((o) => o.name === name);
-    const { data, error } = await supabase.rpc("confirm_contact_media", { p_upload_token: uploadToken, p_path: path, p_ok: exists });
+    const obj = list?.find((o) => o.name === name);
+    const meta = (obj?.metadata ?? {}) as { size?: number; mimetype?: string };
+    const observedSize = Number.isFinite(Number(meta.size)) ? Number(meta.size) : null;
+    const observedType = typeof meta.mimetype === "string" ? meta.mimetype.toLowerCase() : null;
+    const { data, error } = await supabase.rpc("confirm_contact_media", {
+      p_upload_token: uploadToken, p_path: path, p_ok: !!obj,
+      p_observed_size: observedSize, p_observed_type: observedType,
+    });
     if (error) return rpcError(error, origin, allowed);
-    if (!exists) await supabase.storage.from(BUCKET).remove([path]).catch(() => {});
-    log("confirmed", { media_id: data.media_id, status: data.status });
+    // anything the database refused (missing, wrong size, wrong type) leaves no object behind
+    if (data.status !== "uploaded") await supabase.storage.from(BUCKET).remove([path]).catch(() => {});
+    log("confirmed", { media_id: data.media_id, status: data.status, reason: data.reason ?? null });
     return json(200, { ok: true, status: data.status }, origin, allowed);
   }
 
