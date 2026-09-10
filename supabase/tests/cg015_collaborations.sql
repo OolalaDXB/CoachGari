@@ -9,7 +9,8 @@ do $$
 declare
   ok int := 0; fail int := 0; log text := '';
   rt jsonb := '{"stripe":{"configured":true,"mode":"test","embedded":true}}'::jsonb;
-  j jsonb; ref text; ref2 text; ref3 text; tok text; tok2 text; tok3 text; toknew text; did uuid; did2 uuid; did3 uuid; cid uuid; v int; ord text; s text; n int;
+  j jsonb; ref text; ref2 text; ref3 text; ref4 text; tok text; tok2 text; tok3 text; tok4 text; toknew text;
+  did uuid; did2 uuid; did3 uuid; did4 uuid; cid uuid; v int; ord text; s text; n int;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
   perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
@@ -189,6 +190,31 @@ begin
   -- and the flow that legitimately uses them still works (they run as owner)
   if (public.collab_room(tok) ->> 'public_ref') = ref and (public.collab_admin_get(did) ->> 'contact_email') = 'brand@example.com'
     then ok := ok + 1; else fail := fail + 1; log := log || ' [definer-flow-broke]'; end if;
+
+  -- 20. collab_pay_start is idempotent: it resumes the order in flight instead of minting another,
+  --     closes an expired checkout explicitly before replacing it, and never re-charges a settled one
+  j := public.collab_intake(jsonb_build_object('name','Idem Co','email','idem@example.com','type','event_appearance','title','T'));
+  ref4 := j ->> 'public_ref'; tok4 := j ->> 'token';
+  select id into did4 from public.collaboration_deals where public_ref = ref4;
+  perform public.collab_propose(did4, jsonb_build_object('monetary_amount',500000,'currency','AED'));
+  perform public.collab_accept(tok4, 1, '{}'::jsonb);
+  perform public.collab_payment_request(did4, 500000, 'AED', 'full');
+  j := public.collab_pay_start(tok4, 'AE', rt); ord := j -> 'order' ->> 'reference';
+  j := public.collab_pay_start(tok4, 'AE', rt); s := j -> 'order' ->> 'reference';
+  if ord = s and (j ->> 'resumed') = 'true' then ok := ok + 1; else fail := fail + 1; log := log || ' [pay-start-not-idempotent]'; end if;
+  select count(*) into n from public.orders where order_reason = 'collaboration' and service_title = 'Collaboration ' || ref4 and status = 'pending_payment';
+  if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [multiple-active-orders]'; end if;
+  select count(*) into n from beau_ph.payment_requests where external_reference = ord and status in ('created','pending','requires_action');
+  if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [multiple-active-requests]'; end if;
+  select count(*) into n from public.collaboration_payments where collaboration_id = did4;
+  if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [multiple-payment-rows]'; end if;
+  update public.orders set checkout_expires_at = now() - interval '1 hour' where reference = ord;
+  j := public.collab_pay_start(tok4, 'AE', rt); s := j -> 'order' ->> 'reference';
+  if s <> ord and (select status from public.orders where reference = ord) = 'cancelled'
+     and not exists (select 1 from beau_ph.payment_requests where external_reference = ord and status in ('created','pending','requires_action'))
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [expired-checkout-not-replaced]'; end if;
+  update public.orders set status = 'paid', paid_at = now() where reference = s;
+  begin perform public.collab_pay_start(tok4, 'AE', rt); fail := fail + 1; log := log || ' [settled-payment-recharged]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
 
   raise exception 'CG015_TESTS ok=% fail=% %', ok, fail, log;
 end $$;
