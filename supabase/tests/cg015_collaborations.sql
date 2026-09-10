@@ -216,5 +216,20 @@ begin
   update public.orders set status = 'paid', paid_at = now() where reference = s;
   begin perform public.collab_pay_start(tok4, 'AE', rt); fail := fail + 1; log := log || ' [settled-payment-recharged]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
 
+  -- 21. a payment request is bound to the ACCEPTED proposal, never to the caller's numbers
+  --     (a) non-cash-only agreed terms are never charged (did2 agreed a non-cash proposal)
+  begin perform public.collab_payment_request(did2, 100000, 'AED', 'x'); fail := fail + 1; log := log || ' [noncash-charged]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  --     (b) the currency must be the accepted one (did agreed AED)
+  begin perform public.collab_payment_request(did, 1000, 'USD', 'x'); fail := fail + 1; log := log || ' [wrong-currency-accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  --     (c) the cumulative total cannot exceed the agreed amount (550000 already requested on v3)
+  begin perform public.collab_payment_request(did, 1, 'AED', 'over'); fail := fail + 1; log := log || ' [over-cap-accepted]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  --     (d) explicitly accepting a NEW proposal is the only thing that opens/raises the cap
+  update public.collaboration_deals set status = 'negotiating' where id = did2;
+  perform public.collab_propose(did2, jsonb_build_object('monetary_amount',250000,'currency','AED'));
+  perform public.collab_admin_accept(did2, 2);
+  perform public.collab_payment_request(did2, 250000, 'AED', 'agreed cash');
+  select count(*) into n from public.collaboration_payments where collaboration_id = did2;
+  if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [new-proposal-cap]'; end if;
+
   raise exception 'CG015_TESTS ok=% fail=% %', ok, fail, log;
 end $$;
