@@ -109,11 +109,11 @@ a service role. All secrets live in the Supabase Edge Function environment.
 | `letsgo@` | Leads and every human exchange. Shown on the site. Reply-To on all mail. |
 | `yoursession@` | Transactional sender: confirmations, cancellations, reschedules, receipts. |
 
-**Sender domain — to be confirmed by the owner.** The repo is not
-self-consistent on it: the code defaults use `@coachgari28.com`
+**Sender domain — to be confirmed by the owner.** The site's `mailto:` link
+and the code defaults use `@coachgari28.com`
 (`supabase/functions/_shared/email.ts`, `email_owner_address()` in
-`20261009_cg_email_outbox.sql`) while the site's `mailto:` link and the older
-migrations still say `@coachgari.com`. The address that actually sends is the
+`20261009_cg_email_outbox.sql`); older, already-applied migrations still
+carry `@coachgari.com` in comments and seed defaults. The address that actually sends is the
 one behind the `EMAIL_FROM` / `EMAIL_REPLY_TO` secrets, on a domain the owner
 has verified in Resend (SPF / DKIM / DMARC); neither the verification nor the
 mailboxes can be checked from this repo.
