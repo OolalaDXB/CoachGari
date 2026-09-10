@@ -37,7 +37,7 @@ const view = $('#view');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n, cur = 'USD') => n == null ? '—' : (n / 100).toLocaleString('en-US', { style: 'currency', currency: cur });
 const st = (s) => `<span class="st st-${esc(s)}">${esc(String(s ?? '').replace('_', ' '))}</span>`;
-const BOOKING_COLS = 'id,reference,service_id,contact_id,customer_name,customer_contact,start_at,end_at,session_timezone,tour_stop_id,delivery_mode,participant_count,status,hold_expires_at,price_amount,currency,notes,cancel_reason,cancelled_at,cancelled_by,created_at,service_title,service_duration_minutes,services(title,slug),tour_stops(city,country)';
+const BOOKING_COLS = 'id,reference,service_id,contact_id,crm_contact_id,customer_name,customer_contact,start_at,end_at,session_timezone,tour_stop_id,delivery_mode,participant_count,status,hold_expires_at,price_amount,currency,notes,cancel_reason,cancelled_at,cancelled_by,created_at,service_title,service_duration_minutes,services(title,slug),tour_stops(city,country)';
 const SERVICE_COLS = 'id,slug,title,category,tagline,description,long_description,duration_minutes,price_amount,currency,price_unit,delivery_mode,default_capacity,booking_mode,features,featured,cta_label,active,listed,sort_order,updated_at,updated_by';
 const CONTACT_COLS = 'id,crm_contact_id,name,contact,country,city,location_raw,interest,message,utm_source,utm_medium,utm_campaign,utm_content,utm_term,referrer,landing_page,first_visit_at,page,source,status,submission_id,created_at';
 const TZS = ['Asia/Dubai', 'Africa/Harare', 'Africa/Johannesburg', 'Africa/Gaborone', 'Africa/Nairobi', 'Europe/London', 'Europe/Paris', 'UTC'];
@@ -325,6 +325,10 @@ function bookingRow(b, tz, withActions = true) {
     if (['hold', 'pending_payment', 'confirmed'].includes(b.status)) acts.push(`<button class="btn btn-line btn-xs" data-act="cancelled" data-ref="${b.reference}">Cancel</button>`);
     if (b.status === 'confirmed' && new Date(b.start_at) <= new Date()) acts.push(`<button class="btn btn-dark btn-xs" data-act="completed" data-ref="${b.reference}">Completed</button>`, `<button class="btn btn-line btn-xs" data-act="no_show" data-ref="${b.reference}">No-show</button>`);
     if (b.status === 'hold' && b.price_amount == null) acts.push(`<button class="btn btn-accent btn-xs" data-act="confirmed" data-ref="${b.reference}">Confirm</button>`);
+    // On-request / any open booking with a known client: open that client's Sessions tab, where a priced
+    // hours package is created and a payment link issued. This is how a price is proposed and collected.
+    if (b.crm_contact_id && has('client_profile:view') && ['hold', 'pending_payment', 'confirmed'].includes(b.status))
+      acts.push(`<button class="btn btn-line btn-xs" data-pack-crm="${b.crm_contact_id}">Price &amp; package</button>`);
   }
   const where = b.tour_stops ? `${b.tour_stops.city}, ${b.tour_stops.country}` : b.delivery_mode;
   return `<tr>
@@ -344,8 +348,10 @@ function bindBookingActions() {
     const { error } = await sb.rpc('ops_set_booking_status', { p_reference: ref, p_status: act, p_reason: reason || null });
     if (error) return fail(error);
     toast(`${ref} → ${act.replace('_', ' ')}${act === 'cancelled' && reason !== null ? '. Refunds, if any, are handled by Oolala.' : ''}`);
-    go(tab);
+    bookings().catch(fail);
   });
+  // "Price & package": jump to the client's Sessions tab to build a priced hours package and issue a pay link
+  view.querySelectorAll('[data-pack-crm]').forEach((btn) => btn.onclick = () => openProfile(btn.dataset.packCrm, null, 'sessions'));
 }
 /* ============================ CALENDAR ============================ */
 /* Gari's operating calendar: Day (default) / Week / Month, reading the
