@@ -21,6 +21,7 @@ const COVERED = [
   '20261013_cg_collaborations.sql', '20261014_cg_finance_collab_label.sql', '20261015_cg_collab_room_link.sql',
   '20261016_cg_collab_token_at_rest.sql', '20261017_cg_collab_operator_grant.sql', '20261019_cg_collab_link_retrieval.sql',
   '20261021_cg_collab_pay_start_resume.sql', '20261022_cg_collab_payment_bound_to_accepted.sql',
+  '20261023_cg_collab_intake_ip_and_throttle.sql',
 ];
 check('the foundation migration is present', !!mig);
 check('every collaboration migration on disk is covered by this suite', migFiles.every((f) => COVERED.includes(f)),
@@ -51,6 +52,10 @@ const logLines = [...edge.matchAll(/log\("[^"]+",\s*\{([^}]*)\}\)/g)].map((m) =>
 check('no log line carries a name, email, message or contact (PII)', logLines.every((l) => !/\bname\b|email|message|contact|initial_request|company/.test(l)), JSON.stringify(logLines.filter((l) => /\bname\b|email|message|contact/.test(l))));
 check('analytics events carry only event names, no amounts or PII', [pageJs, roomJs].every((s) => [...s.matchAll(/plausible\(([^)]*)\)/g)].every((m) => !/amount|name|email|currency|,/.test(m[1]))));
 check('card payment reuses BEAU PH through collab_pay_start + attach_checkout (no new rail)', /collab_pay_start/.test(edge) && /attach_checkout/.test(edge) && /createPaymentRequest/.test(edge) && !/new .*Provider|addProvider|register.*rail/i.test(edge));
+check('the intake body is bounded before it is parsed', /MAX_BODY_BYTES/.test(edge) && /payload_too_large/.test(edge) && /content-length/.test(edge) && /JSON\.parse\(raw\)/.test(edge));
+check('intake has a per-IP quota in front of the identity-independent back-stop', /rate_limited_ip/.test(edge) && /saltedIpHash\(req, "IP_HASH_SALT"/.test(edge) && /rate_limited_global/.test(edge));
+check('only a salted digest of the IP reaches the database, never the address', /ip_hash: ipHash/.test(edge) && !/clientIp\(req\)/.test(edge));
+check('a counter-offer is bounded: capped considerations, known term keys only', /MAX_CONSIDERATIONS/.test(edge) && /TERM_KEYS/.test(edge) && /slice\(0, MAX_CONSIDERATIONS\)/.test(edge));
 check('the room never derives a paid state from the URL — only a server-confirmed order', !/paid \|\| q\.get\('paid'\)/.test(roomJs) && /if \(paid\)/.test(roomJs) && /confirmPaid/.test(roomJs) && /\(p\.order_status \|\| p\.status\) === 'paid'/.test(roomJs));
 
 /* ---- migration invariants ---- */
@@ -88,6 +93,12 @@ check('non-cash consideration is never turned into a payment (payment_request ne
   check('20261021 resumes a live checkout instead of minting a second order',
     /resumed', true/.test(m21) && /beau_ph\.cancel_request/.test(m21) && /already settled/.test(m21)
     && /checkout_expires_at is null or o\.checkout_expires_at > now\(\)/.test(m21));
+  const m23 = M['20261023_cg_collab_intake_ip_and_throttle.sql'];
+  check('20261023 stores only a salted IP digest, drops anything that is not one, and hides it from operators',
+    /ip_hash text/.test(m23) && /v_ip !~ '\^\[0-9a-f\]\{64\}\$'/.test(m23) && !/grant select \(/.test(m23));
+  check('20261023 caps and throttles a counter-offer in the database',
+    /too many considerations \(20 maximum\)/.test(m23) && /the counter-offer is too large/.test(m23)
+    && /too many changes just now/.test(m23) && /interval '10 minutes'/.test(m23));
   check('20261022 binds a payment to the accepted proposal (non-cash refused, currency pinned, cumulative cap)',
     /no cash component; non-cash consideration is never charged/.test(m22)
     && /payment currency must match the accepted proposal/.test(m22)

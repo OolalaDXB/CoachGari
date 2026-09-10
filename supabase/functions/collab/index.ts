@@ -29,8 +29,13 @@ const SECRET_VALUE_RE = /(sk|rk)_(live|test)_[A-Za-z0-9]{8,}|whsec_[A-Za-z0-9]{8
 const isToken = (s: unknown): s is string => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
 
 const GLOBAL_WINDOW_MIN = 10;   // intake back-stop, all callers (identity-independent)
-const GLOBAL_MAX = 30;          // real inbound is a few a week; 30 in 10 min is a flood
+const GLOBAL_MAX = 60;          // raised: the per-IP quota below is now the first line, this is the wall
+const IP_WINDOW_MIN = 10;       // per-IP intake quota (fail-closed: no salt -> no identity -> global only)
+const IP_MAX = 5;               // a real sender submits once; 5 in 10 min is already generous
 const MIN_FILL_MS = 2000;
+const MAX_BODY_BYTES = 32 * 1024;   // a room holds a negotiation, not a payload store
+const MAX_CONSIDERATIONS = 20;
+const TERM_KEYS = ["deliverables", "timing", "usage_rights", "exclusivity", "territory", "payment_terms", "additional"];
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) || null : null);
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\r\n/g, "\n").trim().slice(0, max) || null : null);
 const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s);
@@ -49,8 +54,13 @@ Deno.serve(async (req: Request) => {
   if (!allowed) { log("origin_rejected"); return json(403, { ok: false, error: "origin_not_allowed" }, origin, false); }
   if (req.method !== "POST") return json(405, { ok: false, error: "method_not_allowed" }, origin, allowed);
 
+  // Bound the body before parsing it: an unbounded JSON.parse is the cheapest way to burn a worker.
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return json(413, { ok: false, error: "payload_too_large" }, origin, allowed);
+  const raw = await req.text();
+  if (raw.length > MAX_BODY_BYTES) return json(413, { ok: false, error: "payload_too_large" }, origin, allowed);
+
   let body: Record<string, unknown>;
-  try { body = JSON.parse(await req.text()); } catch { return json(400, { ok: false, error: "invalid_json" }, origin, allowed); }
+  try { body = JSON.parse(raw); } catch { return json(400, { ok: false, error: "invalid_json" }, origin, allowed); }
   const sb = createClient(env("SUPABASE_URL")!, env("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
   const action = body.action;
 
@@ -59,7 +69,16 @@ Deno.serve(async (req: Request) => {
     // honeypot + minimum fill time (bots answer instantly / fill the hidden field)
     if (typeof body.website === "string" && body.website.trim() !== "") { log("honeypot"); return json(200, { ok: true }, origin, allowed); }
     const ts = Number(body.ts); if (Number.isFinite(ts) && Date.now() - ts < MIN_FILL_MS) { log("too_fast"); return json(200, { ok: true }, origin, allowed); }
-    // identity-independent back-stop
+    /* Per-IP quota first (the identity a real sender has), then the identity-independent
+       back-stop that a caller rotating its X-Forwarded-For still hits. Fail-closed: with no
+       IP_HASH_SALT there is no identity, the per-IP check is skipped and the global wall stands. */
+    const ipHash = await saltedIpHash(req, "IP_HASH_SALT", () => log("ip_salt_missing"));
+    if (ipHash) {
+      const iSince = new Date(Date.now() - IP_WINDOW_MIN * 60_000).toISOString();
+      const { count: iCount } = await sb.from("collaboration_deals").select("id", { count: "exact", head: true })
+        .eq("ip_hash", ipHash).gte("created_at", iSince);
+      if ((iCount ?? 0) >= IP_MAX) { log("rate_limited_ip", { window_min: IP_WINDOW_MIN, xff_hops: xffHops(req) }); return json(429, { ok: false, error: "rate_limited", message: "Please try again shortly." }, origin, allowed); }
+    }
     const gSince = new Date(Date.now() - GLOBAL_WINDOW_MIN * 60_000).toISOString();
     const { count: gCount } = await sb.from("collaboration_deals").select("id", { count: "exact", head: true }).gte("created_at", gSince);
     if ((gCount ?? 0) >= GLOBAL_MAX) { log("rate_limited_global", { window_min: GLOBAL_WINDOW_MIN, xff_hops: xffHops(req) }); return json(429, { ok: false, error: "rate_limited", message: "Please try again shortly." }, origin, allowed); }
@@ -77,6 +96,7 @@ Deno.serve(async (req: Request) => {
       budget_amount: Number.isInteger(body.budget_amount) && Number(body.budget_amount) >= 0 ? Number(body.budget_amount) : null,
       budget_currency: typeof body.budget_currency === "string" && /^[A-Za-z]{3}$/.test(body.budget_currency) ? body.budget_currency.toUpperCase() : null,
       offer: text(body.offer, 2000),
+      ip_hash: ipHash,   // salted hash only; the raw IP never leaves this function
     };
     const { data, error } = await sb.rpc("collab_intake", { p: payload });
     if (error) return rpcHttp(error, origin, allowed);
@@ -100,8 +120,19 @@ Deno.serve(async (req: Request) => {
       intro: text(body.intro, 4000),
       monetary_amount: Number.isInteger(body.monetary_amount) && Number(body.monetary_amount) >= 0 ? Number(body.monetary_amount) : null,
       currency: typeof body.currency === "string" && /^[A-Za-z]{3}$/.test(body.currency) ? body.currency.toUpperCase() : null,
-      considerations: Array.isArray(body.considerations) ? body.considerations : [],
-      terms: body.terms && typeof body.terms === "object" ? body.terms : {},
+      // bounded and shaped: a capped number of considerations, each field trimmed, and only
+      // the known term keys. The same caps are enforced again in collab_counter.
+      considerations: (Array.isArray(body.considerations) ? body.considerations : []).slice(0, MAX_CONSIDERATIONS)
+        .filter((c: unknown) => c && typeof c === "object")
+        .map((c: Record<string, unknown>) => ({
+          type: c.type === "monetary" ? "monetary" : "non_cash",
+          description: str(c.description, 200),
+          amount: Number.isInteger(c.amount) && Number(c.amount) >= 0 ? Number(c.amount) : null,
+          currency: typeof c.currency === "string" && /^[A-Za-z]{3}$/.test(c.currency) ? c.currency.toUpperCase() : null,
+        })),
+      terms: Object.fromEntries(TERM_KEYS
+        .map((k) => [k, text((body.terms as Record<string, unknown> | undefined)?.[k], 2000)])
+        .filter(([, v]) => v !== null)),
     };
     const { data, error } = await sb.rpc("collab_counter", { p_token: token, p });
     if (error) return rpcHttp(error, origin, allowed);
