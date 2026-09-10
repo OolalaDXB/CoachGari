@@ -112,9 +112,23 @@ begin
   select id into did3 from public.collaboration_deals where public_ref = ref3;
   if (select room_token_enc is not null from public.collaboration_deals where id = did3) then ok := ok + 1; else fail := fail + 1; log := log || ' [no-ciphertext]'; end if;
   if public.collab_room_token((select d from public.collaboration_deals d where id = did3)) = tok3 then ok := ok + 1; else fail := fail + 1; log := log || ' [decrypt-mismatch]'; end if;
-  if (public.collab_deal_json(did3, true) ->> 'room_url') = 'https://coachgari28.com/c/' || tok3 then ok := ok + 1; else fail := fail + 1; log := log || ' [admin-room-url]'; end if;
+  -- collab_deal_json exposes no room_url on any path; the audited RPC is the only way to a link
+  if (public.collab_deal_json(did3, true) ? 'room_url') = false and (public.collab_deal_json(did3, true) ->> 'room_active') = 'true'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [admin-json-room-url]'; end if;
+  j := public.collab_copy_room_link(did3);   -- call first (it writes the audit row), then assert both
+  if (j ->> 'url') = 'https://coachgari28.com/c/' || tok3
+     and exists (select 1 from public.admin_audit where area = 'collaboration' and entity_id = did3::text and action = 'room_link_access')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [copy-link-or-audit]'; end if;
   -- the counterparty room view never carries the URL back to the client
   if (public.collab_room(tok3) ? 'room_url') = false then ok := ok + 1; else fail := fail + 1; log := log || ' [room-leaks-url]'; end if;
+  -- the outbox row stores the deal id, never a live link; the drain injects the URL at send time
+  if exists (select 1 from public.email_events where kind = 'collab_ack' and to_address = 'enc@example.com'
+               and (payload ? 'collab_id') and not (payload ? 'room_url'))
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [outbox-persists-link]'; end if;
+  if exists (select 1 from public.email_outbox_claim(200, null, null, null)
+               where kind = 'collab_ack' and to_address = 'enc@example.com'
+                 and (payload ->> 'room_url') = 'https://coachgari28.com/c/' || tok3 and not (payload ? 'collab_id'))
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [drain-not-enriched]'; end if;
   -- the decryptor and the key reader are executable by the owner only, never by public roles
   if not has_function_privilege('authenticated', 'public.collab_room_token(public.collaboration_deals)', 'execute')
      and not has_function_privilege('service_role', 'public.collab_room_key()', 'execute') then ok := ok + 1; else fail := fail + 1; log := log || ' [decryptor-exposed]'; end if;
@@ -146,6 +160,18 @@ begin
     then ok := ok + 1; else fail := fail + 1; log := log || ' [decline-did-not-close]'; end if;
   -- a settled (declined) deal accepts no further action
   begin perform public.collab_counter(toknew, jsonb_build_object('monetary_amount',1,'currency','AED')); fail := fail + 1; log := log || ' [counter-after-declined]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+
+  -- 18. a collab:VIEW-only operator obtains a room link by NO path: not from the json,
+  --     not from the audited RPC (that needs collab:manage), not from the decryptor helper
+  insert into public.app_users (email, display_name, party, active) values ('collabviewer@test.dev', 'Viewer', 'studio', true) on conflict (email) do nothing;
+  insert into public.app_permissions (email, permission) values ('collabviewer@test.dev', 'collab:view') on conflict do nothing;
+  set local role authenticated;
+  perform set_config('request.jwt.claims', '{"email":"collabviewer@test.dev","role":"authenticated"}', true);
+  if (public.collab_admin_get(did) ? 'room_url') = false then ok := ok + 1; else fail := fail + 1; log := log || ' [view-json-leaks-link]'; end if;
+  begin perform public.collab_copy_room_link(did); fail := fail + 1; log := log || ' [view-copy-allowed]'; exception when sqlstate '42501' then ok := ok + 1; end;
+  begin perform public.collab_room_url(did); fail := fail + 1; log := log || ' [view-room_url-executable]'; exception when insufficient_privilege then ok := ok + 1; end;
+  reset role;
+  perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
 
   raise exception 'CG015_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

@@ -5,6 +5,32 @@ documented but deliberately **not** implemented. Newest sprint first.
 
 ---
 
+## Collaborations — room-link retrieval gated + not persisted (2026-09-10)
+
+Even with the token encrypted at rest (20261016) and the operator column grant
+(20261017), a *working* room link still reached an operator by two paths a
+column grant cannot cover. `20261019_cg_collab_link_retrieval.sql` closes both:
+
+- **Audited retrieval, collab:manage only.** `collab_copy_room_link(id)`
+  (SECURITY DEFINER) decrypts the token, returns the URL and writes an
+  `admin_audit(area='collaboration', action='room_link_access')` row. It is the
+  **only** way an operator obtains a link. `collab_deal_json` no longer returns
+  `room_url` on any path (a `room_active` boolean tells the admin UI a link
+  exists without exposing it), so a **collab:view** operator can reconstruct a
+  URL by no path — not the json, not the RPC (needs manage), not the
+  owner-only `collab_room_url`/`collab_room_token` helpers.
+- **No live link persisted in the outbox.** Producers store `collab_id` in the
+  `email_events` payload instead of `room_url`; `email_outbox_claim` builds the
+  URL at send time by decrypting definer-side and injecting it into the returned
+  (never stored) payload. A row at rest holds a deal id, not an exploitable
+  link; a revoked link resolves to nothing. The email magic-link is unchanged.
+- **Intake** still returns the raw token to the submitter (their own room); it
+  is never logged and only the hash + ciphertext are stored.
+- Room/counter/accept/pay flow and the encryption are untouched. cg015 → 42
+  checks; admin "Copy room link" now calls the audited RPC.
+
+---
+
 ## Security hardening — IP salt + outbox key (2026-09-10)
 
 - **No hardcoded IP salt fallback (S3).** `contact` and `booking` read

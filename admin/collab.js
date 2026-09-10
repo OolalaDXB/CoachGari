@@ -75,8 +75,8 @@ async function openDeal(id) {
           <button class="btn btn-line btn-sm" id="cl-reset">Reset link</button>
           ${canPropose ? `<button class="btn btn-line btn-sm" id="cl-close">Close</button>` : `<button class="btn btn-line btn-sm" id="cl-reopen">Reopen</button>`}
         </div>
-        <p id="cl-linkout" class="ad-muted" style="font-size:13px;margin-top:8px;word-break:break-all">${d.room_url ? esc(d.room_url) : 'No active link — reset to issue one.'}</p>
-        <p class="ad-muted" style="font-size:12px;margin-top:4px">The room link is included in every proposal and payment email automatically. Copy it to share directly.</p>
+        <p id="cl-linkout" class="ad-muted" style="font-size:13px;margin-top:8px;word-break:break-all">${d.room_active ? 'An active link exists. Copy to reveal it (access is logged).' : 'No active link — reset to issue one.'}</p>
+        <p class="ad-muted" style="font-size:12px;margin-top:4px">The room link is included in every proposal and payment email automatically. It is never displayed at rest; Copy retrieves it through an audited action.</p>
       </div>
 
       <div class="ad-panel">
@@ -120,8 +120,13 @@ async function openDeal(id) {
 
   C.$('#cl-back').onclick = () => collabList().catch(C.fail);
   const copyBtn = C.$('#cl-copy'); if (copyBtn) copyBtn.onclick = async () => {
-    if (!d.room_url) return C.toast('No active link — reset to issue one', true);
-    try { await navigator.clipboard.writeText(d.room_url); C.toast('Room link copied'); } catch { C.$('#cl-linkout').textContent = d.room_url; }
+    if (!d.room_active) return C.toast('No active link — reset to issue one', true);
+    // The link is never held client-side; retrieve it through the audited RPC (collab:manage only).
+    const { data: r, error: e3 } = await C.sb.rpc('collab_copy_room_link', { p_id: id });
+    if (e3) return C.fail(e3);
+    const url = r && r.url;
+    if (!url) return C.toast('No active link — reset to issue one', true);
+    try { await navigator.clipboard.writeText(url); C.toast('Room link copied'); } catch { C.$('#cl-linkout').textContent = url; }
   };
   const resetBtn = C.$('#cl-reset'); if (resetBtn) resetBtn.onclick = async () => {
     if (!confirm('Reset the private room link? The current link stops working and a new one is issued.')) return;
