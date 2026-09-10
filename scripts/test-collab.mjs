@@ -49,11 +49,13 @@ check('non-cash consideration is never turned into a payment (payment_request ne
 
 /* ---- email templates ---- */
 const { render } = await import('../supabase/functions/_shared/email.ts');
-const P = { public_ref: 'CL-ABC123', name: 'ACME <b>Brand</b>', first_name: 'ACME', title: 'Padel', version: 2, monetary_amount: 550000, currency: 'AED', amount: 550000, label: '100%', by: 'Coach Gari', type: 'event_appearance', company: 'ACME', reply_to: 'b@x.com' };
+const ROOM = 'https://coachgari28.com/c/deadbeef';
+const P = { public_ref: 'CL-ABC123', name: 'ACME <b>Brand</b>', first_name: 'ACME', title: 'Padel', version: 2, monetary_amount: 550000, currency: 'AED', amount: 550000, label: '100%', by: 'you', type: 'event_appearance', company: 'ACME', reply_to: 'b@x.com', room_url: ROOM };
 for (const k of ['collab_ack', 'collab_proposal', 'collab_accepted', 'collab_payment_ready']) {   // customer-facing: branded
   const r = render(k, P);
   check(`email ${k} renders and carries the "Coach Gari" wrapper`, !!r.subject && !!r.html && !!r.text && /Coach Gari/.test(r.html));
   check(`email ${k} escapes HTML in untrusted fields`, !/<b>Brand<\/b>/.test(r.html));
+  check(`email ${k} embeds the private room link`, r.html.includes(ROOM) && r.text.includes(ROOM));
 }
 for (const k of ['collab_received', 'collab_counter']) {   // owner-internal: same style as lead_notification (no wrapper)
   const r = render(k, P);

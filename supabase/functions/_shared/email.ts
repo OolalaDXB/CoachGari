@@ -74,6 +74,8 @@ const wrap = (eyebrow: string, title: string, body: string) => `<div style="font
 const row = (k: string, v: string, bold = false) => `<tr><td style="padding:8px 0;color:#6C6C78;width:110px;vertical-align:top">${esc(k)}</td><td style="padding:8px 0;${bold ? "font-weight:700" : ""}">${esc(v)}</td></tr>`;
 const table = (rows: string) => `<table style="border-collapse:collapse;width:100%;margin:0 0 24px;font-size:15px">${rows}</table>`;
 const replyNote = (t: string) => `<p style="margin:0 0 8px;font-size:14px;color:#6C6C78">${esc(t)} Just reply to this email — it reaches Coach Gari directly.</p>`;
+const roomBtn = (p: Payload) => { const u = str(p, "room_url"); return u ? `<p style="margin:0 0 20px"><a href="${esc(u)}" style="display:inline-block;background:#1540E8;color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 24px;border-radius:9px">Open your collaboration room →</a></p>` : ""; };
+const roomLine = (p: Payload) => { const u = str(p, "room_url"); return u ? `\nOpen your collaboration room:\n${u}\n` : ""; };
 
 function sessionRows(p: Payload, whenLabel = "When") {
   const w = whenParts(str(p, "start_at"), str(p, "timezone", "UTC"));
@@ -152,29 +154,29 @@ export function render(kind: string, p: Payload): Rendered {
     case "collab_ack": {   // to the requester
       return { subject: `Got your collaboration idea — Coach Gari`,
         html: wrap("Collaborate", `Thanks, ${esc(firstName(p))}.`,
-          `<p style="margin:0 0 20px">Your idea has reached Coach Gari${p.title ? ` (<b>${esc(str(p, "title"))}</b>)` : ""}. We'll take a look and come back to you about whether there's a good fit.</p>${table(row("Reference", str(p, "public_ref"), true))}${replyNote("Anything to add?")}`),
-        text: `Thanks, ${firstName(p)}.\nYour idea has reached Coach Gari${p.title ? ` (${str(p, "title")})` : ""}. We'll come back to you about whether there's a good fit.\n\nReference: ${str(p, "public_ref")}\n\nAnything to add? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+          `<p style="margin:0 0 20px">Your idea has reached Coach Gari${p.title ? ` (<b>${esc(str(p, "title"))}</b>)` : ""}. We'll take a look and come back to you about whether there's a good fit. This is your private space to follow it and reply.</p>${roomBtn(p)}${table(row("Reference", str(p, "public_ref"), true))}${replyNote("Anything to add?")}`),
+        text: `Thanks, ${firstName(p)}.\nYour idea has reached Coach Gari${p.title ? ` (${str(p, "title")})` : ""}. We'll come back to you about whether there's a good fit.\n${roomLine(p)}\nReference: ${str(p, "public_ref")}\n\nAnything to add? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
     }
     case "collab_proposal": {   // to the requester
       const amt = p.monetary_amount != null ? money(p.monetary_amount, p.currency) : "";
       return { subject: `A proposal from Coach Gari — ${str(p, "public_ref")}`,
         html: wrap("Collaborate", `Coach Gari has sent a proposal.`,
-          `<p style="margin:0 0 20px">${esc(firstName(p))}, proposal #${esc(str(p, "version"))} is ready in your private collaboration room${amt ? ` (${esc(amt)})` : ""}. Open the room to review it, make a counter-offer or accept.</p>${table(row("Reference", str(p, "public_ref"), true))}${replyNote("Use the private link from your first email.")}`),
-        text: `Coach Gari has sent a proposal.\n${firstName(p)}, proposal #${str(p, "version")} is ready in your private collaboration room${amt ? ` (${amt})` : ""}. Open the room to review, counter or accept.\n\nReference: ${str(p, "public_ref")}\n\nUse the private link from your first email.\n\nCoach Gari · coachgari28.com` };
+          `<p style="margin:0 0 20px">${esc(firstName(p))}, proposal #${esc(str(p, "version"))} is ready in your private collaboration room${amt ? ` (${esc(amt)})` : ""}. Open the room to review it, make a counter-offer or accept.</p>${roomBtn(p)}${table(row("Reference", str(p, "public_ref"), true))}${replyNote("Questions?")}`),
+        text: `Coach Gari has sent a proposal.\n${firstName(p)}, proposal #${str(p, "version")} is ready in your private collaboration room${amt ? ` (${amt})` : ""}. Open the room to review, counter or accept.\n${roomLine(p)}\nReference: ${str(p, "public_ref")}\n\nQuestions? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
     }
     case "collab_accepted": {   // to both sides
       const you = str(p, "by") === "you";
       return { subject: `Collaboration agreed — ${str(p, "public_ref")}`,
         html: wrap("Collaborate", `It's agreed.`,
-          `<p style="margin:0 0 20px">${you ? "Thank you — you accepted" : `${esc(str(p, "by", "Coach Gari"))} accepted`} proposal #${esc(str(p, "version"))} for collaboration <b>${esc(str(p, "public_ref"))}</b>. Coach Gari will be in touch with the next steps${you ? ", including any payment" : ""}.</p>${replyNote("Questions?")}`),
-        text: `It's agreed.\n${you ? "You accepted" : `${str(p, "by", "Coach Gari")} accepted`} proposal #${str(p, "version")} for collaboration ${str(p, "public_ref")}.\n\nQuestions? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+          `<p style="margin:0 0 20px">${you ? "Thank you — you accepted" : `${esc(str(p, "by", "Coach Gari"))} accepted`} proposal #${esc(str(p, "version"))} for collaboration <b>${esc(str(p, "public_ref"))}</b>. Coach Gari will be in touch with the next steps${you ? ", including any payment" : ""}.</p>${roomBtn(p)}${replyNote("Questions?")}`),
+        text: `It's agreed.\n${you ? "You accepted" : `${str(p, "by", "Coach Gari")} accepted`} proposal #${str(p, "version")} for collaboration ${str(p, "public_ref")}.\n${roomLine(p)}\nQuestions? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
     }
     case "collab_payment_ready": {   // to the requester
       const amt = money(p.amount, p.currency);
       return { subject: `Payment ready — ${str(p, "public_ref")}`,
         html: wrap("Collaborate", `Your payment is ready.`,
-          `<p style="margin:0 0 20px">${esc(firstName(p))}, the payment for your agreed collaboration is ready: <b>${esc(amt)}</b>${p.label ? ` (${esc(str(p, "label"))})` : ""}. Open your private collaboration room to pay by card.</p>${table(row("Amount", amt, true) + row("Reference", str(p, "public_ref")))}${replyNote("Use the private link from your first email.")}`),
-        text: `Your payment is ready.\n${firstName(p)}, the payment for your agreed collaboration is ready: ${amt}${p.label ? ` (${str(p, "label")})` : ""}. Open your private collaboration room to pay by card.\n\nAmount: ${amt}\nReference: ${str(p, "public_ref")}\n\nUse the private link from your first email.\n\nCoach Gari · coachgari28.com` };
+          `<p style="margin:0 0 20px">${esc(firstName(p))}, the payment for your agreed collaboration is ready: <b>${esc(amt)}</b>${p.label ? ` (${esc(str(p, "label"))})` : ""}. Open your private collaboration room to pay by card.</p>${roomBtn(p)}${table(row("Amount", amt, true) + row("Reference", str(p, "public_ref")))}${replyNote("Questions?")}`),
+        text: `Your payment is ready.\n${firstName(p)}, the payment for your agreed collaboration is ready: ${amt}${p.label ? ` (${str(p, "label")})` : ""}. Open your private collaboration room to pay by card.\n${roomLine(p)}\nAmount: ${amt}\nReference: ${str(p, "public_ref")}\n\nQuestions? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
     }
     case "collab_received": {   // owner, internal
       return { subject: `New collaboration enquiry — ${str(p, "type", "other")} — ${str(p, "name")}`,

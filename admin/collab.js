@@ -71,10 +71,12 @@ async function openDeal(id) {
         ${d.initial_request ? `<p style="white-space:pre-wrap;margin:0 0 6px"><b>What they'd like to explore:</b><br>${esc(d.initial_request)}</p>` : ''}
         ${d.intake_offer ? `<p style="white-space:pre-wrap;margin:8px 0 0"><b>What they're offering:</b><br>${esc(d.intake_offer)}</p>` : ''}
         <div class="cg-actions" style="margin-top:14px">
-          <button class="btn btn-line btn-sm" id="cl-link">Get private room link</button>
+          <button class="btn btn-line btn-sm" id="cl-copy">Copy room link</button>
+          <button class="btn btn-line btn-sm" id="cl-reset">Reset link</button>
           ${canPropose ? `<button class="btn btn-line btn-sm" id="cl-close">Close</button>` : `<button class="btn btn-line btn-sm" id="cl-reopen">Reopen</button>`}
         </div>
-        <p id="cl-linkout" class="ad-muted" style="font-size:13px;margin-top:8px"></p>
+        <p id="cl-linkout" class="ad-muted" style="font-size:13px;margin-top:8px;word-break:break-all">${d.room_url ? esc(d.room_url) : 'No active link — reset to issue one.'}</p>
+        <p class="ad-muted" style="font-size:12px;margin-top:4px">The room link is included in every proposal and payment email automatically. Copy it to share directly.</p>
       </div>
 
       <div class="ad-panel">
@@ -117,11 +119,15 @@ async function openDeal(id) {
     <div class="ad-panel"><h2>History</h2>${(d.history || []).length ? `<table class="ad-table"><thead><tr><th>Version</th><th>By</th><th class="num">Amount</th><th>State</th><th>When</th></tr></thead><tbody>${d.history.map((v) => `<tr><td>${esc(v.version)}</td><td>${v.proposed_by === 'coach' ? 'Coach Gari' : 'Counterparty'}</td><td class="num">${v.monetary_amount != null ? esc(money(v.monetary_amount, v.currency)) : '—'}</td><td>${v.accepted_at ? 'accepted' : v.declined_at ? 'declined' : v.superseded_at ? 'superseded' : 'open'}</td><td>${C.fmt(v.created_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'short' })}</td></tr>`).join('')}</tbody></table>` : '<p class="ad-muted">No versions yet.</p>'}</div>`;
 
   C.$('#cl-back').onclick = () => collabList().catch(C.fail);
-  const linkBtn = C.$('#cl-link'); if (linkBtn) linkBtn.onclick = async () => {
-    if (!confirm('Generate a fresh private room link? Any previous link stops working.')) return;
-    const { data: r, error: e2 } = await C.sb.rpc('collab_regenerate_token', { p_id: id });
+  const copyBtn = C.$('#cl-copy'); if (copyBtn) copyBtn.onclick = async () => {
+    if (!d.room_url) return C.toast('No active link — reset to issue one', true);
+    try { await navigator.clipboard.writeText(d.room_url); C.toast('Room link copied'); } catch { C.$('#cl-linkout').textContent = d.room_url; }
+  };
+  const resetBtn = C.$('#cl-reset'); if (resetBtn) resetBtn.onclick = async () => {
+    if (!confirm('Reset the private room link? The current link stops working and a new one is issued.')) return;
+    const { error: e2 } = await C.sb.rpc('collab_regenerate_token', { p_id: id });
     if (e2) return C.fail(e2);
-    C.$('#cl-linkout').textContent = `${location.origin}/c/${r.token}`;
+    C.toast('New link issued'); openDeal(id);
   };
   const closeBtn = C.$('#cl-close'); if (closeBtn) closeBtn.onclick = async () => { if (!confirm('Close this collaboration?')) return; const { error: e2 } = await C.sb.rpc('collab_set_status', { p_id: id, p_status: 'closed' }); if (e2) return C.fail(e2); C.toast('Closed'); openDeal(id); };
   const reopenBtn = C.$('#cl-reopen'); if (reopenBtn) reopenBtn.onclick = async () => { const { error: e2 } = await C.sb.rpc('collab_set_status', { p_id: id, p_status: 'reviewing' }); if (e2) return C.fail(e2); C.toast('Reopened'); openDeal(id); };
