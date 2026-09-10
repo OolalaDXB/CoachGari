@@ -59,7 +59,7 @@ const COUNTRIES = {
 };
 const CURRENCIES = ['AED', 'USD', 'EUR', 'GBP', 'CHF', 'SAR', 'QAR', 'KWD', 'BHD', 'OMR', 'EGP', 'MAD', 'ZAR', 'KES', 'NGN', 'GHS', 'TZS', 'UGX', 'ZWG', 'ZMW', 'BWP', 'MUR', 'XOF', 'XAF', 'GEL', 'TRY', 'INR', 'PKR', 'SGD', 'MYR', 'THB', 'IDR', 'PHP', 'JPY', 'KRW', 'CNY', 'HKD', 'AUD', 'NZD', 'CAD', 'MXN', 'BRL', 'SEK', 'NOK', 'DKK', 'PLN', 'CZK', 'HUF', 'RON', 'RUB'];
 const INTENT_LABEL = { service: 'Service (a session)', package: 'Package (a session pack)', support: 'Support Coach Gari', other: 'Other' };
-const TYPE_LABEL = { service: 'Service', package: 'Package', support: 'Support', other: 'Other' };
+const TYPE_LABEL = { service: 'Service', package: 'Package', support: 'Support', collaboration: 'Collaboration', other: 'Other' };
 const STATUS_LABEL = { created: 'Created', pending: 'Awaiting receipt', requires_action: 'In progress', paid: 'Paid', failed: 'Failed', expired: 'Expired', cancelled: 'Cancelled', refunded: 'Refunded' };
 const READY_LABEL = { available: 'Available', not_configured: 'Not onboarded', placeholder: 'Coming soon' };
 const countryName = (c) => COUNTRIES[c] || c;
@@ -158,7 +158,7 @@ async function openTransaction(reference) {
     <p class="ad-eyebrow">Transaction</p><h2 style="margin:0 0 4px">${esc(req ? req.public_reference : o.reference)}</h2>
     <p class="ad-muted" style="margin:0 0 14px">${esc(o.reference)} · ${st(req ? req.status : o.status)}</p>
     ${kv([['Amount', req ? money(req.amount, req.currency) : money(o.gross_amount, o.currency)], ['Priced', req && req.pricing_currency && req.pricing_currency !== req.currency ? money(req.pricing_amount, req.pricing_currency) : undefined],
-          ['Customer', esc(o.customer_hint || '—')], ['Type', esc(TYPE_LABEL[req ? req.intent : o.reason] || o.reason || '—')], ['Item', esc(o.service_title || (d.pack && d.pack.title) || '—')],
+          ['Customer', esc(o.customer_hint || '—')], ['Type', esc(o.reason === 'collaboration' ? 'Collaboration' : (TYPE_LABEL[req ? req.intent : o.reason] || o.reason || '—'))], ['Item', esc(o.service_title || (d.pack && d.pack.title) || '—')],
           ['Payment method', req ? esc(req.provider) + (req.capability ? ` · ${esc(req.capability.replace(/_/g, ' '))}` : '') : '—'],
           ['Provider reference', req && req.payment_reference ? `<code>${esc(req.payment_reference)}</code>` : (req && req.provider_reference ? `<code>${esc(req.provider_reference)}</code>` : undefined)],
           ['Created', when(o.created_at)], ['Paid', o.paid_at ? when(o.paid_at) : undefined], ['Reconciled', req ? (req.reconciled ? 'Yes' : 'No') : undefined],
