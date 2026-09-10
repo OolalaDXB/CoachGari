@@ -328,6 +328,9 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .f-bot a{text-decoration:none;}
 .f-legal a{color:var(--black);font-weight:600;}
 .f-legal a:hover{color:var(--accent);}
+/* discreet staff door: the © reads as plain text, links to /admin */
+.f-door{color:inherit;text-decoration:none;cursor:text;}
+.f-door:hover{color:inherit;}
 .credit{display:flex;align-items:center;gap:9px;}
 .credit a{font-weight:700;color:var(--black);text-decoration:none;border-bottom:1.5px solid var(--accent);padding-bottom:1px;}
 
