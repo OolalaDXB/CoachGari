@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Collaboration — Coach Gari</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="/assets/coach-gari.css">
+  <style>
+    body { background: var(--grey-bg); }
+    .cr { max-width: 720px; margin: 0 auto; padding: 36px 20px 80px; }
+    .cr-home { display: inline-block; font-weight: 800; letter-spacing: -.02em; font-size: 19px; color: var(--black); text-decoration: none; margin-bottom: 24px; }
+    .cr-home span { color: var(--accent); }
+    .cr-card { background: var(--white); border-radius: 20px; padding: 26px 24px; margin-bottom: 16px; }
+    .cr-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .cr-ref { font-size: 13px; color: var(--grey-text); font-weight: 700; letter-spacing: .03em; }
+    .cr-badge { font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; border-radius: 999px; padding: 4px 10px; background: var(--grey-bg); color: var(--grey-text); }
+    .cr-badge.agreed { background: #E7F6EC; color: #1E7A3D; } .cr-badge.declined { background: #FBE9E9; color: #B23B3B; }
+    .cr-badge.negotiating, .cr-badge.reviewing { background: var(--accent-tint); color: var(--accent-dark); }
+    h1 { font-size: 24px; letter-spacing: -.02em; margin: 6px 0 4px; }
+    .cr-sub { color: var(--grey-text); margin: 0 0 8px; }
+    .cr-legend { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--grey-text); margin: 0 0 12px; }
+    .cr-amt { font-size: 30px; font-weight: 800; letter-spacing: -.02em; }
+    .cr-kv { border-collapse: collapse; width: 100%; font-size: 15px; }
+    .cr-kv td { padding: 7px 0; vertical-align: top; border-top: 1px solid var(--line); }
+    .cr-kv td:first-child { color: var(--grey-text); width: 150px; }
+    .cr-kv tr:first-child td { border-top: 0; }
+    .cr-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; }
+    .cr-chip { background: var(--grey-bg); border-radius: 9px; padding: 7px 11px; font-size: 14px; }
+    .cr-chip b { font-weight: 700; }
+    .cr-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    details.cr-hist { margin-top: 4px; } details.cr-hist summary { cursor: pointer; font-weight: 700; color: var(--accent); }
+    .cr-ver { border-top: 1px solid var(--line); padding: 12px 0; font-size: 14px; }
+    .cr-ver:first-of-type { border-top: 0; }
+    .cr-by { font-size: 12px; color: var(--grey-text); text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+    .field { margin-bottom: 12px; }
+    .cr-hidden { display: none; }
+    #card-mount { margin-top: 12px; }
+    .cr-state { text-align: center; color: var(--grey-text); padding: 60px 20px; }
+  </style>
+</head>
+<body>
+  <main class="cr">
+    <a class="cr-home" href="/">Coach <span>Gari</span></a>
+    <div id="loading" class="cr-state">Loading…</div>
+    <div id="error" class="cr-state" hidden></div>
+
+    <div id="content" hidden>
+      <div class="cr-card">
+        <div class="cr-top"><span class="cr-ref" id="ref"></span><span class="cr-badge" id="status"></span></div>
+        <h1 id="title"></h1>
+        <p class="cr-sub" id="typeline"></p>
+        <p id="request" style="white-space:pre-wrap;margin:12px 0 0"></p>
+        <table class="cr-kv" id="meta" style="margin-top:14px"></table>
+      </div>
+
+      <div class="cr-card" id="proposal-card" hidden>
+        <div class="cr-legend" id="proposal-legend">Current proposal</div>
+        <div class="cr-amt" id="prop-amt"></div>
+        <p id="prop-intro" style="white-space:pre-wrap;margin:8px 0 0"></p>
+        <div id="prop-considerations" style="margin-top:14px"></div>
+        <table class="cr-kv" id="prop-terms" style="margin-top:14px"></table>
+        <p class="cr-sub" id="prop-validity" style="margin-top:12px" hidden></p>
+        <div class="cr-actions" id="prop-actions" hidden>
+          <button class="btn btn-accent" type="button" id="btn-accept">Accept this proposal</button>
+          <button class="btn btn-line" type="button" id="btn-counter">Make a counter-offer</button>
+          <button class="btn btn-soft" type="button" id="btn-decline">Decline</button>
+        </div>
+      </div>
+
+      <form class="cr-card cr-hidden" id="counter-form">
+        <div class="cr-legend">Your counter-offer</div>
+        <div class="two">
+          <div class="field"><label for="co-amount">Amount you propose <span class="opt">optional</span></label><input id="co-amount" name="amount" type="number" min="0" step="1" inputmode="numeric"></div>
+          <div class="field"><label for="co-currency">Currency</label><select id="co-currency" name="currency"><option value="">—</option><option>AED</option><option>USD</option><option>EUR</option><option>GBP</option></select></div>
+        </div>
+        <div class="field"><label for="co-noncash">Non-cash you can offer or want <span class="opt">optional</span></label><textarea id="co-noncash" name="noncash" rows="2" placeholder="Flights, hotel, products, exposure…"></textarea></div>
+        <div class="field"><label for="co-intro">Message <span class="opt">optional</span></label><textarea id="co-intro" name="intro" rows="3"></textarea></div>
+        <div class="cr-actions"><button class="btn btn-accent" type="submit">Send counter-offer</button><button class="btn btn-line" type="button" id="co-cancel">Cancel</button></div>
+        <p class="form-status" role="status" aria-live="polite"></p>
+      </form>
+
+      <div class="cr-card" id="pay-card" hidden>
+        <div class="cr-legend">Payment</div>
+        <div class="cr-amt" id="pay-amt"></div>
+        <p class="cr-sub" id="pay-label"></p>
+        <div id="pay-live">
+          <div class="field" style="max-width:280px"><label for="pay-country">Your country</label>
+            <select id="pay-country" name="country"><option value="">Choose…</option><option value="AE">United Arab Emirates</option><option value="GB">United Kingdom</option><option value="US">United States</option><option value="FR">France</option><option value="DE">Germany</option><option value="ZA">South Africa</option></select></div>
+          <button class="btn btn-accent" type="button" id="btn-pay">Pay by card</button>
+          <p class="form-status" role="status" aria-live="polite" id="pay-status"></p>
+        </div>
+        <div id="card-panel" hidden><div id="card-mount"></div></div>
+        <p id="pay-done" hidden>Payment received. Thank you. Coach Gari has it too.</p>
+      </div>
+
+      <div class="cr-card">
+        <details class="cr-hist"><summary>Negotiation history</summary><div id="history" style="margin-top:12px"></div></details>
+      </div>
+    </div>
+  </main>
+  <script type="module" src="/assets/collab-room.js"></script>
+</body>
+</html>

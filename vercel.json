@@ -3,7 +3,8 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/r/:token", "destination": "/r" }
+    { "source": "/r/:token", "destination": "/r" },
+    { "source": "/c/:token", "destination": "/c" }
   ],
   "redirects": [
     { "source": "/routes/c", "destination": "/", "permanent": true },
@@ -43,6 +44,20 @@
     },
     {
       "source": "/r/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/collab",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/c/(.*)",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
         { "key": "Cache-Control", "value": "no-store" }

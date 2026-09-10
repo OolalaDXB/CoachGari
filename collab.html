@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Collaborate with Coach Gari</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="/assets/coach-gari.css">
+  <style>
+    body { background: var(--grey-bg); }
+    .cl-shell { max-width: 760px; margin: 0 auto; padding: 40px 24px 80px; }
+    .cl-home { display: inline-block; font-weight: 800; letter-spacing: -.02em; font-size: 20px; color: var(--black); text-decoration: none; margin-bottom: 28px; }
+    .cl-home span { color: var(--accent); }
+    .cl-intro { color: var(--grey-text); font-size: 18px; margin: 0 0 28px; max-width: 60ch; }
+    .cl-card { background: var(--white); border-radius: 22px; padding: 32px 28px; }
+    .cl-legend { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--grey-text); margin: 24px 0 12px; }
+    .cl-legend:first-child { margin-top: 0; }
+    .field { margin-bottom: 14px; }
+    .cl-note { font-size: 13px; color: var(--grey-text); margin: 6px 0 0; }
+    .cl-done { display: none; }
+    .cl-done .cl-ref { font-weight: 800; letter-spacing: .02em; }
+    .cl-link-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .cl-link-row input { flex: 1 1 260px; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 9px; font: inherit; background: var(--grey-bg); }
+    .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <main class="cl-shell">
+    <a class="cl-home" href="/">Coach <span>Gari</span></a>
+    <div class="cl-live">
+      <h1>Collaborate with Coach Gari</h1>
+      <p class="cl-intro">Have an idea for a collaboration, event, campaign or partnership? Tell us a little about it and we can explore whether there is a good fit.</p>
+      <div class="cl-card">
+        <form data-collab novalidate>
+          <div class="cl-legend">Contact</div>
+          <div class="two">
+            <div class="field"><label for="cl-name">Your name</label><input id="cl-name" name="name" type="text" autocomplete="name"></div>
+            <div class="field"><label for="cl-company">Company or organisation <span class="opt">optional</span></label><input id="cl-company" name="company" type="text" autocomplete="organization"></div>
+          </div>
+          <div class="two">
+            <div class="field"><label for="cl-email">Email</label><input id="cl-email" name="email" type="email" autocomplete="email" inputmode="email"></div>
+            <div class="field"><label for="cl-phone">Phone or WhatsApp <span class="opt">optional</span></label><input id="cl-phone" name="phone" type="text" autocomplete="tel" inputmode="tel"></div>
+          </div>
+          <div class="field"><label for="cl-url">Website or social profile <span class="opt">optional</span></label><input id="cl-url" name="url" type="text" inputmode="url" placeholder="instagram.com/…"></div>
+
+          <div class="cl-legend">Collaboration</div>
+          <div class="field"><label for="cl-type">Type of collaboration</label>
+            <select id="cl-type" name="type">
+              <option value="brand_partnership">Brand partnership</option>
+              <option value="sponsored_content">Sponsored content</option>
+              <option value="event_appearance">Event appearance</option>
+              <option value="corporate_activation">Corporate activation</option>
+              <option value="padel_sport">Padel or sport collaboration</option>
+              <option value="affiliate_ambassador">Affiliate or ambassador</option>
+              <option value="product_collaboration">Product collaboration</option>
+              <option value="other">Something else</option>
+            </select>
+          </div>
+          <div class="field"><label for="cl-title">Short subject <span class="opt">optional</span></label><input id="cl-title" name="title" type="text" placeholder="A line to name it"></div>
+          <div class="field"><label for="cl-request">What would you like to explore together?</label>
+            <textarea id="cl-request" name="initial_request" rows="5" placeholder="A few lines about the idea, the audience and what you have in mind."></textarea></div>
+          <div class="two">
+            <div class="field"><label for="cl-from">Proposed dates <span class="opt">optional</span></label><input id="cl-from" name="date_from" type="date"></div>
+            <div class="field"><label for="cl-to">to <span class="opt">optional</span></label><input id="cl-to" name="date_to" type="date"></div>
+          </div>
+          <div class="field"><label for="cl-location">Location <span class="opt">optional</span></label><input id="cl-location" name="location" type="text" placeholder="City, or online"></div>
+
+          <div class="cl-legend">Commercial context <span class="opt" style="text-transform:none;letter-spacing:0;font-weight:600">all optional</span></div>
+          <div class="two">
+            <div class="field"><label for="cl-budget">Proposed budget</label><input id="cl-budget" name="budget" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 6000"></div>
+            <div class="field"><label for="cl-currency">Currency</label>
+              <select id="cl-currency" name="budget_currency"><option value="">—</option><option>AED</option><option>USD</option><option>EUR</option><option>GBP</option></select></div>
+          </div>
+          <p class="cl-note">No budget needed. A collaboration can be based on products, travel, services or another arrangement.</p>
+          <div class="field" style="margin-top:14px"><label for="cl-offer">What are you offering? <span class="opt">optional</span></label>
+            <textarea id="cl-offer" name="offer" rows="3" placeholder="Fee, products, flights, hotel, exposure, or anything else on the table."></textarea></div>
+
+          <div class="hp" aria-hidden="true"><label for="cl-website">Website</label><input id="cl-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+          <button class="btn btn-accent btn-full" type="submit" style="margin-top:8px">Send</button>
+          <p class="form-status" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+    </div>
+
+    <div class="cl-done cl-card">
+      <div class="cl-legend">Thank you</div>
+      <h1 style="margin-top:0">That's with Coach Gari.</h1>
+      <p class="cl-intro">We'll take a look and come back to you about whether there is a good fit. Your reference is <span class="cl-ref"></span>.</p>
+      <p class="cl-note">This is your private collaboration room. Keep the link — it is where any proposal will appear and where you can reply or accept.</p>
+      <div class="cl-link-row"><input class="cl-room" type="text" readonly><button class="btn btn-line" type="button" data-copy>Copy</button></div>
+    </div>
+  </main>
+  <script type="module" src="/assets/collab.js"></script>
+</body>
+</html>

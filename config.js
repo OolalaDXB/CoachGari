@@ -46,6 +46,12 @@ export const CONFIG = {
   // access, and never any body-metrics/health/notes.
   REPORT_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/report',
 
+  // Collaborations. The /collab page POSTs a partnership enquiry here; the
+  // private /c/<token> deal room reads and negotiates through the same
+  // function. Token-authorised for the room — no CRM access, no admin
+  // internals; only the verified Stripe webhook marks a payment paid.
+  COLLAB_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/collab',
+
   // Back-office (/admin): Supabase project URL + publishable key. The
   // publishable key is public by design; every row is protected by RLS and
   // a signed-in email only sees what app_permissions grants it.

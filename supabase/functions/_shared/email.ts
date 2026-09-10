@@ -149,6 +149,49 @@ export function render(kind: string, p: Payload): Rendered {
         html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B"><p><b>${esc(who)}</b></p><p>${esc(what)}</p><p>${esc(amt)} by ${esc(method(p))} · order ${esc(str(p, "order_reference"))}${p.mode === "test" ? " (test mode)" : ""}</p></div>`,
         text: `${who}\n${what}\n${amt} by ${method(p)} · order ${str(p, "order_reference")}` };
     }
+    case "collab_ack": {   // to the requester
+      return { subject: `Got your collaboration idea — Coach Gari`,
+        html: wrap("Collaborate", `Thanks, ${esc(firstName(p))}.`,
+          `<p style="margin:0 0 20px">Your idea has reached Coach Gari${p.title ? ` (<b>${esc(str(p, "title"))}</b>)` : ""}. We'll take a look and come back to you about whether there's a good fit.</p>${table(row("Reference", str(p, "public_ref"), true))}${replyNote("Anything to add?")}`),
+        text: `Thanks, ${firstName(p)}.\nYour idea has reached Coach Gari${p.title ? ` (${str(p, "title")})` : ""}. We'll come back to you about whether there's a good fit.\n\nReference: ${str(p, "public_ref")}\n\nAnything to add? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+    }
+    case "collab_proposal": {   // to the requester
+      const amt = p.monetary_amount != null ? money(p.monetary_amount, p.currency) : "";
+      return { subject: `A proposal from Coach Gari — ${str(p, "public_ref")}`,
+        html: wrap("Collaborate", `Coach Gari has sent a proposal.`,
+          `<p style="margin:0 0 20px">${esc(firstName(p))}, proposal #${esc(str(p, "version"))} is ready in your private collaboration room${amt ? ` (${esc(amt)})` : ""}. Open the room to review it, make a counter-offer or accept.</p>${table(row("Reference", str(p, "public_ref"), true))}${replyNote("Use the private link from your first email.")}`),
+        text: `Coach Gari has sent a proposal.\n${firstName(p)}, proposal #${str(p, "version")} is ready in your private collaboration room${amt ? ` (${amt})` : ""}. Open the room to review, counter or accept.\n\nReference: ${str(p, "public_ref")}\n\nUse the private link from your first email.\n\nCoach Gari · coachgari28.com` };
+    }
+    case "collab_accepted": {   // to both sides
+      const you = str(p, "by") === "you";
+      return { subject: `Collaboration agreed — ${str(p, "public_ref")}`,
+        html: wrap("Collaborate", `It's agreed.`,
+          `<p style="margin:0 0 20px">${you ? "Thank you — you accepted" : `${esc(str(p, "by", "Coach Gari"))} accepted`} proposal #${esc(str(p, "version"))} for collaboration <b>${esc(str(p, "public_ref"))}</b>. Coach Gari will be in touch with the next steps${you ? ", including any payment" : ""}.</p>${replyNote("Questions?")}`),
+        text: `It's agreed.\n${you ? "You accepted" : `${str(p, "by", "Coach Gari")} accepted`} proposal #${str(p, "version")} for collaboration ${str(p, "public_ref")}.\n\nQuestions? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+    }
+    case "collab_payment_ready": {   // to the requester
+      const amt = money(p.amount, p.currency);
+      return { subject: `Payment ready — ${str(p, "public_ref")}`,
+        html: wrap("Collaborate", `Your payment is ready.`,
+          `<p style="margin:0 0 20px">${esc(firstName(p))}, the payment for your agreed collaboration is ready: <b>${esc(amt)}</b>${p.label ? ` (${esc(str(p, "label"))})` : ""}. Open your private collaboration room to pay by card.</p>${table(row("Amount", amt, true) + row("Reference", str(p, "public_ref")))}${replyNote("Use the private link from your first email.")}`),
+        text: `Your payment is ready.\n${firstName(p)}, the payment for your agreed collaboration is ready: ${amt}${p.label ? ` (${str(p, "label")})` : ""}. Open your private collaboration room to pay by card.\n\nAmount: ${amt}\nReference: ${str(p, "public_ref")}\n\nUse the private link from your first email.\n\nCoach Gari · coachgari28.com` };
+    }
+    case "collab_received": {   // owner, internal
+      return { subject: `New collaboration enquiry — ${str(p, "type", "other")} — ${str(p, "name")}`,
+        html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B">
+    <p style="margin:0 0 14px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6C6C78">New collaboration · coachgari28.com</p>
+    <p><b>${esc(str(p, "name"))}</b>${p.company ? `<br>${esc(str(p, "company"))}` : ""}${p.reply_to ? `<br>${esc(str(p, "reply_to"))}` : ""}</p>
+    <p><b>Type:</b> ${esc(str(p, "type", "—"))}${p.title ? `<br><b>Subject:</b> ${esc(str(p, "title"))}` : ""}</p>
+    <p style="font-size:13px;color:#6C6C78">Reference ${esc(str(p, "public_ref"))} · open it in the back-office.</p>
+  </div>`,
+        text: `New collaboration enquiry\n${str(p, "name")}${p.company ? " · " + str(p, "company") : ""}${p.reply_to ? " · " + str(p, "reply_to") : ""}\nType: ${str(p, "type", "—")}${p.title ? "\nSubject: " + str(p, "title") : ""}\nReference: ${str(p, "public_ref")}` };
+    }
+    case "collab_counter": {   // owner, internal
+      const amt = p.monetary_amount != null ? money(p.monetary_amount, p.currency) : "—";
+      return { subject: `Counter-offer — ${str(p, "public_ref")} — v${str(p, "version")}`,
+        html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B"><p><b>${esc(str(p, "name"))}</b> sent counter-offer #${esc(str(p, "version"))}</p><p>Amount: ${esc(amt)} · collaboration ${esc(str(p, "public_ref"))}</p><p style="font-size:13px;color:#6C6C78">Review it in the back-office.</p></div>`,
+        text: `${str(p, "name")} sent counter-offer #${str(p, "version")}\nAmount: ${amt} · collaboration ${str(p, "public_ref")}` };
+    }
     default:
       throw new Error(`no template for ${kind}`);
   }
