@@ -25,7 +25,7 @@
    ============================================================= */
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { originAllowed, corsHeaders as cors } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
-import { clientIp, sha256hex } from "../_shared/client-ip.ts";            // same IP derivation as contact
+import { saltedIpHash } from "../_shared/client-ip.ts";            // fail-closed salted IP hash, shared with contact / booking
 
 const json = (status: number, body: unknown, origin: string | null, allowed: boolean) => new Response(JSON.stringify(body), { status, headers: cors(origin, allowed) });
 const log = (event: string, data: Record<string, unknown> = {}) => console.log(JSON.stringify({ fn: "consent", event, ...data }));
@@ -64,13 +64,12 @@ Deno.serve(async (req: Request) => {
     if (!decision) return json(400, { ok: false, error: "validation", fields: ["decision"] }, origin, allowed);
     // Evidence: salted IP hash + truncated UA + timestamp. Never the raw IP.
     // IP = trusted-edge hop (shared derivation); salt = dedicated CONSENT_IP_SALT, never the service-role key.
-    const ip = clientIp(req);
-    const salt = (Deno.env.get("CONSENT_IP_SALT") ?? "").trim();
-    if (!salt) log("consent_ip_salt_missing");
+    // Fail-closed: with no CONSENT_IP_SALT set the hash is null (never a repo-known salt).
+    const ipHash = await saltedIpHash(req, "CONSENT_IP_SALT", () => log("consent_ip_salt_missing"));
     const ua = (req.headers.get("user-agent") || "").slice(0, 200);
     const evidence = {
       method: "client_link",
-      ip_hash: salt && ip !== "unknown" ? await sha256hex(salt + "|" + ip) : null,
+      ip_hash: ipHash,
       user_agent: ua || null,
       submitted_at: new Date().toISOString(),
     };

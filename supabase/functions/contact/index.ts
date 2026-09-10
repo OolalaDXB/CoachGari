@@ -22,10 +22,9 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 import { drainOutbox } from "../_shared/email.ts";                  // lead notification to letsgo@ + acknowledgement to the customer
-import { clientIp, xffHops, sha256hex } from "../_shared/client-ip.ts";   // trusted-hop IP derivation, shared with consent
+import { xffHops, saltedIpHash } from "../_shared/client-ip.ts";   // trusted-hop IP derivation + fail-closed salted hash, shared with consent / booking
 
 /* ---- configuration (not secrets) -------------------------- */
-const IP_SALT   = Deno.env.get("IP_HASH_SALT") ?? "coachgari-cg001";
 const env = (name: string) => Deno.env.get(name);
 
 const RATE_WINDOW_MIN = 10;   // per IP hash
@@ -131,7 +130,10 @@ Deno.serve(async (req: Request) => {
   const firstVisit = typeof attr.first_visit_at === "string" && !Number.isNaN(Date.parse(attr.first_visit_at))
     ? new Date(attr.first_visit_at).toISOString() : null;
   const { city, country } = splitLocation(location);
-  const ipHash = await sha256hex(IP_SALT + clientIp(req));
+  // Rate-limit identity: a salted hash of the trusted-hop IP. Fail-closed — with no
+  // IP_HASH_SALT secret set the hash is null (never a hash under a repo-known salt),
+  // and the per-IP checks below are skipped; the global back-stop still applies.
+  const ipHash = await saltedIpHash(req, "IP_HASH_SALT", () => log("ip_salt_missing"));
   // diagnostic only: whether the caller supplied its own X-Forwarded-For chain (never the value, never an identity)
   const hops = xffHops(req);
 
@@ -141,15 +143,17 @@ Deno.serve(async (req: Request) => {
     { auth: { persistSession: false } },
   );
 
-  // Rate limit per IP hash
-  const since = new Date(Date.now() - RATE_WINDOW_MIN * 60_000).toISOString();
-  const { count: recent, error: rlErr } = await supabase
-    .from("contacts").select("id", { count: "exact", head: true })
-    .eq("ip_hash", ipHash).gte("created_at", since);
-  if (rlErr) log("rate_limit_query_failed", { code: rlErr.code });
-  if ((recent ?? 0) >= RATE_MAX) {
-    log("rate_limited", { submission_id: submissionId, xff_hops: hops });
-    return json(429, { ok: false, error: "rate_limited" }, origin, allowed);
+  // Rate limit per IP hash (skipped when the IP could not be identified/hashed)
+  if (ipHash) {
+    const since = new Date(Date.now() - RATE_WINDOW_MIN * 60_000).toISOString();
+    const { count: recent, error: rlErr } = await supabase
+      .from("contacts").select("id", { count: "exact", head: true })
+      .eq("ip_hash", ipHash).gte("created_at", since);
+    if (rlErr) log("rate_limit_query_failed", { code: rlErr.code });
+    if ((recent ?? 0) >= RATE_MAX) {
+      log("rate_limited", { submission_id: submissionId, xff_hops: hops });
+      return json(429, { ok: false, error: "rate_limited" }, origin, allowed);
+    }
   }
   // Global back-stop, independent of any identity the caller presents: total inserts in a short window, all callers.
   // Far above legitimate traffic; a flood that rotates identities still hits this wall. Honeypot, timing and the
@@ -172,18 +176,21 @@ Deno.serve(async (req: Request) => {
   }
 
   // Duplicate guard 2: same contact + message from the same IP within a short window
-  const dupSince = new Date(Date.now() - DUP_WINDOW_MIN * 60_000).toISOString();
-  const { data: near } = await supabase
-    .from("contacts").select("id, notified_at")
-    .eq("ip_hash", ipHash).eq("contact", contact).gte("created_at", dupSince)
-    .order("created_at", { ascending: false }).limit(5);
-  const nearDup = (near ?? []).find(() => true); // any recent identical-contact row from this IP
-  if (nearDup && message !== null) {
-    const { data: same } = await supabase
-      .from("contacts").select("id, notified_at").eq("id", nearDup.id).eq("message", message).maybeSingle();
-    if (same) {
-      log("duplicate_content", { id: same.id });
-      return json(200, { ok: true, id: same.id, duplicate: true, notified: !!same.notified_at }, origin, allowed);
+  // (needs an IP identity; skipped when ip_hash is null — the submission_id guard above still holds)
+  if (ipHash) {
+    const dupSince = new Date(Date.now() - DUP_WINDOW_MIN * 60_000).toISOString();
+    const { data: near } = await supabase
+      .from("contacts").select("id, notified_at")
+      .eq("ip_hash", ipHash).eq("contact", contact).gte("created_at", dupSince)
+      .order("created_at", { ascending: false }).limit(5);
+    const nearDup = (near ?? []).find(() => true); // any recent identical-contact row from this IP
+    if (nearDup && message !== null) {
+      const { data: same } = await supabase
+        .from("contacts").select("id, notified_at").eq("id", nearDup.id).eq("message", message).maybeSingle();
+      if (same) {
+        log("duplicate_content", { id: same.id });
+        return json(200, { ok: true, id: same.id, duplicate: true, notified: !!same.notified_at }, origin, allowed);
+      }
     }
   }
 

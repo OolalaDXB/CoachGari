@@ -21,9 +21,8 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { originAllowed, corsHeaders } from "../_shared/cors.ts";   // one allowlist for every browser-facing function
 import { drainOutbox } from "../_shared/email.ts";                  // cancellation email (queued by cancel_booking for a confirmed booking)
-import { clientIp, xffHops, sha256hex } from "../_shared/client-ip.ts";   // trusted-hop IP derivation, shared with contact / consent
+import { xffHops, saltedIpHash } from "../_shared/client-ip.ts";   // trusted-hop IP derivation + fail-closed salted hash, shared with contact / consent
 
-const IP_SALT = Deno.env.get("IP_HASH_SALT") ?? "coachgari-cg001";
 const HOLD_RATE_WINDOW_MIN = 10;   // per IP hash
 const HOLD_RATE_MAX = 10;          // holds per window per identity
 const GLOBAL_HOLD_WINDOW_MIN = 10; // back-stop, all callers together (identity-independent)
@@ -196,12 +195,17 @@ Deno.serve(async (req: Request) => {
     const notes = str(body.notes, 500);
     if (fields.length) return json(400, { ok: false, error: "validation", fields }, origin, allowed);
 
-    const ipHash = await sha256hex(IP_SALT + clientIp(req));
+    // Fail-closed salted hash of the trusted-hop IP (null when IP_HASH_SALT is unset —
+    // never a hash under a repo-known salt). The per-IP hold cap is skipped when null;
+    // the identity-independent global back-stop below still applies.
+    const ipHash = await saltedIpHash(req, "IP_HASH_SALT", () => log("ip_salt_missing"));
     const hops = xffHops(req);
-    const since = new Date(Date.now() - HOLD_RATE_WINDOW_MIN * 60_000).toISOString();
-    const { count } = await supabase.from("bookings").select("id", { count: "exact", head: true })
-      .eq("ip_hash", ipHash).gte("created_at", since);
-    if ((count ?? 0) >= HOLD_RATE_MAX) { log("rate_limited", { xff_hops: hops }); return json(429, { ok: false, error: "rate_limited" }, origin, allowed); }
+    if (ipHash) {
+      const since = new Date(Date.now() - HOLD_RATE_WINDOW_MIN * 60_000).toISOString();
+      const { count } = await supabase.from("bookings").select("id", { count: "exact", head: true })
+        .eq("ip_hash", ipHash).gte("created_at", since);
+      if ((count ?? 0) >= HOLD_RATE_MAX) { log("rate_limited", { xff_hops: hops }); return json(429, { ok: false, error: "rate_limited" }, origin, allowed); }
+    }
 
     // Identity-independent back-stop: even if a caller rotates its X-Forwarded-For, the total
     // hold rate across all callers is capped over a short window so the calendar can't be flooded.

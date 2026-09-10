@@ -19,7 +19,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
 import { stripe } from "../../../beau-ph/providers/stripe/adapter.ts";
 import { originAllowed, corsHeaders as cors } from "../_shared/cors.ts";
-import { clientIp, xffHops, sha256hex } from "../_shared/client-ip.ts";
+import { xffHops, saltedIpHash } from "../_shared/client-ip.ts";
 
 const env = (name: string) => Deno.env.get(name);
 const SITE_URL = (env("SITE_URL") ?? "https://coachgari28.com").replace(/\/$/, "");
@@ -112,10 +112,10 @@ Deno.serve(async (req: Request) => {
   if (action === "accept") {
     const version = Number.isInteger(body.version) ? Number(body.version) : NaN;
     if (!Number.isFinite(version)) return json(400, { ok: false, error: "validation", fields: ["version"] }, origin, allowed);
-    const salt = (env("CONSENT_IP_SALT") ?? "").trim(); const ip = clientIp(req);
+    // Fail-closed salted IP hash for acceptance evidence (null when CONSENT_IP_SALT is unset).
     const evidence = {
       method: "room_link",
-      ip_hash: salt && ip !== "unknown" ? await sha256hex(salt + "|" + ip) : null,
+      ip_hash: await saltedIpHash(req, "CONSENT_IP_SALT", () => log("consent_ip_salt_missing")),
       user_agent: (req.headers.get("user-agent") || "").slice(0, 200) || null,
     };
     const { data, error } = await sb.rpc("collab_accept", { p_token: token, p_version: version, p_evidence: evidence });

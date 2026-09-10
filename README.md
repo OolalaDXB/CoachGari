@@ -548,8 +548,8 @@ Project: `acrjrlgeeyseyolmofuq` (eu-central-1).
    supabase secrets set RESEND_API_KEY=re_...                                   # transactional email (Resend), server-side only
    supabase secrets set EMAIL_FROM="Coach Gari <yoursession@<sender domain>>"  # transactional sender — a domain verified in Resend (owner)
    supabase secrets set EMAIL_REPLY_TO=letsgo@<sender domain>                  # Reply-To on every customer email
-   supabase secrets set IP_HASH_SALT=<random string>                            # optional; changes the contact rate-limit IP hash
-   supabase secrets set CONSENT_IP_SALT=<random string, 32+ chars>              # consent evidence salt (dedicated, never the service-role key); without it the consent is still recorded but its ip_hash is null
+   supabase secrets set IP_HASH_SALT=<random string, 32+ chars>                 # REQUIRED (owner) — salt for the contact/booking rate-limit IP hash; fail-closed like consent: without it ip_hash is null (submissions still work; the per-IP limit relies on the identity-independent global back-stop) and the function logs ip_salt_missing. Never the service-role key.
+   supabase secrets set CONSENT_IP_SALT=<random string, 32+ chars>              # REQUIRED (owner) — consent/collab evidence salt (dedicated, never the service-role key); without it the consent is still recorded but its ip_hash is null (logs consent_ip_salt_missing)
    ```
    Without `RESEND_API_KEY` the lead is still stored, its emails wait in the
    outbox (`public.email_events`) and the function logs `email_skipped`.

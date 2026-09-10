@@ -39,3 +39,23 @@ export async function sha256hex(s: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+/* Salted IP hash for a rate-limit / evidence identity — FAIL-CLOSED.
+   With no salt secret set we do NOT hash: this returns null (and calls
+   onMissing), so an IP is never hashed under a salt that ships in the repo —
+   a known salt would make the hash reproducible and the IP brute-forceable.
+   An "unknown" IP is not hashed either. This is the consent function's rule,
+   shared here so no caller can drift back to a hardcoded fallback. The salt is
+   read from `saltEnv` (an owner-set secret, e.g. IP_HASH_SALT / CONSENT_IP_SALT)
+   and never from the service-role key. */
+export async function saltedIpHash(
+  req: Request,
+  saltEnv: string,
+  onMissing?: () => void,
+): Promise<string | null> {
+  const salt = (Deno.env.get(saltEnv) ?? "").trim();
+  if (!salt) { onMissing?.(); return null; }
+  const ip = clientIp(req);
+  if (ip === "unknown") return null;
+  return await sha256hex(salt + "|" + ip);
+}
