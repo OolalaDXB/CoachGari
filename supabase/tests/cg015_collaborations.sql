@@ -9,7 +9,7 @@ do $$
 declare
   ok int := 0; fail int := 0; log text := '';
   rt jsonb := '{"stripe":{"configured":true,"mode":"test","embedded":true}}'::jsonb;
-  j jsonb; ref text; ref2 text; tok text; tok2 text; did uuid; did2 uuid; cid uuid; v int; ord text; s text; n int;
+  j jsonb; ref text; ref2 text; ref3 text; tok text; tok2 text; tok3 text; toknew text; did uuid; did2 uuid; did3 uuid; cid uuid; v int; ord text; s text; n int;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
   perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
@@ -101,6 +101,45 @@ begin
   begin perform public.collab_propose(did, jsonb_build_object('monetary_amount',1)); fail := fail + 1; log := log || ' [no-perm-write]'; exception when sqlstate '42501' then ok := ok + 1; end;
   reset role;
   perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
+
+  -- 14. the room bearer token is encrypted at rest, recoverable server-side only
+  --     (no plaintext column; ciphertext populated; the room URL is built from the decrypted token)
+  if not exists (select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'collaboration_deals' and column_name = 'room_token')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [plaintext-token-column]'; end if;
+  j := public.collab_intake(jsonb_build_object('name','Enc Co','email','enc@example.com','type','event_appearance','title','Launch'));
+  ref3 := j ->> 'public_ref'; tok3 := j ->> 'token';
+  select id into did3 from public.collaboration_deals where public_ref = ref3;
+  if (select room_token_enc is not null from public.collaboration_deals where id = did3) then ok := ok + 1; else fail := fail + 1; log := log || ' [no-ciphertext]'; end if;
+  if public.collab_room_token((select d from public.collaboration_deals d where id = did3)) = tok3 then ok := ok + 1; else fail := fail + 1; log := log || ' [decrypt-mismatch]'; end if;
+  if (public.collab_deal_json(did3, true) ->> 'room_url') = 'https://coachgari28.com/c/' || tok3 then ok := ok + 1; else fail := fail + 1; log := log || ' [admin-room-url]'; end if;
+  -- the counterparty room view never carries the URL back to the client
+  if (public.collab_room(tok3) ? 'room_url') = false then ok := ok + 1; else fail := fail + 1; log := log || ' [room-leaks-url]'; end if;
+  -- the decryptor and the key reader are executable by the owner only, never by public roles
+  if not has_function_privilege('authenticated', 'public.collab_room_token(public.collaboration_deals)', 'execute')
+     and not has_function_privilege('service_role', 'public.collab_room_key()', 'execute') then ok := ok + 1; else fail := fail + 1; log := log || ' [decryptor-exposed]'; end if;
+
+  -- 15. reset (regenerate) invalidates the previous link immediately; a fresh link works
+  perform public.collab_propose(did3, jsonb_build_object('intro','P','monetary_amount',100000,'currency','AED'));
+  j := public.collab_regenerate_token(did3); toknew := j ->> 'token';
+  begin perform public.collab_deal_by_token(tok3); fail := fail + 1; log := log || ' [old-link-still-live]'; exception when sqlstate 'P0002' then ok := ok + 1; end;
+  if public.collab_deal_by_token(toknew) = did3 then ok := ok + 1; else fail := fail + 1; log := log || ' [new-link-dead]'; end if;
+
+  -- 16. duplicate counter-offers are safe: each is a new version, only the latest stays actionable
+  perform public.collab_counter(toknew, jsonb_build_object('monetary_amount',90000,'currency','AED'));
+  perform public.collab_counter(toknew, jsonb_build_object('monetary_amount',80000,'currency','AED'));
+  select count(*) into n from public.collaboration_proposals
+    where collaboration_id = did3 and proposed_by = 'counterparty' and superseded_at is null and accepted_at is null and declined_at is null;
+  if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [duplicate-counter-multi-active]'; end if;
+
+  -- 17. decline closes the actionable proposal and settles the deal
+  perform public.collab_decline(toknew, 'not this time');
+  if (select status from public.collaboration_deals where id = did3) = 'declined'
+     and (select declined_at is not null from public.collaboration_proposals
+            where collaboration_id = did3 order by version_number desc limit 1)
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [decline-did-not-close]'; end if;
+  -- a settled (declined) deal accepts no further action
+  begin perform public.collab_counter(toknew, jsonb_build_object('monetary_amount',1,'currency','AED')); fail := fail + 1; log := log || ' [counter-after-declined]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
 
   raise exception 'CG015_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

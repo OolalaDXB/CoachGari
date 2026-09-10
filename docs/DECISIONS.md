@@ -11,8 +11,9 @@ Public intake (`/collab`) → private token room (`/c/<token>`) → immutable,
 versioned proposals and counter-offers → explicit acceptance → optional
 monetary payment through the existing BEAU PH rails → Finance visibility.
 Migration `20261013_cg_collaborations.sql`; edge function `collab`; admin
-Collaborations workspace; suites `cg015_collaborations.sql` (24) and
-`scripts/test-collab.mjs` (38).
+Collaborations workspace; suites `cg015_collaborations.sql` (35) and
+`scripts/test-collab.mjs` (42). The private room link is embedded in every
+counterparty email (`20261015_cg_collab_room_link.sql`).
 
 - **No new payment rails, no BEAU PH extraction.** A collaboration payment is
   a target-less order (`order_reason = 'collaboration'`, both FKs null, like
@@ -35,9 +36,23 @@ Collaborations workspace; suites `cg015_collaborations.sql` (24) and
   the payment-request metadata / transaction detail. A distinct `Collaboration`
   label would mean extending the finance read CASEs; left out of V1 to avoid
   touching the working Finance surface.
-- **Token.** 32 random bytes, only the SHA-256 stored; invalid or revoked
-  tokens reveal nothing; the room view exposes no admin internals or private
-  notes. Revoke / regenerate from the admin.
+- **Token.** 32 random bytes. Public access validates only against the stored
+  SHA-256 (`access_token_hash`); invalid or revoked tokens reveal nothing, and
+  the room view exposes no admin internals or private notes. Revoke / regenerate
+  from the admin, which re-hashes and invalidates the previous link immediately.
+- **Token at rest (`20261016_cg_collab_token_at_rest.sql`).** The recoverable
+  token is not kept in plaintext. It is encrypted with pgcrypto (`pgp_sym`)
+  under a random key held in Supabase Vault (`collab_room_key`, generated at
+  apply time, never in the committed SQL) and stored as `room_token_enc bytea`;
+  the old plaintext `room_token` column is dropped. Producers recover it
+  server-side only — `collab_room_key()` and `collab_room_token(deal)` are
+  SECURITY DEFINER with `EXECUTE` revoked from `anon`, `authenticated` and
+  `service_role`, so the plaintext is reachable by the function owner alone and
+  never through a generic serializer, a client RPC, logs or analytics. It leaves
+  the server only as the authorised room URL (`/c/<token>`): embedded in the
+  counterparty emails and shown to an admin (`collab_deal_json(_, true)`), never
+  in the counterparty room payload. The SHA-256 hash still gates authentication;
+  reset re-hashes **and** re-encrypts.
 
 ---
 
