@@ -5,6 +5,36 @@ documented but deliberately **not** implemented. Newest sprint first.
 
 ---
 
+## Security hardening — IP salt + outbox key (2026-09-10)
+
+- **No hardcoded IP salt fallback (S3).** `contact` and `booking` read
+  `IP_HASH_SALT` with a hardcoded fallback (`"coachgari-cg001"`); a salt that
+  ships in the repo makes the IP hash reproducible and the IP brute-forceable
+  when the secret is unset. Adopted the consent rule, factored into
+  `_shared/client-ip.ts` as `saltedIpHash(req, saltEnv, onMissing)`: **no salt
+  secret → no hash** (`ip_hash` null, an `ip_salt_missing` log line), and the
+  per-IP rate-limit / dedupe checks are skipped while the identity-independent
+  global back-stop still applies. Now used by contact, booking, consent and
+  collab, so no function can drift back to a fallback. `IP_HASH_SALT` is a
+  required owner secret (README), beside `CONSENT_IP_SALT`; neither is ever the
+  service-role key.
+- **Outbox drain key stored hashed, not clear (S4, `20261018`).** `20261009`
+  stored `outbox_keys.key` in the clear while its comment claimed "stored
+  hashed", and `email_outbox_authorize` compared it in the clear. Chose the
+  **hash-at-rest** path: `outbox_keys` now keeps only `key_sha256 bytea`;
+  `email_outbox_authorize` hashes the presented key and compares with a
+  constant-time `ct_bytea_eq`. The drain still has to present the clear key, so
+  it lives in **Supabase Vault** (`outbox_email_key`) and `email_outbox_kick`
+  reads it from Vault at send time — the clear key transits once per kick as the
+  `x-outbox-key` header through pg_net's ephemeral queue, never persisted in the
+  clear in an application table. **Rotation:** `email_outbox_rotate_key()`
+  (SECURITY DEFINER, service_role only) regenerates the Vault secret and the
+  stored hash together; effective on the next kick (the function caches no key).
+  The deployed function is behaviourally unchanged (same key value preserved);
+  its comment was corrected to match. `admin_audit.area` gained `'email'`.
+
+---
+
 ## Collaborations V1 — deal room (2026-09-10)
 
 Public intake (`/collab`) → private token room (`/c/<token>`) → immutable,

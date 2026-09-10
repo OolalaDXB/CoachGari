@@ -5,8 +5,10 @@
             Sends the due rows of public.email_events (the ones no request
             drained on the spot: coach-side cancels / reschedules from the
             admin, retries after a Resend outage). pg_cron calls this every
-            two minutes through pg_net (public.email_outbox_kick) with the
-            key it holds in public.outbox_keys — no secret to paste anywhere.
+            two minutes through pg_net (public.email_outbox_kick), presenting a
+            key held in Supabase Vault; public.outbox_keys stores only its
+            SHA-256, and email_outbox_authorize hashes the presented key and
+            compares in constant time. No secret to paste anywhere.
      POST {action:"status"}  same header
           → {ok, configured, missing[], from, reply_to, domain, domain_status}
             Presence of the Resend configuration and the sending domain's
