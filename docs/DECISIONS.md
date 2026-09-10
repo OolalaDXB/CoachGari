@@ -53,6 +53,15 @@ counterparty email (`20261015_cg_collab_room_link.sql`).
   counterparty emails and shown to an admin (`collab_deal_json(_, true)`), never
   in the counterparty room payload. The SHA-256 hash still gates authentication;
   reset re-hashes **and** re-encrypts.
+- **Operator grant aligned to the house pattern (`20261017`).** The initial
+  migration granted table-wide `SELECT` on `collaboration_deals` to
+  `authenticated`, exposing the token columns to any `collab:view` operator. It
+  is now a column-scoped grant that **excludes `access_token_hash` and
+  `room_token_enc`** — the same rule the back-office uses for
+  `manage_token`/`ip_hash`/`idempotency_key` (`20260905`). An operator's raw
+  `select` of either secret column raises `insufficient_privilege`; RLS still
+  gates rows by `collab:view`, and the SECURITY DEFINER producers keep access
+  because they run as the owner. Flow unchanged.
 
 ---
 

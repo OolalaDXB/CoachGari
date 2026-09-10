@@ -118,6 +118,12 @@ begin
   -- the decryptor and the key reader are executable by the owner only, never by public roles
   if not has_function_privilege('authenticated', 'public.collab_room_token(public.collaboration_deals)', 'execute')
      and not has_function_privilege('service_role', 'public.collab_room_key()', 'execute') then ok := ok + 1; else fail := fail + 1; log := log || ' [decryptor-exposed]'; end if;
+  -- the operator SELECT grant excludes the secret columns (house pattern), but keeps the rest
+  if not has_column_privilege('authenticated', 'public.collaboration_deals', 'access_token_hash', 'select')
+     and not has_column_privilege('authenticated', 'public.collaboration_deals', 'room_token_enc', 'select')
+     and has_column_privilege('authenticated', 'public.collaboration_deals', 'status', 'select')
+     and has_column_privilege('authenticated', 'public.collaboration_deals', 'contact_email', 'select')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [operator-grant-not-aligned]'; end if;
 
   -- 15. reset (regenerate) invalidates the previous link immediately; a fresh link works
   perform public.collab_propose(did3, jsonb_build_object('intro','P','monetary_amount',100000,'currency','AED'));
