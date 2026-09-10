@@ -140,7 +140,26 @@ function init(){
     });
   }
 
+  /* A bearer token must not linger in the address bar, the history entry or the Referer
+     header sent to any third party the page loads. Capture it, then rewrite the URL. */
+  function scrubUrl(){
+    try {
+      var u = new URL(window.location.href), hit = false;
+      ['t', 'token', 'access_token', 'manage_token', 'session_id', 'session', 'paid'].forEach(function(k){
+        if (u.searchParams.has(k)) { u.searchParams.delete(k); hit = true; }
+      });
+      if (hit && window.history && history.replaceState) {
+        var s = u.searchParams.toString();
+        history.replaceState(null, '', u.pathname + (s ? '?' + s : '') + u.hash);
+      }
+    } catch (e) { /* a URL we cannot parse is one we cannot leak from */ }
+  }
+
   // back from a Stripe-side redirect (bank / 3DS): ?support=REF&t=TOKEN — never proof, the state is re-read
   var q = new URLSearchParams(window.location.search);
-  if (q.get('support') && q.get('t')) { reset(); open(); confirm(q.get('support'), q.get('t')); }
+  if (q.get('support') && q.get('t')) {
+    var spRef = q.get('support'), spTok = q.get('t');
+    scrubUrl();
+    reset(); open(); confirm(spRef, spTok);
+  }
 }

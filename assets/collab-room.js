@@ -7,7 +7,22 @@ import { CONFIG } from '/config.js';
 
 const $ = (id) => document.getElementById(id);
 const token = (location.pathname.split('/').filter(Boolean).pop() || '').trim();
-const q = new URLSearchParams(location.search);
+const q = new URLSearchParams(location.search);   // captured before the URL is scrubbed below
+/* The room token lives in the path, but the Stripe return appends markers (?paid=1, and
+   a session id on some rails). Capture them above, then rewrite the URL so nothing
+   payment-related lingers in history or in a Referer header. */
+(function scrubUrl() {
+  try {
+    const u = new URL(location.href); let hit = false;
+    ['t', 'token', 'access_token', 'manage_token', 'session_id', 'session', 'paid'].forEach((k) => {
+      if (u.searchParams.has(k)) { u.searchParams.delete(k); hit = true; }
+    });
+    if (hit && window.history && history.replaceState) {
+      const s = u.searchParams.toString();
+      history.replaceState(null, '', u.pathname + (s ? `?${s}` : '') + u.hash);
+    }
+  } catch { /* a URL we cannot parse is one we cannot leak from */ }
+})();
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const money = (minor, cur) => { const n = Number(minor); if (!Number.isFinite(n) || !cur) return ''; try { return new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur }).format(n / 100); } catch { return `${cur} ${(n / 100).toFixed(2)}`; } };
 const TYPE = { brand_partnership: 'Brand partnership', sponsored_content: 'Sponsored content', event_appearance: 'Event appearance', corporate_activation: 'Corporate activation', padel_sport: 'Padel or sport collaboration', affiliate_ambassador: 'Affiliate or ambassador', product_collaboration: 'Product collaboration', other: 'Collaboration' };

@@ -231,6 +231,23 @@ import { CONFIG } from '/config.js';
    the visitor submits the form. Not an analytics system.        */
 var FT_KEY = 'cg_first_touch';
 var UTM_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
+/* Bearer credentials and payment-session ids ride in the query string on the
+   return pages (/r?t=, ?booking=REF&t=, ?support=REF&t=, session_id=…). They must
+   never be stored: not in localStorage, not in contacts.landing_page/referrer. */
+var SENSITIVE_PARAMS = ['t', 'token', 'access_token', 'manage_token', 'session_id', 'session'];
+
+/* the same URL with every sensitive parameter removed. Same-origin keeps just the
+   path (that is what landing_page has always stored); an external referrer keeps its
+   origin, because the domain is the attribution value. */
+function scrubbed(href){
+  try {
+    var u = new URL(href, window.location.origin);
+    SENSITIVE_PARAMS.forEach(function(k){ u.searchParams.delete(k); });
+    var s = u.searchParams.toString();
+    var tail = u.pathname + (s ? '?' + s : '');
+    return u.origin === window.location.origin ? tail : u.origin + tail;
+  } catch (e) { return ''; }
+}
 
 function readParams(){
   var out = {};
@@ -247,8 +264,9 @@ function firstTouch(){
   if (stored && stored.first_visit_at) return stored;
 
   var ft = readParams();
-  ft.referrer = (document.referrer || '').slice(0, 1000);
-  ft.landing_page = (window.location.pathname + window.location.search).slice(0, 1000);
+  // both are scrubbed: a referrer can carry the token of the page the visitor came from
+  ft.referrer = (document.referrer ? scrubbed(document.referrer) : '').slice(0, 1000);
+  ft.landing_page = scrubbed(window.location.href).slice(0, 1000);
   ft.first_visit_at = new Date().toISOString();
   try { localStorage.setItem(FT_KEY, JSON.stringify(ft)); } catch (e) {}
   return ft;

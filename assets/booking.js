@@ -91,11 +91,30 @@ function init(){
   function after(ms, fn){ if (reduceMotion) fn(); else setTimeout(fn, ms); }
   function nextFrame(fn){ if (reduceMotion) fn(); else requestAnimationFrame(function(){ requestAnimationFrame(fn); }); }
 
+  /* A bearer token must not linger in the address bar, the history entry or the Referer
+     header sent to any third party the page loads. Capture it, then rewrite the URL. */
+  function scrubUrl(){
+    try {
+      var u = new URL(window.location.href), hit = false;
+      ['t', 'token', 'access_token', 'manage_token', 'session_id', 'session', 'paid'].forEach(function(k){
+        if (u.searchParams.has(k)) { u.searchParams.delete(k); hit = true; }
+      });
+      if (hit && window.history && history.replaceState) {
+        var s = u.searchParams.toString();
+        history.replaceState(null, '', u.pathname + (s ? '?' + s : '') + u.hash);
+      }
+    } catch (e) { /* a URL we cannot parse is one we cannot leak from */ }
+  }
+
   // Returning from payment? ?booking=REF&t=TOKEN
   var q = new URLSearchParams(window.location.search);
   if (q.get('booking') && q.get('t')) {
+    // Capture the manage token, then strip it from the address bar, history and any
+    // outgoing Referer before anything else runs. Polling continues from memory.
+    var bkRef = q.get('booking'), bkTok = q.get('t');
+    scrubUrl();
     [stepService, stepDate, stepSlots, stepForm].forEach(function(s){ s.hidden = true; });
-    pollState(q.get('booking'), q.get('t'));
+    pollState(bkRef, bkTok);
     return;
   }
 
