@@ -302,11 +302,12 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .f-top a{text-decoration:none;color:var(--grey-text);transition:color .25s ease;}
 .f-top a:hover,.f-top a:focus-visible{color:var(--black);}
 .f-news-copy{font-size:15.5px;color:var(--grey-text);font-weight:500;margin:0;}
-/* Support Coach Gari: a footer link, slightly emphasised (black, arrow), never a button */
-.f-top a.f-support{color:var(--black);font-weight:700;display:inline-flex;align-items:center;gap:6px;}
-.f-top a.f-support span{display:inline-block;transition:transform .25s cubic-bezier(.2,.7,.2,1);}
-.f-top a.f-support:hover,.f-top a.f-support:focus-visible{color:var(--accent);}
-.f-top a.f-support:hover span,.f-top a.f-support:focus-visible span{transform:translateX(3px);}
+/* Book a session: first in the offer column, lightly accented (black, arrow) */
+.f-top a.f-lead{color:var(--black);font-weight:500;display:inline-flex;align-items:center;gap:6px;}
+.f-top a.f-lead span{display:inline-block;transition:transform .25s cubic-bezier(.2,.7,.2,1);}
+.f-top a.f-lead:hover span,.f-top a.f-lead:focus-visible span{transform:translateX(3px);}
+/* Support Coach Gari: a distinct, discreet CTA (design-system button), not a list link */
+.f-support-cta{margin-top:16px;}
 .f-news{display:flex;gap:10px;margin-top:16px;}
 .f-news input{flex:1;min-width:0;padding:15px 18px;border:1.5px solid var(--line);border-radius:9px;
   font-family:inherit;font-size:14.5px;background:#fff;}
@@ -331,6 +332,10 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 /* discreet staff door: the © reads as plain text, links to /admin */
 .f-door{color:inherit;text-decoration:none;cursor:text;}
 .f-door:hover{color:inherit;}
+/* social icons live in the bottom bar, next to the name and mentions */
+.f-social{display:inline-flex;align-items:center;gap:14px;}
+.f-social a{display:inline-flex;color:var(--grey-text);transition:color .2s ease;}
+.f-social a:hover,.f-social a:focus-visible{color:var(--accent);}
 .credit{display:flex;align-items:center;gap:9px;}
 .credit a{font-weight:700;color:var(--black);text-decoration:none;border-bottom:1.5px solid var(--accent);padding-bottom:1px;}
 
