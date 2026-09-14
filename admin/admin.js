@@ -1500,6 +1500,16 @@ const delta = (now, before) => {
   return `<span class="an-d ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${compact(Math.abs(d))}${Number.isFinite(pct) ? ` · ${Math.abs(pct)}%` : ''}</span>`;
 };
 
+/* Seconds as m:ss. The site is one page, so how long a visit lasts is the
+   engagement number — bounce rate cannot be one here: Plausible counts a bounce
+   as a session with a single pageview, and a single pageview is all this site
+   can produce however well it works. */
+const mmss = (sec) => {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  return n < 60 ? `${Math.round(n)}s` : `${Math.floor(n / 60)}m ${String(Math.round(n % 60)).padStart(2, '0')}s`;
+};
+
 async function analytics() {
   const days = +(view.dataset.anDays || 30);
   const { data: a, error } = await sb.rpc('audience_overview', { p_days: days }); if (error) throw error;
@@ -1577,7 +1587,7 @@ async function analytics() {
     <div class="ad-kpis">
       <div class="ad-kpi"><b>${compact(web.visitors)}</b><span>Website visitors</span><span class="an-sub">${web.has_previous ? (delta(web.visitors, web.visitors_prev) || `vs ${compact(web.visitors_prev)} before`) : 'no period to compare yet'}</span></div>
       <div class="ad-kpi"><b>${compact(web.pageviews)}</b><span>Pageviews</span></div>
-      <div class="ad-kpi" title="The share of visits that left after a single page. It only starts meaning something around a few hundred visits: below that one person closing a tab moves it by ten points."><b>${web.bounce_rate != null && Number(web.visitors || 0) >= 100 ? web.bounce_rate + '%' : '—'}</b><span>Bounce rate</span><span class="an-sub">${Number(web.visitors || 0) >= 100 ? 'left after one page' : 'needs ~100 visits to mean anything'}</span></div>
+      <div class="ad-kpi" title="How long a visit lasts on average. On a one-page site this is the engagement figure: someone who reads the offers and the prices stays; someone who bounces off the header does not."><b>${mmss(web.visit_duration)}</b><span>Time on page</span><span class="an-sub">average visit</span></div>
       <div class="ad-kpi"><b>${compact(Object.values(social).reduce((t, v) => t + Number(v.latest?.followers || 0), 0))}</b><span>Followers, all platforms</span></div>
       <div class="ad-kpi"><b>${f.enquiries ?? 0}</b><span>Enquiries in the period</span></div>
     </div>
