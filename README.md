@@ -1069,6 +1069,14 @@ empty field is left off the document rather than filled with a guess, and the
 letterhead is snapshotted at signature, so correcting a typo today never
 rewrites a contract signed last month. Under `platform:admin`, audited.
 
+The same entity details already appear in the footers of `legal.html`,
+`privacy.html` and `r.html`, which are static pages served without a database
+call. That is a **deliberate duplication, not a mistake** — a legal notice must
+render for a visitor whether or not the database answers — but it means the
+licence number and address now live in two places. If either changes, change
+both. The live values are Oolala Next FZ-LLC, licence 47017963 RAK (U.A.E.),
+PO Box 644762, The Sustainable City, Dubai.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml`, three jobs.
