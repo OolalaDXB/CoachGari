@@ -83,10 +83,10 @@ Deno.serve(async (req: Request) => {
     const { count: gCount } = await sb.from("collaboration_deals").select("id", { count: "exact", head: true }).gte("created_at", gSince);
     if ((gCount ?? 0) >= GLOBAL_MAX) { log("rate_limited_global", { window_min: GLOBAL_WINDOW_MIN, xff_hops: xffHops(req) }); return json(429, { ok: false, error: "rate_limited", message: "Please try again shortly." }, origin, allowed); }
 
+    // Every field is optional except a way to reply: an email or a phone. The same rule holds in collab_intake.
     const name = str(body.name, 120);
     const email = str(body.email, 160);
     const phone = str(body.phone, 60);
-    if (!name) return json(400, { ok: false, error: "validation", fields: ["name"] }, origin, allowed);
     if (!(email && isEmail(email)) && !(phone && looksLikePhone(phone))) return json(400, { ok: false, error: "validation", fields: ["email"], message: "Add an email or phone so we can reply." }, origin, allowed);
     const payload = {
       name, company: str(body.company, 160), email: email && isEmail(email) ? email : null,

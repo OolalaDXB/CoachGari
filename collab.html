@@ -44,17 +44,18 @@
         <form data-collab novalidate>
           <div class="cl-legend">Contact</div>
           <div class="two">
-            <div class="field"><label for="cl-name">Your name</label><input id="cl-name" name="name" type="text" autocomplete="name"></div>
+            <div class="field"><label for="cl-name">Your name <span class="opt">optional</span></label><input id="cl-name" name="name" type="text" autocomplete="name"></div>
             <div class="field"><label for="cl-company">Company or organisation <span class="opt">optional</span></label><input id="cl-company" name="company" type="text" autocomplete="organization"></div>
           </div>
           <div class="two">
             <div class="field"><label for="cl-email">Email</label><input id="cl-email" name="email" type="email" autocomplete="email" inputmode="email"></div>
-            <div class="field"><label for="cl-phone">Phone or WhatsApp <span class="opt">optional</span></label><input id="cl-phone" name="phone" type="text" autocomplete="tel" inputmode="tel"></div>
+            <div class="field"><label for="cl-phone">Phone or WhatsApp</label><input id="cl-phone" name="phone" type="text" autocomplete="tel" inputmode="tel"></div>
           </div>
+          <p class="cl-note" style="margin-top:-6px">Everything is optional, except one way to reply: an email or a phone.</p>
           <div class="field"><label for="cl-url">Website or social profile <span class="opt">optional</span></label><input id="cl-url" name="url" type="text" inputmode="url" placeholder="instagram.com/…"></div>
 
           <div class="cl-legend">Collaboration</div>
-          <div class="field"><label for="cl-type">Type of collaboration</label>
+          <div class="field"><label for="cl-type">Type of collaboration <span class="opt">optional</span></label>
             <select id="cl-type" name="type">
               <option value="brand_partnership">Brand partnership</option>
               <option value="sponsored_content">Sponsored content</option>
@@ -67,7 +68,7 @@
             </select>
           </div>
           <div class="field"><label for="cl-title">Short subject <span class="opt">optional</span></label><input id="cl-title" name="title" type="text" placeholder="A line to name it"></div>
-          <div class="field"><label for="cl-request">What would you like to explore together?</label>
+          <div class="field"><label for="cl-request">What would you like to explore together? <span class="opt">optional</span></label>
             <textarea id="cl-request" name="initial_request" rows="5" placeholder="A few lines about the idea, the audience and what you have in mind."></textarea></div>
           <div class="two">
             <div class="field"><label for="cl-from">Proposed dates <span class="opt">optional</span></label><input id="cl-from" name="date_from" type="date"></div>

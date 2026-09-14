@@ -201,8 +201,44 @@ export function render(kind: string, p: Payload): Rendered {
           `<p style="margin:0 0 20px">${esc(firstName(p))}, the payment for your agreed collaboration is ready: <b>${esc(amt)}</b>${p.label ? ` (${esc(str(p, "label"))})` : ""}. Open your private collaboration room to pay by card.</p>${roomBtn(p)}${table(row("Amount", amt, true) + row("Reference", str(p, "public_ref")))}${replyNote("Questions?")}`),
         text: `Your payment is ready.\n${firstName(p)}, the payment for your agreed collaboration is ready: ${amt}${p.label ? ` (${str(p, "label")})` : ""}. Open your private collaboration room to pay by card.\n${roomLine(p)}\nAmount: ${amt}\nReference: ${str(p, "public_ref")}\n\nQuestions? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
     }
+    case "collab_declined": {   // to the requester when Coach Gari passes; to the owner when the counterparty does
+      if (str(p, "by") === "counterparty") {
+        return { subject: `Declined — ${str(p, "public_ref")} — ${str(p, "name", "the counterparty")}`,
+          html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B"><p><b>${esc(str(p, "name", "The counterparty"))}</b> declined collaboration ${esc(str(p, "public_ref"))}${p.title ? ` (${esc(str(p, "title"))})` : ""}.</p>${p.note ? `<p style="white-space:pre-wrap;border-left:3px solid #6C6C78;padding-left:12px">${esc(str(p, "note"))}</p>` : ""}<p style="font-size:13px;color:#6C6C78">Nothing to do. It stays in the back-office for the record.</p></div>`,
+          text: `${str(p, "name", "The counterparty")} declined collaboration ${str(p, "public_ref")}${p.title ? ` (${str(p, "title")})` : ""}.${p.note ? `\n\n${str(p, "note")}` : ""}\n\nNothing to do. It stays in the back-office for the record.` };
+      }
+      return { subject: `About your collaboration idea — Coach Gari`,
+        html: wrap("Collaborate", `Thank you, ${esc(firstName(p))}.`,
+          `<p style="margin:0 0 20px">Thank you for thinking of Coach Gari${p.title ? ` for <b>${esc(str(p, "title"))}</b>` : ""}. After a proper look, this one is not the right fit right now, so we won't take it further — but we mean the thank you.</p>${p.note ? `<p style="margin:0 0 20px;white-space:pre-wrap;border-left:3px solid #1540E8;padding-left:14px">${esc(str(p, "note"))}</p>` : ""}<p style="margin:0 0 20px">If the idea changes shape, or another comes along, the door stays open: <a href="https://coachgari28.com/collab" style="color:#1540E8">coachgari28.com/collab</a>.</p>${table(row("Reference", str(p, "public_ref"), true))}${replyNote("Want to say something back?")}`),
+        text: `Thank you, ${firstName(p)}.\nThank you for thinking of Coach Gari${p.title ? ` for ${str(p, "title")}` : ""}. After a proper look, this one is not the right fit right now, so we won't take it further — but we mean the thank you.${p.note ? `\n\n${str(p, "note")}` : ""}\n\nIf the idea changes shape, or another comes along, the door stays open: https://coachgari28.com/collab\nReference: ${str(p, "public_ref")}\n\nWant to say something back? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+    }
+    case "collab_reminder": {   // requester (proposal / payment) or owner (counter / new) — one nudge, never two
+      const about = str(p, "about");
+      if (about === "proposal") {
+        const amt = p.monetary_amount != null ? money(p.monetary_amount, p.currency) : "";
+        const until = str(p, "expires_at") ? ` It is valid until ${new Date(str(p, "expires_at")).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.` : "";
+        return { subject: `Still there? Your proposal is waiting — ${str(p, "public_ref")}`,
+          html: wrap("Collaborate", `A gentle nudge, ${esc(firstName(p))}.`,
+            `<p style="margin:0 0 20px">Proposal #${esc(str(p, "version"))}${amt ? ` (${esc(amt)})` : ""} is still waiting in your private collaboration room.${esc(until)} Accept it, make a counter-offer, or let Coach Gari know it's not for you — any answer is a good answer.</p>${roomBtn(p)}${table(row("Reference", str(p, "public_ref"), true))}${replyNote("Questions?")}`),
+          text: `A gentle nudge, ${firstName(p)}.\nProposal #${str(p, "version")}${amt ? ` (${amt})` : ""} is still waiting in your private collaboration room.${until} Accept it, counter, or say it's not for you — any answer is a good answer.\n${roomLine(p)}\nReference: ${str(p, "public_ref")}\n\nQuestions? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+      }
+      if (about === "payment") {
+        const amt = money(p.amount, p.currency);
+        return { subject: `Reminder: payment waiting — ${str(p, "public_ref")}`,
+          html: wrap("Collaborate", `A gentle nudge, ${esc(firstName(p))}.`,
+            `<p style="margin:0 0 20px">The payment for your agreed collaboration is still open: <b>${esc(amt)}</b>${p.label ? ` (${esc(str(p, "label"))})` : ""}. Open your private collaboration room to pay by card — it takes a minute.</p>${roomBtn(p)}${table(row("Amount", amt, true) + row("Reference", str(p, "public_ref")))}${replyNote("A problem with the payment?")}`),
+          text: `A gentle nudge, ${firstName(p)}.\nThe payment for your agreed collaboration is still open: ${amt}${p.label ? ` (${str(p, "label")})` : ""}. Open your private collaboration room to pay by card.\n${roomLine(p)}\nAmount: ${amt}\nReference: ${str(p, "public_ref")}\n\nA problem with the payment? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+      }
+      // owner, internal: it's his move
+      const what = about === "counter"
+        ? `counter-offer #${str(p, "version")}${p.monetary_amount != null ? ` (${money(p.monetary_amount, p.currency)})` : ""} from ${str(p, "name", "the counterparty")} is waiting for your reply`
+        : `the enquiry from ${str(p, "name", "someone")}${p.title ? ` (${str(p, "title")})` : ""} has had no answer yet`;
+      return { subject: `Your move — collaboration ${str(p, "public_ref")}`,
+        html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B"><p style="margin:0 0 14px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6C6C78">Reminder · collaborations</p><p>Collaboration <b>${esc(str(p, "public_ref"))}</b>: ${esc(what)}.</p><p style="font-size:13px;color:#6C6C78">Reply, propose, or decline politely from the back-office.</p></div>`,
+        text: `Collaboration ${str(p, "public_ref")}: ${what}.\nReply, propose, or decline politely from the back-office.` };
+    }
     case "collab_received": {   // owner, internal
-      return { subject: `New collaboration enquiry — ${str(p, "type", "other")} — ${str(p, "name")}`,
+      return { subject: `New collaboration enquiry — ${str(p, "type", "other")} — ${str(p, "name", str(p, "company", "someone"))}`,
         html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B">
     <p style="margin:0 0 14px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6C6C78">New collaboration · coachgari28.com</p>
     <p><b>${esc(str(p, "name"))}</b>${p.company ? `<br>${esc(str(p, "company"))}` : ""}${p.reply_to ? `<br>${esc(str(p, "reply_to"))}` : ""}</p>

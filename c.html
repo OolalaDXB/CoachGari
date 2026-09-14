@@ -21,7 +21,8 @@
     .cr-ref { font-size: 13px; color: var(--grey-text); font-weight: 700; letter-spacing: .03em; }
     .cr-badge { font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; border-radius: 999px; padding: 4px 10px; background: var(--grey-bg); color: var(--grey-text); }
     .cr-badge.agreed { background: #E7F6EC; color: #1E7A3D; } .cr-badge.declined { background: #FBE9E9; color: #B23B3B; }
-    .cr-badge.negotiating, .cr-badge.reviewing { background: var(--accent-tint); color: var(--accent-dark); }
+    .cr-badge.new, .cr-badge.negotiating, .cr-badge.reviewing { background: #EFE8FB; color: #5B2D9E; }
+    .cr-badge.closed { background: var(--grey-bg); color: var(--grey-text); }
     h1 { font-size: 24px; letter-spacing: -.02em; margin: 6px 0 4px; }
     .cr-sub { color: var(--grey-text); margin: 0 0 8px; }
     .cr-legend { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--grey-text); margin: 0 0 12px; }
@@ -55,6 +56,7 @@
         <div class="cr-top"><span class="cr-ref" id="ref"></span><span class="cr-badge" id="status"></span></div>
         <h1 id="title"></h1>
         <p class="cr-sub" id="typeline"></p>
+        <p id="settled" class="cr-sub" style="margin:12px 0 0" hidden></p>
         <p id="request" style="white-space:pre-wrap;margin:12px 0 0"></p>
         <table class="cr-kv" id="meta" style="margin-top:14px"></table>
       </div>

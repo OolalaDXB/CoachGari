@@ -21,7 +21,7 @@ const COVERED = [
   '20261013_cg_collaborations.sql', '20261014_cg_finance_collab_label.sql', '20261015_cg_collab_room_link.sql',
   '20261016_cg_collab_token_at_rest.sql', '20261017_cg_collab_operator_grant.sql', '20261019_cg_collab_link_retrieval.sql',
   '20261021_cg_collab_pay_start_resume.sql', '20261022_cg_collab_payment_bound_to_accepted.sql',
-  '20261023_cg_collab_intake_ip_and_throttle.sql',
+  '20261023_cg_collab_intake_ip_and_throttle.sql', '20261034_cg_collab_workflow.sql',
 ];
 check('the foundation migration is present', !!mig);
 check('every collaboration migration on disk is covered by this suite', migFiles.every((f) => COVERED.includes(f)),
@@ -86,7 +86,8 @@ check('every non-intake action is token-gated before it runs', /if \(!isToken\(b
 check('token shape is validated (64 hex)', /\/\^\[0-9a-f\]\{64\}\$\//.test(edge));
 check('intake has a honeypot and a minimum fill time', /body\.website/.test(edge) && /MIN_FILL_MS/.test(edge) && /too_fast/.test(edge));
 check('intake has an identity-independent global back-stop', /GLOBAL_MAX/.test(edge) && /from\("collaboration_deals"\)\.select\("id", \{ count: "exact", head: true \}\)/.test(edge) && /rate_limited_global/.test(edge));
-check('server validation is authoritative (name required, email-or-phone required)', /fields: \["name"\]/.test(edge) && /Add an email or phone/.test(edge));
+check('server validation is authoritative: only a reply channel is required (email or phone), the name is optional', !/fields: \["name"\]/.test(edge) && /Add an email or phone/.test(edge) && !/Please add your name/.test(pageJs));
+check('the public form says so: every field optional, one way to reply', /Everything is optional, except one way to reply/.test(page) && /for="cl-name">Your name <span class="opt">optional<\/span>/.test(page));
 check('the room output passes the secret-value guard', /SECRET_VALUE_RE\.test\(JSON\.stringify\(data\)\)/.test(edge));
 check('the pay reply never ships a stray secret', /SECRET_VALUE_RE\.test\(JSON\.stringify\(\{ \.\.\.reply, client_secret: "" \}\)\)/.test(edge));
 check('invalid/revoked token map to 404/410, never a leak', /error\.code === "P0002"\) return json\(404/.test(edge) && /error\.code === "P0003"\) return json\(410/.test(edge));
@@ -146,6 +147,35 @@ check('non-cash consideration is never turned into a payment (payment_request ne
     && /payment currency must match the accepted proposal/.test(m22)
     && /would exceed the agreed amount/.test(m22)
     && /proposal_id = d\.accepted_proposal_id and status <> 'cancelled'/.test(m22));
+
+  /* the workflow pass: polite decline, reminders, optional intake, whose move */
+  const m34 = M['20261034_cg_collab_workflow.sql'];
+  check('20261034 makes the intake name optional and keeps a reply channel mandatory',
+    /alter column contact_name drop not null/.test(m34) && !/'name is required'/.test(m34) && /'an email or phone is required'/.test(m34));
+  check('20261034 adds a polite admin decline that emails the requester once (deduped) and audits',
+    /function public\.collab_admin_decline\(p_id uuid, p_note text/.test(m34) && /has_permission\('collab:manage'\)/.test(m34)
+    && /email_queue\('collab_declined', d\.contact_email/.test(m34) && /':declined:coach'/.test(m34) && /'decline', e,/.test(m34));
+  check('20261034 tells the owner when the counterparty declines from the room',
+    /email_queue\('collab_declined', public\.email_owner_address\(\)/.test(m34) && /':declined:party'/.test(m34));
+  check('20261034 reminders cover the four waits and are deduped per thing, never per run',
+    /':reminder:proposal:' \|\| r\.version_number/.test(m34) && /':reminder:payment'/.test(m34)
+    && /':reminder:owner:' \|\| r\.version_number/.test(m34) && /':reminder:owner:new'/.test(m34)
+    && /is not null then n := n \+ 1/.test(m34));
+  check('20261034 reminders run daily by pg_cron and are not callable by a browser role',
+    /cron\.schedule\('cg-collab-reminders', '0 6 \* \* \*'/.test(m34)
+    && /revoke all on function public\.collab_reminders\(interval\) from public, anon, authenticated/.test(m34));
+  check('20261034 the email kind constraint carries the two new kinds', /'collab_declined','collab_reminder'\)\)/.test(m34));
+  check('20261034 the admin list says whose move it is', /'waiting_on', case/.test(m34) && /then 'payment'/.test(m34) && /then 'them'/.test(m34) && /else 'you' end/.test(m34) && /'waiting_since'/.test(m34));
+  const adminJs = read('../admin/collab.js'), adminCss = read('../admin/admin.css');
+  check('admin: green agreed, violet in progress, red declined, grey closed',
+    /\.cl-st\.st-agreed\{background:#e2f5e9/.test(adminCss) && /\.cl-st\.st-new,\.cl-st\.st-reviewing,\.cl-st\.st-negotiating\{background:#efe8fb/.test(adminCss)
+    && /\.cl-st\.st-declined\{background:#fde7e5/.test(adminCss) && /\.cl-st\.st-closed\{background:#eef0f4/.test(adminCss) && /class="st cl-st /.test(adminJs));
+  check('admin: Decline politely (with an optional personal line) sits next to Close, and Close sends nothing',
+    /id="cl-decline">Decline politely/.test(adminJs) && /collab_admin_decline/.test(adminJs) && /p_note: note\.trim\(\) \|\| null/.test(adminJs) && /No email is sent/.test(adminJs));
+  check('admin: the list shows whose move and for how long', /'Waiting on'/.test(adminJs) && /Your move/.test(adminJs) && /Their reply/.test(adminJs) && /waiting_since/.test(adminJs));
+  check('room: same palette, and a settled room says so in one line',
+    /\.cr-badge\.new, \.cr-badge\.negotiating, \.cr-badge\.reviewing \{ background: #EFE8FB/.test(room) && /\.cr-badge\.declined/.test(room)
+    && /id="settled"/.test(room) && /declined: 'This collaboration was declined/.test(roomJs));
 }
 
 /* ---- email templates ---- */
@@ -162,6 +192,27 @@ for (const k of ['collab_received', 'collab_counter']) {   // owner-internal: sa
   const r = render(k, P);
   check(`email ${k} (internal) renders with subject/html/text`, !!r.subject && !!r.html && !!r.text);
   check(`email ${k} (internal) escapes HTML in untrusted fields`, !/<b>Brand<\/b>/.test(r.html));
+}
+{   // the polite decline: courteous, quotes the personal line, leaves the door open; the owner flavour is internal
+  const NOTE = 'Not this <i>season</i>, maybe next.';
+  const r = render('collab_declined', { ...P, by: 'Coach Gari', note: NOTE });
+  check('email collab_declined (requester) is courteous, quotes the note escaped, and leaves the door open',
+    /Thank you/.test(r.html) && /not the right fit right now/.test(r.html) && r.html.includes('&lt;i&gt;season&lt;/i&gt;') && /coachgari28\.com\/collab/.test(r.html) && /Coach Gari/.test(r.html) && !/<b>Brand<\/b>/.test(r.html));
+  const r2 = render('collab_declined', { ...P, by: 'Coach Gari', note: null });
+  check('email collab_declined (requester) reads fine without a note', !/undefined|null/.test(r2.html) && !/border-left/.test(r2.html));
+  const r3 = render('collab_declined', { ...P, by: 'counterparty', note: 'budget' });
+  check('email collab_declined (owner) is internal: subject names the deal, no branded wrapper', /^Declined — CL-ABC123/.test(r3.subject) && !/Open your collaboration room/.test(r3.html) && /budget/.test(r3.text));
+  const rp = render('collab_reminder', { ...P, about: 'proposal', expires_at: '2026-12-01T00:00:00Z' });
+  check('email collab_reminder (proposal) nudges once, embeds the room link and the validity', /gentle nudge/.test(rp.html) && rp.html.includes(ROOM) && /valid until 1 December 2026/.test(rp.html) && /^Still there\?/.test(rp.subject));
+  const rpay = render('collab_reminder', { ...P, about: 'payment' });
+  check('email collab_reminder (payment) carries the amount and the room link', rpay.html.includes(ROOM) && /5,500\.00|5.500,00|AED/.test(rpay.html) && /payment waiting/.test(rpay.subject));
+  const rc = render('collab_reminder', { ...P, about: 'counter' });
+  const rn = render('collab_reminder', { ...P, about: 'new', name: null });
+  check('email collab_reminder (owner) says whose move it is, internal style, and survives a missing name',
+    /^Your move — collaboration CL-ABC123/.test(rc.subject) && /counter-offer #2/.test(rc.text) && !/Open your collaboration room/.test(rc.html)
+    && /enquiry from someone/.test(rn.text) && !/<b>Brand<\/b>/.test(rc.html));
+  const rr = render('collab_received', { ...P, name: null, company: 'ACME' });
+  check('email collab_received falls back to the company when no name was given', /— ACME$/.test(rr.subject));
 }
 
 console.log(`\nCOLLAB_TESTS ok=${ok} fail=${fail}`);

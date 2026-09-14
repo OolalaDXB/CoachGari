@@ -49,6 +49,12 @@ table.ad-table{width:100%;border-collapse:collapse;font-size:14px;}
 .st-hold,.st-pending_payment,.st-new,.st-draft,.st-pending{background:#fff3d6;color:#8a5a00;}
 .st-cancelled,.st-expired,.st-no_show,.st-failed,.st-refunded,.st-spam,.st-lost{background:#fde7e5;color:#b3261e;}
 .st-completed,.st-reconciled,.st-settled,.st-closed,.st-contacted{background:#e6e9ff;color:#3546b3;}
+/* Collaborations: green = agreed, violet = in progress (new / reviewing / negotiating), red = declined, grey = closed */
+.cl-st.st-agreed{background:#e2f5e9;color:#1b7a3d;}
+.cl-st.st-new,.cl-st.st-reviewing,.cl-st.st-negotiating{background:#efe8fb;color:#5b2d9e;}
+.cl-st.st-declined{background:#fde7e5;color:#b3261e;}
+.cl-st.st-closed{background:#eef0f4;color:#3a3a44;}
+.cl-wait{font-size:12.5px;white-space:nowrap;} .cl-wait b{font-weight:800;} .cl-wait.you b{color:#b3261e;} .cl-wait.them b{color:#5b2d9e;} .cl-wait.payment b{color:#8a5a00;}
 .btn-xs{padding:6px 10px;font-size:12.5px;border-radius:999px;}
 .ad-day{margin:18px 0 6px;font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);}
 .ad-empty{color:var(--grey-text);padding:14px 0;font-size:14px;}

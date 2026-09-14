@@ -305,6 +305,9 @@ drained by the Edge Functions (`supabase/functions/_shared/email.ts`):
 | confirmed booking cancelled (customer or coach) | `cancel_booking` / `ops_set_booking_status` | `booking_cancelled` → customer |
 | the session of a confirmed booking moved in Schedule | trigger `sync_booking_from_session` | `reschedule` → customer (booking follows the session) |
 | enquiry stored | `contact` function → `email_on_enquiry` | `lead_notification` → letsgo@ (Reply-To the customer) · `enquiry_received` → customer |
+| collaboration declined from the back-office (`collab_admin_decline`) | the RPC | `collab_declined` → requester (courteous, with the optional personal line) |
+| collaboration declined from the room | `collab_decline` | `collab_declined` → letsgo@ (internal) |
+| collaboration waiting 3 days (`collab_reminders`, pg_cron daily 06:00 UTC) | the cron | `collab_reminder` → requester (proposal unanswered, payment unpaid) · → letsgo@ (counter-offer or new enquiry waiting on the coach) — one per thing, deduped for ever |
 
 Every row carries a `dedupe_key` (`on conflict do nothing`), so a replayed
 webhook or a re-run never queues twice; the same key is Resend's
@@ -692,7 +695,7 @@ Every offline suite, the same ones CI runs:
 
 ```
 node scripts/test-webhook-signature.mjs   # WEBHOOK_SIGNATURE_TESTS ok=24
-node scripts/test-collab.mjs              # COLLAB_TESTS ok=59
+node scripts/test-collab.mjs              # COLLAB_TESTS ok=94
 node scripts/test-url-scrub.mjs           # URL_SCRUB_TESTS ok=21
 node scripts/test-contact-ip.mjs          # CONTACT_IP_TESTS ok=31
 node scripts/test-email.mjs               # EMAIL_TESTS ok=41
@@ -753,6 +756,38 @@ On Android Chrome it is a button; on iOS there is no such browser event, so it
 shows Safari's Share → Add to Home Screen instruction instead. iOS also only
 delivers push to a site added to the Home Screen, so the notifications banner
 waits until the app is installed there.
+
+### The collaboration workflow
+
+```
+/collab intake ──► new ──► (coach proposes) negotiating ◄──► (counter-offers)
+   everything optional         │                    │
+   except email OR phone       │                    ├──► agreed  (green)  ──► payment requested ──► paid
+                               │                    │
+                               └── declined (red) ◄─┘      either side, any time before agreed
+                                   closed  (grey)          coach only: filed, no email
+```
+
+- **Colours**, same in the back-office and in the room: green `agreed`,
+  violet in progress (`new`, `reviewing`, `negotiating`), red `declined`, grey
+  `closed`.
+- **Decline politely** (back-office, `collab_admin_decline(id, note)`): settles
+  the deal and sends the requester one courteous email; the optional note is
+  quoted inside it. Idempotent. An agreed deal cannot be declined — it is
+  closed. **Close** files a deal with no email. A decline from the room tells
+  the coach (internal mail + push).
+- **Whose move.** `collab_admin_list` returns `waiting_on` (`you` · `them` ·
+  `payment`) and `waiting_since`; the list shows it as *Your move · 4 days*.
+- **Reminders** (`collab_reminders()`, pg_cron `cg-collab-reminders`, daily):
+  after 3 days a proposal unanswered → requester; a requested payment unpaid
+  → requester; a counter-offer or a new enquiry unanswered → coach. One
+  reminder per thing, ever (outbox dedupe key), so a re-run or a manual call
+  never sends twice; a revoked room link or a paid-but-unsynced order is never
+  nudged. `select public.collab_reminders()` runs it by hand and returns how
+  many were queued.
+- **Intake**: every field optional except one reply channel (email or phone),
+  enforced in the page, the function and the RPC. Without a name the CRM
+  person is the company, else the email's local part.
 
 ### `collab.coachgari28.com`
 

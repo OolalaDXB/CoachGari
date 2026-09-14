@@ -5,6 +5,37 @@ documented but deliberately **not** implemented. Newest sprint first.
 
 ---
 
+## Collaborations — the workflow, second pass (2026-09-14)
+
+The owner asked for four things: decline politely and/or close; a colour per
+state (green agreed, violet in progress, red declined); a reminder when a reply
+or a payment is pending; every intake field optional. And: "simple et
+efficace, pas d'overengineering". `20261034_cg_collab_workflow.sql`:
+
+- **No new state, no new table.** `declined` and `closed` already existed;
+  what was missing was the *polite* path and the colours. `collab_admin_decline`
+  sends `collab_declined` to the requester (courteous wording, optional personal
+  line, door left open); Close stays silent. The room's own decline now emails
+  the owner. Two email kinds added to the constraint, nothing else.
+- **Reminders are a daily cron, not a scheduler.** `collab_reminders()` looks
+  at what is 3 days old and queues at most one outbox row per waiting thing,
+  keyed `collab:<id>:reminder:<what>:<version>`. The dedupe key *is* the
+  state — no `reminded_at` columns, no per-deal timers. Re-running is free.
+  Four cases only: proposal unanswered (→ requester), payment unpaid
+  (→ requester), counter-offer unanswered and new enquiry untouched (→ owner,
+  which also buzzes the phone through the existing push hook). A second nudge
+  at day 7 was considered and left out: one honest reminder, then the human.
+- **Optional intake, one hard rule.** `contact_name` is nullable; the only
+  thing still required is a reply channel (email or phone) — a form nobody can
+  answer is noise, not a lead. The CRM person falls back to the company, then
+  the email's local part, so dedupe and display keep working.
+- **Whose move, in the list.** `waiting_on` / `waiting_since` computed in
+  `collab_admin_list` from the latest version, no stored field. Colours live in
+  `.cl-st` (admin) and `.cr-badge` (room); `new` counts as in progress (violet).
+- Suites: `cg015_collaborations.sql` 58 → **72**, `test-collab.mjs` 59 → **94**.
+
+---
+
 ## Collaborations — room-link retrieval gated + not persisted (2026-09-10)
 
 Even with the token encrypted at rest (20261016) and the operator column grant

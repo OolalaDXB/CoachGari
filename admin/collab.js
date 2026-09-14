@@ -9,6 +9,16 @@ const TYPE = { brand_partnership: 'Brand partnership', sponsored_content: 'Spons
 const STATUSES = ['', 'new', 'reviewing', 'negotiating', 'agreed', 'declined', 'closed'];
 const money = (m, c) => (m == null ? '—' : C.money(m, c));
 const esc = (s) => C.esc(s);
+// the collab palette: green agreed, violet in progress, red declined, grey closed (admin.css .cl-st)
+const st = (s) => C.st(s).replace('class="st ', 'class="st cl-st ');
+const days = (iso) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
+// whose move it is, and for how long — the one thing a list row has to say
+const wait = (r) => {
+  if (!r.waiting_on) return '—';
+  const d = days(r.waiting_since);
+  const label = { you: 'Your move', them: 'Their reply', payment: 'Payment' }[r.waiting_on] || r.waiting_on;
+  return `<span class="cl-wait ${esc(r.waiting_on)}"><b>${esc(label)}</b> · ${d === 0 ? 'today' : d === 1 ? '1 day' : d + ' days'}</span>`;
+};
 
 export async function collabList() {
   const view = C.view;
@@ -23,13 +33,14 @@ export async function collabList() {
         <input id="cl-search" placeholder="Name, company, reference" value="${esc(search)}">
         <select id="cl-status">${STATUSES.map((s) => `<option value="${s}" ${s === status ? 'selected' : ''}>${s ? s[0].toUpperCase() + s.slice(1) : 'All statuses'}</option>`).join('')}</select>
       </div></div>
-    <div class="ad-panel">${C.table(['Reference', 'Who', 'Type', 'Subject', 'Status', 'Latest', 'Updated'],
+    <div class="ad-panel">${C.table(['Reference', 'Who', 'Type', 'Subject', 'Status', 'Waiting on', 'Latest', 'Updated'],
       rows.map((r) => `<tr class="clik" data-id="${r.id}">
         <td><b>${esc(r.public_ref)}</b></td>
-        <td>${esc(r.contact_name || '—')}${r.company ? `<br><span class="ad-muted" style="font-size:12px">${esc(r.company)}</span>` : ''}</td>
+        <td>${esc(r.contact_name || r.company || '—')}${r.company && r.contact_name ? `<br><span class="ad-muted" style="font-size:12px">${esc(r.company)}</span>` : ''}</td>
         <td>${esc(TYPE[r.collaboration_type] || r.collaboration_type)}</td>
         <td>${esc(r.title || '—')}</td>
-        <td>${C.st(r.status)}</td>
+        <td>${st(r.status)}</td>
+        <td>${wait(r)}</td>
         <td class="num">${r.latest_amount != null ? money(r.latest_amount, r.latest_currency) : '—'}</td>
         <td>${C.fmt(r.updated_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td>
       </tr>`), 'No collaborations yet.')}</div>`;
@@ -54,13 +65,13 @@ async function openDeal(id) {
   view.innerHTML = `
     <div class="ad-head"><div><button class="btn btn-line btn-sm" id="cl-back">← Collaborations</button>
       <h1 style="margin-top:10px">${esc(d.title || TYPE[d.collaboration_type] || 'Collaboration')}</h1>
-      <p class="ad-muted">${esc(d.public_ref)} · ${esc(TYPE[d.collaboration_type] || d.collaboration_type)} · ${C.st(d.status)}</p></div></div>
+      <p class="ad-muted">${esc(d.public_ref)} · ${esc(TYPE[d.collaboration_type] || d.collaboration_type)} · ${st(d.status)}</p></div></div>
 
     <div class="ad-grid2">
       <div class="ad-panel">
         <h2>Request</h2>
         <table class="ad-table"><tbody>
-          <tr><td>Contact</td><td><b>${esc(d.contact_name)}</b>${d.company ? ' · ' + esc(d.company) : ''}</td></tr>
+          <tr><td>Contact</td><td><b>${esc(d.contact_name || d.company || '—')}</b>${d.company && d.contact_name ? ' · ' + esc(d.company) : ''}</td></tr>
           ${d.contact_email ? `<tr><td>Email</td><td><a href="mailto:${esc(d.contact_email)}">${esc(d.contact_email)}</a></td></tr>` : ''}
           ${d.contact_phone ? `<tr><td>Phone</td><td>${esc(d.contact_phone)}</td></tr>` : ''}
           ${d.contact_url ? `<tr><td>Link</td><td>${esc(d.contact_url)}</td></tr>` : ''}
@@ -73,8 +84,9 @@ async function openDeal(id) {
         <div class="cg-actions" style="margin-top:14px">
           <button class="btn btn-line btn-sm" id="cl-copy">Copy room link</button>
           <button class="btn btn-line btn-sm" id="cl-reset">Reset link</button>
-          ${canPropose ? `<button class="btn btn-line btn-sm" id="cl-close">Close</button>` : `<button class="btn btn-line btn-sm" id="cl-reopen">Reopen</button>`}
+          ${canPropose ? `<button class="btn btn-line btn-sm" id="cl-decline">Decline politely</button><button class="btn btn-line btn-sm" id="cl-close">Close</button>` : `<button class="btn btn-line btn-sm" id="cl-reopen">Reopen</button>`}
         </div>
+        ${canPropose ? `<p class="ad-muted" style="font-size:12px;margin-top:8px"><b>Decline</b> sends ${d.contact_email ? 'a courteous email' : 'nothing (no email on file)'} and settles it in red. <b>Close</b> just files it, no email.</p>` : ''}
         <p id="cl-linkout" class="ad-muted" style="font-size:13px;margin-top:8px;word-break:break-all">${d.room_active ? 'An active link exists. Copy to reveal it (access is logged).' : 'No active link — reset to issue one.'}</p>
         <p class="ad-muted" style="font-size:12px;margin-top:4px">The room link is included in every proposal and payment email automatically. It is never displayed at rest; Copy retrieves it through an audited action.</p>
       </div>
@@ -134,7 +146,14 @@ async function openDeal(id) {
     if (e2) return C.fail(e2);
     C.toast('New link issued'); openDeal(id);
   };
-  const closeBtn = C.$('#cl-close'); if (closeBtn) closeBtn.onclick = async () => { if (!confirm('Close this collaboration?')) return; const { error: e2 } = await C.sb.rpc('collab_set_status', { p_id: id, p_status: 'closed' }); if (e2) return C.fail(e2); C.toast('Closed'); openDeal(id); };
+  const declineBtn = C.$('#cl-decline'); if (declineBtn) declineBtn.onclick = async () => {
+    // one optional personal line, quoted inside the courteous email; empty = the standard wording alone
+    const note = prompt(`Decline ${d.public_ref}${d.contact_email ? ` — a courteous email goes to ${d.contact_email}` : ''}.\n\nA personal line to add (optional):`, '');
+    if (note === null) return;
+    const { error: e2 } = await C.sb.rpc('collab_admin_decline', { p_id: id, p_note: note.trim() || null }); if (e2) return C.fail(e2);
+    C.toast(d.contact_email ? 'Declined — email queued' : 'Declined'); openDeal(id);
+  };
+  const closeBtn = C.$('#cl-close'); if (closeBtn) closeBtn.onclick = async () => { if (!confirm('Close this collaboration? No email is sent.')) return; const { error: e2 } = await C.sb.rpc('collab_set_status', { p_id: id, p_status: 'closed' }); if (e2) return C.fail(e2); C.toast('Closed'); openDeal(id); };
   const reopenBtn = C.$('#cl-reopen'); if (reopenBtn) reopenBtn.onclick = async () => { const { error: e2 } = await C.sb.rpc('collab_set_status', { p_id: id, p_status: 'reviewing' }); if (e2) return C.fail(e2); C.toast('Reopened'); openDeal(id); };
   const acceptBtn = C.$('#cl-accept'); if (acceptBtn) acceptBtn.onclick = async () => { if (!confirm('Accept this counter-offer? It freezes the agreed terms.')) return; const { error: e2 } = await C.sb.rpc('collab_admin_accept', { p_id: id, p_version: Number(acceptBtn.dataset.v) }); if (e2) return C.fail(e2); C.toast('Agreed'); openDeal(id); };
 

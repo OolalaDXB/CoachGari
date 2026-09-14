@@ -231,5 +231,81 @@ begin
   select count(*) into n from public.collaboration_payments where collaboration_id = did2;
   if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [new-proposal-cap]'; end if;
 
+  -- 22. the workflow pass (20261034): optional intake, polite decline, reminders, whose move
+  --     (a) an intake with no name is accepted; only a reply channel is mandatory
+  j := public.collab_intake(jsonb_build_object('email','noname@example.com','company','Quiet Co','type','other'));
+  ref := j ->> 'public_ref'; tok := j ->> 'token';
+  select id, crm_contact_id into did, cid from public.collaboration_deals where public_ref = ref;
+  if did is not null and (select contact_name is null from public.collaboration_deals where id = did)
+     and (select display_name from public.crm_contacts where id = cid) = 'Quiet Co' then ok := ok + 1; else fail := fail + 1; log := log || ' [nameless-intake]'; end if;
+  begin perform public.collab_intake(jsonb_build_object('name','Nobody','type','other')); fail := fail + 1; log := log || ' [no-channel-accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
+  --     (b) polite decline from the back-office: declined + one courteous email + audit; a second call is a no-op
+  perform public.collab_propose(did, jsonb_build_object('monetary_amount',100000,'currency','AED'));
+  j := public.collab_admin_decline(did, 'Not this <season>');
+  if (select status from public.collaboration_deals where id = did) = 'declined'
+     and (select declined_at is not null from public.collaboration_proposals where collaboration_id = did and version_number = 1)
+     and exists (select 1 from public.email_events where kind = 'collab_declined' and to_address = 'noname@example.com'
+                   and payload ->> 'by' = 'Coach Gari' and payload ->> 'note' = 'Not this <season>')
+     and exists (select 1 from public.admin_audit where area = 'collaboration' and entity_id = did::text and action = 'decline')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [admin-decline]'; end if;
+  j := public.collab_admin_decline(did, 'again');
+  select count(*) into n from public.email_events where kind = 'collab_declined' and to_address = 'noname@example.com';
+  if (j ->> 'already') = 'true' and n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [decline-not-idempotent]'; end if;
+  --     (c) an agreed deal is closed, never declined (did4 is agreed)
+  begin perform public.collab_admin_decline(did4, null); fail := fail + 1; log := log || ' [declined-an-agreed-deal]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  --     (d) a decline from the room tells the owner (did3 was declined by the counterparty in §17)
+  if exists (select 1 from public.email_events where kind = 'collab_declined' and dedupe_key = 'collab:' || did3 || ':declined:party'
+               and payload ->> 'by' = 'counterparty' and payload ->> 'note' = 'not this time')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [room-decline-silent]'; end if;
+  --     (e) reminders: nothing is due yet, then everything 3 days old is nudged exactly once
+  j := public.collab_intake(jsonb_build_object('name','Slow Co','email','slow@example.com','type','other'));
+  ref2 := j ->> 'public_ref'; tok2 := j ->> 'token';
+  select id into did2 from public.collaboration_deals where public_ref = ref2;
+  perform public.collab_propose(did2, jsonb_build_object('monetary_amount',200000,'currency','AED'));      -- their reply is pending
+  j := public.collab_intake(jsonb_build_object('name','Silent Co','email','silent@example.com','type','other'));
+  ref3 := j ->> 'public_ref';
+  select id into did3 from public.collaboration_deals where public_ref = ref3;                             -- the owner's reply is pending (new, no proposal)
+  -- the suite runs against live data, so every count below is scoped to the fixtures' dedupe keys
+  perform public.collab_reminders();
+  select count(*) into n from public.email_events where kind = 'collab_reminder' and (dedupe_key like 'collab:' || did2 || ':%' or dedupe_key like 'collab:' || did3 || ':%');
+  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [reminder-too-early:' || n || ']'; end if;
+  update public.collaboration_proposals set created_at = now() - interval '4 days' where collaboration_id = did2;
+  update public.collaboration_deals set created_at = now() - interval '4 days' where id = did3;
+  perform public.collab_reminders();
+  if exists (select 1 from public.email_events where kind = 'collab_reminder' and to_address = 'slow@example.com'
+               and payload ->> 'about' = 'proposal' and (payload ? 'collab_id') and dedupe_key = 'collab:' || did2 || ':reminder:proposal:1')
+     and exists (select 1 from public.email_events where kind = 'collab_reminder' and to_address = public.email_owner_address()
+               and payload ->> 'about' = 'new' and dedupe_key = 'collab:' || did3 || ':reminder:owner:new')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [reminders-due]'; end if;
+  perform public.collab_reminders();
+  select count(*) into n from public.email_events where kind = 'collab_reminder' and (dedupe_key like 'collab:' || did2 || ':%' or dedupe_key like 'collab:' || did3 || ':%');
+  if n = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [reminder-repeated:' || n || ']'; end if;
+  --     (f) a counter-offer waiting on the owner, and an unpaid payment, are nudged too — once each
+  perform public.collab_counter(tok2, jsonb_build_object('monetary_amount',150000,'currency','AED'));
+  update public.collaboration_proposals set created_at = now() - interval '4 days' where collaboration_id = did2 and version_number = 2;
+  select id into did from public.collaboration_deals where contact_email = 'gear@example.com';   -- agreed, 'agreed cash' still requested (§21d), link revoked (§12)
+  update public.collaboration_payments set created_at = now() - interval '4 days' where collaboration_id in (did, did4);   -- did4's order is paid (§20)
+  perform public.collab_reminders();
+  if exists (select 1 from public.email_events where kind = 'collab_reminder' and payload ->> 'about' = 'counter' and dedupe_key = 'collab:' || did2 || ':reminder:owner:2')
+     and not exists (select 1 from public.email_events where kind = 'collab_reminder' and payload ->> 'about' = 'payment' and to_address in ('gear@example.com','idem@example.com'))
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [counter-reminder]'; end if;   -- revoked link and paid order: no nudge
+  perform public.collab_regenerate_token(did);
+  perform public.collab_reminders();
+  if exists (select 1 from public.email_events where kind = 'collab_reminder' and to_address = 'gear@example.com'
+               and payload ->> 'about' = 'payment' and (payload ->> 'amount')::int = 250000 and (payload ? 'collab_id'))
+     and not exists (select 1 from public.email_events where kind = 'collab_reminder' and to_address = 'idem@example.com')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [payment-reminder]'; end if;
+  perform public.collab_reminders();
+  select count(*) into n from public.email_events where kind = 'collab_reminder' and to_address in ('slow@example.com','gear@example.com');
+  if n = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [reminder-repeated-2:' || n || ']'; end if;
+  --     (g) the list says whose move it is
+  if (public.collab_admin_list(null, 'Slow Co') -> 0 ->> 'waiting_on') = 'you'
+     and (public.collab_admin_list(null, 'Gear Co') -> 0 ->> 'waiting_on') = 'payment'
+     and (public.collab_admin_list(null, 'Silent Co') -> 0 ->> 'waiting_on') = 'you'
+     and (public.collab_admin_list(null, 'Quiet Co') -> 0 ? 'waiting_on') = false
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [waiting-on]'; end if;
+  perform public.collab_propose(did3, jsonb_build_object('monetary_amount',1000,'currency','AED'));
+  if (public.collab_admin_list(null, 'Silent Co') -> 0 ->> 'waiting_on') = 'them' then ok := ok + 1; else fail := fail + 1; log := log || ' [waiting-on-them]'; end if;
+
   raise exception 'CG015_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

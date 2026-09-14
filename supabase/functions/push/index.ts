@@ -29,6 +29,9 @@ const TEXT: Record<string, { t: string; u: string }> = {
   reschedule:         { t: "A session moved",         u: "/admin/#schedule" },
   collab_request:     { t: "New collaboration enquiry", u: "/admin/#collaborations" },
   collab_accepted:    { t: "A collaboration was accepted", u: "/admin/#collaborations" },
+  collab_counter:     { t: "A counter-offer came in",  u: "/admin/#collaborations" },
+  collab_declined:    { t: "A collaboration was declined", u: "/admin/#collaborations" },
+  collab_reminder:    { t: "A collaboration is waiting on you", u: "/admin/#collaborations" },
   support_thanks:     { t: "Someone sent support",    u: "/admin/#finance" },
 };
 const FALLBACK = { t: "New activity in the back-office", u: "/admin/" };

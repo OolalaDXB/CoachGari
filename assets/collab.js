@@ -29,10 +29,10 @@ form.addEventListener('submit', async (e) => {
   if (inFlight) return;
   if (!CONFIG.COLLAB_ENDPOINT) { say('This form is not available right now. Please email Coach Gari.', 'err'); return; }
 
+  // Every field is optional except a way to reply: an email or a phone (the server holds the same rule).
   const name = val('name');
   const email = val('email');
   const phone = val('phone');
-  if (!name) { say('Please add your name.', 'err'); form.elements.name.focus(); return; }
   if (!email && !phone) { say('Add an email or phone so Coach Gari can reply.', 'err'); form.elements.email.focus(); return; }
 
   // Commercial context (budget, what's on the table) is intentionally NOT collected here —

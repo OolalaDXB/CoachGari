@@ -57,6 +57,9 @@ function render() {
   const dates = d.proposed_date_from ? (d.proposed_date_from + (d.proposed_date_to && d.proposed_date_to !== d.proposed_date_from ? ' to ' + d.proposed_date_to : '')) : '';
   $('typeline').textContent = [TYPE[d.collaboration_type] || 'Collaboration', d.location, dates].filter(Boolean).join(' · ');
   $('request').textContent = d.initial_request || '';
+  // a settled room says so in one line; the badge colour carries the rest
+  const settled = { agreed: 'Agreed. Coach Gari will be in touch with the next steps.', declined: 'This collaboration was declined. Thank you for the idea — the door stays open for another.', closed: 'This collaboration is closed.' }[d.status];
+  $('settled').hidden = !settled; $('settled').textContent = settled || '';
   const meta = [];
   if (d.company) meta.push(['Company', d.company]);
   if (d.location) meta.push(['Location', d.location]);
