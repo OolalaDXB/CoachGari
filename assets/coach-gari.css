@@ -348,7 +348,7 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .f-top a.f-lead span{display:inline-block;transition:transform .25s cubic-bezier(.2,.7,.2,1);}
 .f-top a.f-lead:hover span,.f-top a.f-lead:focus-visible span{transform:translateX(3px);}
 /* Support Coach Gari: a distinct, discreet CTA (design-system button), not a list link */
-/* Trim the left inset so the hug sits closer to the button's edge; the right
+/* Trim the left inset so the mark sits closer to the button's edge; the right
    side keeps the full padding, which is what shifts the label left with it. */
 .f-support-cta{margin-top:16px;padding-left:15px;}
 .f-news{display:flex;gap:10px;margin-top:16px;}
@@ -444,16 +444,18 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .sp-box{position:relative;width:100%;max-width:440px;max-height:calc(100vh - 40px);overflow:auto;background:#fff;border-radius:20px;padding:28px 26px 24px;box-shadow:0 30px 80px rgba(10,10,11,.25);}
 .sp-x{position:absolute;top:12px;right:12px;width:36px;height:36px;border:0;border-radius:50%;background:var(--accent-pale);font-size:20px;line-height:1;cursor:pointer;color:var(--black);}
 .sp-box h3{font-size:22px;margin:0 32px 6px 0;display:flex;align-items:center;gap:9px;}
-/* the hug emoji marks Support wherever it is offered: the header button, the footer
+/* the heart marks Support wherever it is offered: the footer
    call to action, the box itself. An emoji, so it keeps the platform's own artwork —
    sized in em so it follows whatever type it sits next to, and never squeezed by flex. */
-/* The button centres its flex items on their boxes, which left the hug off the
-   label's optical centre — emoji sit low in their em box. Align it on the text
-   baseline instead, which is where emoji are designed to sit and, unlike a
-   pixel nudge, holds across Apple Color Emoji, Segoe and Noto alike (their
-   metrics differ, so a hard-coded offset tuned on one is wrong on the others). */
-.hug{flex:none;align-self:baseline;font-size:1.15em;line-height:1;margin-right:.4em;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;}
-.sp-box h3 .hug{margin-right:0;font-size:1.05em;}
+/* Drawn, not typed. This was a colour emoji, which sat wrong next to a set of
+   monochrome stroked icons and rendered differently on every platform. An inline
+   SVG on currentColor matches the form's WhatsApp and email marks — same 1.8
+   stroke — takes the button's colour on hover, and needs no baseline hack: the
+   flex row centres a box cleanly, which is what an emoji glyph never was. */
+/* margin-bottom nudges it up by half, onto the cap-height centre: a flex row
+   centres boxes against the line box, which sits lower than the capitals. */
+.sup-ico{flex:none;width:17px;height:17px;margin-right:.4em;margin-bottom:2px;}
+.sp-box h3 .sup-ico{margin-right:0;width:19px;height:19px;}
 .sp-sub{margin:0 0 18px;font-size:14.5px;color:var(--grey-text);font-weight:500;line-height:1.5;}
 .sp-amounts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
 .sp-amt{font-family:inherit;font-weight:700;font-size:14.5px;padding:12px 6px;border-radius:10px;border:1.5px solid var(--line);background:#fff;cursor:pointer;color:var(--black);}
