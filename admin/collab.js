@@ -61,6 +61,10 @@ async function openDeal(id) {
   const has = (p) => C.has(p);
   const paidAny = (d.payments || []).some((p) => ['paid', 'partially_refunded', 'refunded'].includes(p.order_status || ''));
 
+  // the signed document, if the acceptance has produced one yet
+  let agr = { has: false };
+  if (d.status === 'agreed') { const { data: a } = await C.sb.rpc('collab_agreement_status', { p_collab: id }); agr = a || { has: false }; }
+
   const consChips = (arr, kind) => (arr || []).filter((c) => c && c.type === kind).map((c) =>
     `<span class="cr-chip">${esc(c.description || (kind === 'monetary' ? 'Fee' : 'Item'))}${c.amount != null && c.currency ? ' · ' + esc(money(c.amount, c.currency)) : ''}</span>`).join('');
 
@@ -122,6 +126,18 @@ async function openDeal(id) {
         <div class="cg-actions"><button class="btn btn-accent" type="submit">Send proposal</button></div>
       </form></div>` : ''}
 
+    ${d.status === 'agreed' ? `<div class="ad-panel"><h2>Signed agreement</h2>
+      ${agr.has ? `<table class="ad-table"><tbody>
+          <tr><td>Version</td><td><b>${esc(agr.version)}</b></td></tr>
+          <tr><td>Signed</td><td>${C.fmt(agr.signed_at, 'Asia/Dubai', { dateStyle: 'long', timeStyle: 'short' })}</td></tr>
+          <tr><td>Record hash</td><td style="word-break:break-all;font-size:12px">${esc(agr.record_sha256)}</td></tr>
+        </tbody></table>
+        <div class="cg-actions" style="margin-top:12px"><button class="btn btn-accent btn-sm" id="cl-agr-dl">Download the agreement</button></div>
+        <p class="ad-muted" style="font-size:12px;margin-top:8px">A PDF of the terms that were accepted, with the timestamp, the device and the one-way network hash recorded at the moment of signature. Electronic signature under UAE Federal Decree-Law No. 46 of 2021; not a qualified electronic signature. Each download is logged.</p>`
+      : `<p class="ad-muted">The document is produced automatically when a version is accepted. It is not here yet — the renderer may still be working, or it may have failed.</p>
+        ${has('collab:manage') ? `<div class="cg-actions" style="margin-top:10px"><button class="btn btn-line btn-sm" id="cl-agr-gen">Produce it now</button></div>` : ''}`}
+    </div>` : ''}
+
     ${d.status === 'agreed' ? `<div class="ad-panel"><h2>Payment</h2>
       <p class="ad-muted">The agreed terms are frozen (version ${esc(d.accepted_version)}). Request a payment through BEAU PH. Non-cash consideration is never charged.</p>
       <form id="cl-pay" class="ad-form">
@@ -136,6 +152,29 @@ async function openDeal(id) {
     <div class="ad-panel"><h2>History</h2>${(d.history || []).length ? `<table class="ad-table"><thead><tr><th>Version</th><th>By</th><th class="num">Amount</th><th>State</th><th>When</th></tr></thead><tbody>${d.history.map((v) => `<tr><td>${esc(v.version)}</td><td>${v.proposed_by === 'coach' ? 'Coach Gari' : 'Counterparty'}</td><td class="num">${v.monetary_amount != null ? esc(money(v.monetary_amount, v.currency)) : '—'}</td><td>${v.accepted_at ? 'accepted' : v.declined_at ? 'declined' : v.superseded_at ? 'superseded' : 'open'}</td><td>${C.fmt(v.created_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'short' })}</td></tr>`).join('')}</tbody></table>` : '<p class="ad-muted">No versions yet.</p>'}</div>`;
 
   C.$('#cl-back').onclick = () => collabList().catch(C.fail);
+
+  /* The agreement comes back as base64 and becomes a file in the browser: the
+     bytes never become a URL that could be forwarded, cached or logged. */
+  const dlBtn = C.$('#cl-agr-dl'); if (dlBtn) dlBtn.onclick = async () => {
+    const { data: a, error: e4 } = await C.sb.rpc('collab_agreement_get', { p_collab: id });
+    if (e4) return C.fail(e4);
+    try {
+      const bin = atob(a.pdf_b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const el = document.createElement('a');
+      el.href = url; el.download = a.filename; el.rel = 'noopener';
+      document.body.appendChild(el); el.click(); el.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      C.toast('Agreement downloaded');
+    } catch (err) { C.fail(err); }
+  };
+  const genBtn = C.$('#cl-agr-gen'); if (genBtn) genBtn.onclick = async () => {
+    const { error: e5 } = await C.sb.rpc('agreement_issue_now', { p_collab: id });
+    if (e5) return C.fail(e5);
+    C.toast('Requested — reopen this deal in a moment');
+  };
   const copyBtn = C.$('#cl-copy'); if (copyBtn) copyBtn.onclick = async () => {
     if (!d.room_active) return C.toast('No active link — reset to issue one', true);
     // The link is never held client-side; retrieve it through the audited RPC (collab:manage only).

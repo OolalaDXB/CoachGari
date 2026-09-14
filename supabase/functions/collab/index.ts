@@ -115,6 +115,15 @@ Deno.serve(async (req: Request) => {
     return json(200, data, origin, allowed);
   }
 
+  /* The signed agreement, to the party who signed it. The room link is the
+     authorisation; the bytes come back as base64 so the page can save a file
+     without the document ever becoming a URL that could be forwarded. */
+  if (action === "agreement") {
+    const { data, error } = await sb.rpc("collab_agreement_for_token", { p_token: token });
+    if (error) return rpcHttp(error, origin, allowed);
+    return json(200, data, origin, allowed);
+  }
+
   if (action === "counter") {
     const p = {
       intro: text(body.intro, 4000),

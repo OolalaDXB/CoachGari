@@ -22,10 +22,30 @@ const COVERED = [
   '20261016_cg_collab_token_at_rest.sql', '20261017_cg_collab_operator_grant.sql', '20261019_cg_collab_link_retrieval.sql',
   '20261021_cg_collab_pay_start_resume.sql', '20261022_cg_collab_payment_bound_to_accepted.sql',
   '20261023_cg_collab_intake_ip_and_throttle.sql', '20261034_cg_collab_workflow.sql', '20261038_cg_collab_close_delete_and_payment_state.sql',
+  '20261043_cg_collab_agreement.sql',
 ];
 check('the foundation migration is present', !!mig);
 check('every collaboration migration on disk is covered by this suite', migFiles.every((f) => COVERED.includes(f)),
   'uncovered: ' + migFiles.filter((f) => !COVERED.includes(f)).join(', '));
+
+/* ---- an agreed deal leaves a document behind (CG-020) ----
+   The detailed assertions live in scripts/test-agreement.mjs, which renders a
+   real PDF. What belongs here is the collaboration-side contract: accepting is
+   what produces the document, whichever side accepts, and the document never
+   becomes readable to someone who cannot read the deal. */
+const agr = M['20261043_cg_collab_agreement.sql'];
+const issue = readFileSync(new URL('20261044_cg_agreement_issue.sql', MIG_DIR), 'utf8');
+check('the agreement hangs off the deal and the exact version accepted',
+  /references public\.collaboration_deals\(id\) on delete cascade/.test(agr)
+  && /references public\.collaboration_proposals\(id\) on delete cascade/.test(agr));
+check('reading an agreement needs the permission that reads the deal',
+  /using \(public\.has_permission\('collab:view'\)\)/.test(agr));
+check('the counterparty reaches their copy through the room token, and only through it',
+  /collab_agreement_for_token/.test(agr) && /collab_deal_by_token\(p_token\)/.test(agr));
+check('the hook is on the accepted version changing, so both accept paths produce one',
+  /after update of accepted_proposal_id on public\.collaboration_deals/.test(issue));
+check('a deal with no accepted version has no agreement to give',
+  /nothing has been accepted/.test(agr) && /nothing has been accepted yet/.test(issue));
 const page = read('../collab.html');
 const room = read('../c.html');
 const pageJs = read('../assets/collab.js');

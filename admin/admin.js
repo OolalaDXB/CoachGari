@@ -219,6 +219,7 @@ function navModel() {
     // BEAU PH payment infrastructure (Rails, FX) — each tab keeps its own permission.
     { key: 'settings', label: 'Settings', icon: '⚙', show: () => has('catalog:view') || has('platform:admin') || has('finance:view'),
       subs: [ { key: 'services', label: 'Services', show: () => has('catalog:view'), run: catalogue },
+              { key: 'business', label: 'Business', show: () => has('platform:admin'), run: orgProfile },
               { key: 'access', label: 'Access', show: () => has('platform:admin'), run: access },
               { key: 'rails', label: 'Payment rails', show: () => has('finance:view'), run: phRails },
               { key: 'fx', label: 'FX', show: () => has('finance:view'), run: phFx } ] },
@@ -1690,6 +1691,37 @@ function openSnapshotImport() {
 /* Access administration only. Granting a permission here never bypasses RLS:
    business data still requires the explicit business permissions. */
 const PERMS = ['coach:operations', 'client_profile:view', 'client_profile:manage', 'health_metrics:view', 'health_metrics:manage', 'coaching_sensitive:view', 'coaching_sensitive:manage', 'finance:view', 'finance:manage', 'analytics:view', 'analytics:manage', 'catalog:view', 'catalog:manage', 'platform:admin'];
+/* ---------- Settings › Business: who the coach is on a contract ----------
+   A collaboration agreement names a party, and a party needs a legal name, a
+   licence and an address. None of it can be guessed, so it is typed once here
+   and printed on every agreement issued afterwards. The document keeps the
+   version it was signed with, so correcting a typo today never rewrites a
+   contract signed last month. */
+async function orgProfile() {
+  const { data: o, error } = await sb.from('org_profile').select('*').eq('id', 1).maybeSingle();
+  if (error) return fail(error);
+  const v = o || {};
+  const f = (k, label, ph = '') => `<label>${esc(label)} <input name="${k}" value="${esc(v[k] || '')}" placeholder="${esc(ph)}"></label>`;
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Business</h1><p class="ad-muted">What appears on a collaboration agreement. Leave a field empty and it is left off the document rather than filled with a guess.</p></div></div>
+    <div class="ad-panel"><form id="org-form" class="ad-form">
+      <div class="row">${f('legal_name', 'Legal name', 'The entity that signs')}${f('trading_name', 'Trading name', 'Coach Gari')}</div>
+      <div class="row">${f('licence_no', 'Licence number', 'e.g. the free-zone licence')}${f('jurisdiction', 'Jurisdiction', 'e.g. RAK Economic Zone, United Arab Emirates')}</div>
+      <label>Registered address <input name="address" value="${esc(v.address || '')}"></label>
+      <div class="row">${f('email', 'Contract email', 'collab@…')}${f('website', 'Website', 'coachgari28.com')}</div>
+      <div class="cg-actions"><button class="btn btn-accent" type="submit">Save</button></div>
+    </form>
+    <p class="ad-muted" style="font-size:12px;margin-top:10px">Agreements are signed electronically under UAE Federal Decree-Law No. 46 of 2021. The jurisdiction above is the one named in the governing-law clause.${v.updated_at ? ` Last changed ${esc(fmt(v.updated_at, 'Asia/Dubai', { dateStyle: 'medium' }))}${v.updated_by ? ' by ' + esc(v.updated_by) : ''}.` : ''}</p></div>`;
+  $('#org-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const d = Object.fromEntries(new FormData(e.target).entries());
+    const { error: e2 } = await sb.rpc('org_profile_set', { p: d });
+    if (e2) return fail(e2);
+    toast('Saved');
+    orgProfile().catch(fail);
+  };
+}
+
 async function access() {
   const { data: users, error } = await sb.rpc('admin_list_access'); if (error) throw error;
   view.innerHTML = `

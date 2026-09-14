@@ -60,6 +60,7 @@ function render() {
   // a settled room says so in one line; the badge colour carries the rest
   const settled = { agreed: 'Agreed. Coach Gari will be in touch with the next steps.', declined: 'This collaboration was declined. Thank you for the idea — the door stays open for another.', closed: 'This collaboration is closed.' }[d.status];
   $('settled').hidden = !settled; $('settled').textContent = settled || '';
+  if (d.status === 'agreed') showAgreement();
   const meta = [];
   if (d.company) meta.push(['Company', d.company]);
   if (d.location) meta.push(['Location', d.location]);
@@ -215,3 +216,31 @@ load().then(() => {
   // Returned from Stripe: show "confirming" and poll the server; never a URL-driven paid state.
   if (q.get('paid') === '1' && !(deal && (deal.payments || []).some((p) => (p.order_status || p.status) === 'paid'))) confirmPaid();
 });
+
+/* The signed agreement, for the party who signed it. Asked for only once the
+   room is agreed, and only when the counterparty clicks: the document is not
+   fetched into the page on load, so a shoulder-surfed screen shows nothing. */
+function showAgreement() {
+  const card = $('agr-card'); if (!card) return;
+  card.hidden = false;
+  $('agr-line').textContent = 'Your copy of the agreed terms is ready.';
+  const btn = $('btn-agreement'); const status = $('agr-status');
+  btn.onclick = async () => {
+    btn.disabled = true; status.textContent = 'Preparing your copy…';
+    const { res, data } = await api('agreement');
+    btn.disabled = false;
+    if (res.status === 404) { status.textContent = 'The document is not ready yet. Try again in a moment, or reply to the email and Coach Gari will send it.'; return; }
+    if (!data || !data.ok || !data.pdf_b64) { status.textContent = 'That did not work. Reply to the email and Coach Gari will send it across.'; return; }
+    try {
+      const bin = atob(data.pdf_b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = data.filename || 'agreement.pdf'; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      status.textContent = 'Downloaded. Keep it with your records.';
+    } catch { status.textContent = 'That did not work. Reply to the email and Coach Gari will send it across.'; }
+  };
+}
