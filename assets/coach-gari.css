@@ -119,10 +119,11 @@ p{margin:0 0 1em;}
    (5.5vw - 2px) so it keeps holding down to 320px — min() pins it under the old
    1.06rem so nothing changes from 375px up. `balance` evens the two lines. */
 .hero-lead{font-size:clamp(min(1.06rem,5.5vw - 2px),2.6vw,1.55rem);font-weight:700;letter-spacing:-.025em;line-height:1.2;max-width:30ch;text-wrap:balance;margin:0 auto 16px;color:var(--black);}
-/* The hero title breaks after "me" on narrow screens. It fits on one line from
-   680px, but with only 18px to spare, so the break is kept until 760px where
-   there are 81px — enough that a different font rasteriser cannot push it over. */
-@media(min-width:760px){.br-hero{display:none;}}
+/* Headings that carry a hard break for narrow screens and want none once there is
+   room. Both users fit on one line well before 760px — the hero from 680, the live
+   sessions title from 700 — but the break is held until 760, where each has over
+   100px to spare, so a different font rasteriser cannot push either onto two. */
+@media(min-width:760px){.br-wide{display:none;}}
 /* Follows the lead down on the narrowest screens. Left fixed, the grey
    paragraph would sit at 18.9px under a 15.6px bold lead — bigger than the line
    it supports. min() keeps it untouched from 360px up. */
@@ -334,11 +335,12 @@ p{margin:0 0 1em;}
 @media(max-width:640px){.enquiry{padding:32px 22px;}.two{grid-template-columns:1fr;}}
 
 .close{padding:96px 0;text-align:center;}
-/* The closing line ran to three lines at the shared 60ch and left the form a long
-   way down the page. 76ch holds it to two — the threshold is 72ch, so this keeps
-   margin for a different font rasteriser — and `balance` stops the second line
-   being a stub. Still well inside the 1144px the wrap offers. */
-.close .sub{max-width:76ch;text-wrap:balance;}
+/* A centred line that would otherwise run to three lines at the shared 60ch. 76ch
+   holds these to two — the threshold measured 72ch for both, so this keeps margin
+   for a different font rasteriser — and `balance` stops the second line being a
+   stub. Still well inside the 1144px the wrap offers. Below about 860px the wrap
+   is not wide enough and they take three; that needs shorter copy, not CSS. */
+.sub-wide{max-width:76ch;text-wrap:balance;}
 
 /* big footer (routes B & C) */
 footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
