@@ -5,6 +5,36 @@ documented but deliberately **not** implemented. Newest sprint first.
 
 ---
 
+## CRM — leads are deletable, and handled in CRM, not the Overview (2026-09-14)
+
+The owner: leads must be deletable or they pollute; the Overview and the CRM
+were mixed — conversion / deletion belong in CRM; maybe a Dashboard tab in
+CRM. `20261035_cg_lead_delete_and_crm_dashboard.sql`:
+
+- **Delete is real, and narrow.** `lead_delete(id)` removes the *enquiry*: the
+  row, its `contact_media` rows (cascade) and the files. It never removes the
+  CRM person — a person can hold bookings, notes, consent, measurements; that
+  record has its own CG-010 export / erasure path. Bookings and outbox rows
+  that pointed at the enquiry go `null`, not away.
+- **Files through the Storage API, not SQL.** Supabase's
+  `storage.protect_delete` refuses `delete from storage.objects` from a
+  function. So the RPC returns the paths and the back-office calls
+  `storage.remove()` under a delete policy scoped to the `enquiry-media`
+  bucket and `coach:operations`. An object orphaned by a failed second step is
+  unreachable (nothing can sign a URL to a path no row names) — accepted over
+  a queue or a cron for a case that rarely happens.
+- **Audit keeps the fact, not the content.** `area='enquiry'`, `action=
+  'delete'`, summary = status, CRM id, media count. No name, no message: a
+  deletion must not resurrect what it deleted.
+- **CRM › Dashboard is the lead inbox.** `crm_dashboard()` (funnel counts,
+  per permission) + the two action lists moved verbatim from the Overview,
+  which now shows one line and an *Open CRM* button. One home for one job.
+- **Restore** for archived / spam leads (status back to `new`), the mirror
+  Contacts already had.
+- Suite `cg009_crm.sql` 43 → **51**.
+
+---
+
 ## Collaborations — the workflow, second pass (2026-09-14)
 
 The owner asked for four things: decline politely and/or close; a colour per

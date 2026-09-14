@@ -166,5 +166,44 @@ begin
   if (j ? 'finance') and not (j ? 'operations') and not (j ? 'crm') then ok := ok + 1; else fail := fail + 1; log := log || ' [overview cards ' || j::text || ']'; end if;
   execute 'reset role';
 
+  /* ---- 9. a lead can be deleted for good (20261035); the CRM person stays; audited; gated ---- */
+  insert into public.contacts (submission_id, name, contact, interest, message)
+    values (gen_random_uuid(), 'Spam Bot', 'spam@example.com', 'coaching', 'buy now') returning id, crm_contact_id into cid2, nrid;
+  insert into public.contact_media (contact_id, storage_path, original_name, content_type, size_bytes, status)
+    values (cid2, 'test/' || cid2 || '/a.jpg', 'a.jpg', 'image/jpeg', 10, 'uploaded');
+  -- a client_profile:manage user without coach:operations may not delete a lead
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000003","email":"prof@test.local"}', true);
+  execute 'set local role authenticated';
+  begin perform public.lead_delete(cid2); fail := fail + 1; log := log || ' [prof deleted a lead]'; exception when sqlstate '42501' then ok := ok + 1; end;
+  execute 'reset role';
+  -- the coach may
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000002","email":"coach@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.lead_delete(cid2);
+  execute 'reset role';
+  if (j ->> 'ok') = 'true' and not exists (select 1 from public.contacts where id = cid2) and not exists (select 1 from public.contact_media where contact_id = cid2)
+     and (j -> 'paths' ->> 0) = 'test/' || cid2 || '/a.jpg'   -- the paths come back so the client can remove the files
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [lead not deleted]'; end if;
+  if exists (select 1 from public.crm_contacts where id = nrid) then ok := ok + 1; else fail := fail + 1; log := log || ' [crm person deleted with the lead]'; end if;
+  if exists (select 1 from public.admin_audit where area = 'enquiry' and entity_id = cid2::text and action = 'delete' and changed_by = 'coach@test.local' and not (summary ? 'name') and not (summary ? 'message'))
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [lead delete not audited / audit leaks content]'; end if;
+  begin perform public.lead_delete(cid2); fail := fail + 1; log := log || ' [double delete silent]'; exception when sqlstate 'P0002' then ok := ok + 1; end;
+
+  /* ---- 10. the CRM dashboard shows only authorised blocks ---- */
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000002","email":"coach@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.crm_dashboard();
+  if (j ? 'leads') and not (j ? 'contacts') and (j -> 'leads' ? 'new') and (j -> 'leads' ? 'last_7d') then ok := ok + 1; else fail := fail + 1; log := log || ' [dashboard coach ' || j::text || ']'; end if;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000003","email":"prof@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.crm_dashboard();
+  if (j ? 'contacts') and not (j ? 'leads') and (j -> 'contacts' ? 'needs_review') then ok := ok + 1; else fail := fail + 1; log := log || ' [dashboard prof ' || j::text || ']'; end if;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000005","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  begin perform public.crm_dashboard(); fail := fail + 1; log := log || ' [dashboard open to finance]'; exception when sqlstate '42501' then ok := ok + 1; end;
+  execute 'reset role';
+
   raise exception 'CG009_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

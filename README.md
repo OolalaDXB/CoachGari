@@ -343,7 +343,7 @@ the page; the page never writes permissions directly. Navigation:
 **Overview · CRM · Schedule · Bookings · Services · Finance · BEAU PH ·
 Analytics · Access**. Schedule merges the four time-management domains
 (Calendar, Weekly availability, Exceptions, Tour stops) as sub-tabs; CRM has
-Leads + Contacts; Finance has Transactions (default) + Payment methods; BEAU PH
+Dashboard (default) + Leads + Contacts; Finance has Transactions (default) + Payment methods; BEAU PH
 has Rails + FX (the embedded payment hub's operator workspace, see
 `beau-ph/docs/`). Both launch users — Gari (`grej28roux@gmail.com`) and Mickaël
 (`mickael@thestudio.mt`) — hold `finance:view` + `finance:manage`, so both see
@@ -492,12 +492,25 @@ to it through a back-filled `crm_contact_id`.
   RPCs (`crm_save_contact`, `crm_add_note`, `crm_edit_note`, `metrics_add`,
   `metrics_edit`); the tables have no direct write grant, anon has nothing,
   and changes are recorded in `public.admin_audit`.
-- **Tests** (`supabase/tests/cg009_crm.sql`, `CG009_TESTS ok=43 fail=0`):
+- **Tests** (`supabase/tests/cg009_crm.sql`, `CG009_TESTS ok=51 fail=0`):
   matching (email / phone / ambiguous / same-name), enquiry immutability,
   direct-booking linkage, note authz + audit, metric history + height
   snapshot + BMI correctness + BMI-not-writable + partial + range rejection,
-  and that coach / finance / analytics personas cannot reach profiles, notes
-  or metrics.
+  that coach / finance / analytics personas cannot reach profiles, notes
+  or metrics, lead deletion (row + media rows, CRM person kept, audited
+  without content, coach-only) and the CRM dashboard per permission.
+- **Leads live in CRM, not in the Overview** (`20261035`). CRM opens on a
+  **Dashboard**: the funnel in numbers (new to handle, 7 / 30 days, converted,
+  archived) plus the two action lists — new leads (*Make client · Archive ·
+  Delete · Open*) and possible duplicates. The Overview keeps the sessions and
+  the headline numbers and shows one line — "3 new leads to handle · Open CRM".
+  **Delete** (`lead_delete`, `coach:operations`) removes the enquiry for good:
+  the row, its attachment rows by cascade, and the files through the Storage
+  API (SQL cannot delete `storage.objects`; a scoped delete policy on the
+  `enquiry-media` bucket covers it). The CRM person is never touched by a
+  lead — that record is governed by CG-010. Audited as
+  `admin_audit(area='enquiry', action='delete')` with status and counts only,
+  never the name or message. Archived / spam leads get a **Restore**.
 
 ## Service catalogue (CG-007) — the one admin-editable content
 
