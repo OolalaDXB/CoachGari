@@ -305,6 +305,7 @@ psql "$DATABASE_URL" -f supabase/tests/cg018_audience.sql              # audienc
 psql "$DATABASE_URL" -f supabase/tests/cg019_sessions.sql              # reminders once per session, consent before WhatsApp, the one-line note, the to-close window, 40 checks
 node scripts/test-whatsapp.mjs                                         # offline: WhatsApp rail — key gate, template-only, no number in a log, 30 checks
 node --experimental-strip-types scripts/test-agreement.mjs             # offline: renders a real PDF and parses it back — xref offsets, determinism, both hashes, what the document may claim, 48 checks
+node scripts/test-ph-cancel.mjs                                        # offline: superseded requests are closed at the provider — key gate, queue-only work, no reference in a log, 22 checks
 ```
 
 ### Transactional email (Resend)
@@ -769,6 +770,7 @@ node scripts/test-audience-csv.mjs        # AUDIENCE_CSV_TESTS ok=20
 node scripts/test-audience-sync.mjs       # AUDIENCE_SYNC_TESTS ok=25
 node scripts/test-whatsapp.mjs            # WHATSAPP_TESTS ok=30
 node --experimental-strip-types scripts/test-agreement.mjs   # AGREEMENT_TESTS ok=48
+node scripts/test-ph-cancel.mjs           # PH_CANCEL_TESTS ok=22
 ```
 
 The three marked suites drive a real browser. They find Playwright in the

@@ -2650,3 +2650,61 @@ reads anyway.
 
 `deploy-edge-functions` now waits for `db-boundary-tests` as well as
 `static-checks`.
+
+---
+
+## 2026-09-14 — A superseded payment request is closed at the provider
+
+The hub already handled a superseded request correctly in its own books: the
+old request goes to `cancelled`, the state machine refuses a late webhook on it,
+and no second ledger entry is possible. That is the part the suites proved.
+
+What nobody had closed was the door. A Stripe Checkout session stays open for
+twenty-four hours, and its URL is in an email the client already has. So a
+client who had just paid by bank transfer could still open yesterday's link and
+pay again: the webhook would be refused, correctly, and the money would sit at
+Stripe waiting for somebody to notice and refund it. Proving the second payment
+cannot corrupt the ledger is not the same as preventing it.
+
+**Why it is an outbox.** Cancelling is an HTTP call; the code that supersedes a
+request is SQL — `payment_record_manual` is an RPC the back-office calls
+straight through PostgREST, with no Edge Function in the path. Postgres could
+reach out with `pg_net`, but then recording a receipt would depend on Stripe
+answering, and a slow provider would hold a transaction that has already done
+the real work. So the fact is recorded (`beau_ph.provider_cancellations`) and
+delivered elsewhere, exactly like the email, push, WhatsApp and analytics rails:
+a key in the Vault, a drain (`ph-cancel`), a cron every two minutes.
+
+**Queued on the fact, not on the caller.** A trigger on `payment_requests`
+catches any transition into `cancelled` or `expired`, so every path that ends a
+request — today's three and tomorrow's — is covered without anyone remembering
+to call anything.
+
+**What is deliberately not queued, and says so.** A rail whose adapter has no
+`cancel` (every manual rail, and PayPal, whose order simply expires) and a
+request that never reached the provider are recorded as `skipped` **with the
+reason**, not left pending. A queue that goes quiet is worse than one that
+says "nothing to do here". Five failures and a row becomes `failed` rather than
+retrying for ever, and Finance then says so out loud — an open payment link is
+worth a human glance, and only rows that have actually given up are shown, so
+the warning stays worth reading.
+
+`beau_ph.providers.supports_cancel` mirrors the adapter's `supports.cancel`
+because the queue lives in the database; `scripts/test-ph-cancel.mjs` fails if
+the two ever disagree.
+
+## 2026-09-14 — The rails nobody has onboarded are folded away
+
+Settings › Payment rails is BEAU PH's catalogue and is right to list every rail
+the hub knows. But six of the fourteen are, on launch day, either never
+onboarded or a placeholder, and a screen that opens on six dead payment options
+reads as a broken product rather than as a roadmap.
+
+They are now folded behind one counted button, not removed — the catalogue is
+the point of the screen. A rail with an available capability that the merchant
+simply has not added yet (Magnati, Network International) is real work and stays
+on screen. Choosing one of the folded statuses in the filter unfolds them, so
+the filter never shows less than it claims to.
+
+Finance › Payment methods, the screen actually used day to day, already listed
+only what Coach Gari had added. It was left alone.

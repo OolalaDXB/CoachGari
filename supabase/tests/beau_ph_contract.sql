@@ -18,7 +18,7 @@ declare
   j jsonb; e1 jsonb; e2 jsonb; r1 uuid; r2 uuid; r3 uuid; txt text;
   cA uuid; p1 uuid; p2 uuid; p3 uuid; oref text; oref2 text; ph_ev uuid; ordid uuid; tok text; ev jsonb;
   p4 uuid; oref4 text; rA uuid; rB uuid; jB jsonb; nB int;
-  q1 jsonb; q2 jsonb; qid uuid; mid uuid; nA int; p5 uuid; tok5 text; j5 jsonb; rC uuid;
+  q1 jsonb; q2 jsonb; qid uuid; mid uuid; nA int; p5 uuid; tok5 text; j5 jsonb; rC uuid; v int;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
   /* The Aani rail is MERCHANT CONFIGURATION, not schema: it is set in the
@@ -153,6 +153,8 @@ begin
   /* ---- 14–15. HOST ADAPTER (Coach Gari): reconciles once, idempotently ---- */
   insert into public.app_users (email, display_name, party) values ('fin@test.local', 'Fin', 'gari');
   insert into public.app_permissions (email, permission) values ('fin@test.local', 'coach:operations'), ('fin@test.local', 'finance:view'), ('fin@test.local', 'finance:manage');
+  insert into public.app_users (email, display_name, party) values ('coachonly@test.local', 'Coach only', 'gari');
+  insert into public.app_permissions (email, permission) values ('coachonly@test.local', 'coach:operations');
   insert into public.crm_contacts (display_name, email, email_norm, country) values ('Tino M', 'tino@ex.com', 'tino@ex.com', 'Zimbabwe') returning id into cA;
   insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
     values (cA, '5-session pack', 5, 150000, 'AED', 'unpaid', 'seed') returning id into p1;
@@ -727,6 +729,69 @@ begin
   e1 := beau_ph.confirm_manual(rC, 'op@test', 4000, 'USD', null, now(), 'counted at the court');
   if (e1 ->> 'to') = 'paid' and exists (select 1 from beau_ph.payment_events where id = (e1 ->> 'payment_event_id')::uuid and actor = 'operator' and actor_id = 'op@test') then ok := ok + 1; else fail := fail + 1; log := log || ' [cash: operator confirm]'; end if;
   begin perform beau_ph.confirm_manual(rC, 'op@test', 4000, 'USD'); fail := fail + 1; log := log || ' [cash: confirmed twice]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+
+  /* ---- 22. A superseded request is closed AT THE PROVIDER, not only in our ledger ----
+     The state machine already refuses a late webhook on a cancelled request, so no
+     double ledger entry is possible. What was missing is closing the door: a Stripe
+     Checkout session stays open for 24 hours and its URL is in the client's inbox.
+     Cancelling is an HTTP call and the code that supersedes runs in SQL, so the fact
+     is queued here and delivered by the ph-cancel function. */
+  -- a card intent that reached Stripe (a session exists) and is then superseded by a
+  -- manual receipt: queued PENDING, carrying the session id the adapter has to expire
+  insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, payment_status, created_by)
+    values (cA, '5-session pack #cancel', 5, 70000, 'AED', 'unpaid', 'seed') returning id into p5;
+  j := public.cg_ph_request_for_pack(p5, 'stripe', rt); oref := j -> 'order' ->> 'reference';
+  txt := 'cs_test_' || replace(gen_random_uuid()::text, '-', '');
+  perform public.attach_checkout(oref, txt, 'https://checkout.stripe.com/x', now() + interval '30 minutes');
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  perform public.payment_record_manual(p5, 70000, 'AED', 'cash', 'CASH-CANCEL-1');
+  execute 'reset role';
+  if exists (select 1 from beau_ph.provider_cancellations c join beau_ph.payment_requests r on r.id = c.request_id
+              where r.external_reference = oref and r.provider_key = 'stripe'
+                and c.status = 'pending' and c.provider_key = 'stripe' and c.reason = 'cancelled'
+                and c.provider_reference = txt)
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [cancel: stripe queued]'; end if;
+
+  -- a request that never reached the provider has nothing to close: skipped, with the reason
+  if exists (select 1 from beau_ph.provider_cancellations c join beau_ph.payment_requests r on r.id = c.request_id
+              where r.external_reference = oref2 and r.provider_key = 'stripe'
+                and c.status = 'skipped' and c.last_error = 'never created at the provider')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [cancel: never created]'; end if;
+
+  -- a manual rail has nothing to cancel at a provider: recorded as skipped WITH the reason, never left pending
+  if exists (select 1 from beau_ph.provider_cancellations c join beau_ph.payment_requests r on r.id = c.request_id
+              where r.provider_key in ('cash','aani','bank_transfer') and c.status = 'skipped' and c.last_error is not null)
+     or not exists (select 1 from beau_ph.payment_requests where provider_key in ('cash','aani','bank_transfer') and status in ('cancelled','expired'))
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [cancel: manual rail skipped]'; end if;
+
+  -- a paid request is never queued: the queue only ever holds requests the database has already ended
+  if not exists (select 1 from beau_ph.provider_cancellations c join beau_ph.payment_requests r on r.id = c.request_id where r.status in ('paid','refunded'))
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [cancel: paid queued]'; end if;
+
+  -- the drain surface: due rows come out with what the adapter needs and nothing else
+  j := beau_ph.cancellations_due(50);
+  if jsonb_array_length(j) >= 1
+     and not exists (select 1 from jsonb_array_elements(j) e where e ->> 'provider_reference' is null or e ->> 'provider' is null)
+     and j::text not like '%sk_%' and j::text not like '%whsec_%'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [cancel: due shape]'; end if;
+
+  -- five failures and it stops asking; an open session at a provider deserves a human, not an infinite retry
+  rC := (j -> 0 ->> 'id')::uuid;
+  for v in 1..5 loop perform beau_ph.cancellation_mark(rC, false, 'stripe 500'); end loop;
+  if (select status from beau_ph.provider_cancellations where id = rC) = 'failed'
+     and (select attempts from beau_ph.provider_cancellations where id = rC) = 5
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [cancel: gives up]'; end if;
+  -- and a final row is not reopened by a later mark
+  perform beau_ph.cancellation_mark(rC, true);
+  if (select status from beau_ph.provider_cancellations where id = rC) = 'failed' then ok := ok + 1; else fail := fail + 1; log := log || ' [cancel: final is final]'; end if;
+
+  -- the operator sees what could not be closed; anon and a coach never do
+  if jsonb_array_length(public.ph_cancellations_open()) >= 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [cancel: operator view]'; end if;
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"coachonly@test.local"}', true);
+  execute 'set local role authenticated';
+  begin perform public.ph_cancellations_open(); fail := fail + 1; log := log || ' [cancel: coach sees queue]'; exception when insufficient_privilege then ok := ok + 1; end;
+  execute 'reset role';
 
   raise exception 'BEAU_PH_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

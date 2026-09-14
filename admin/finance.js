@@ -93,7 +93,16 @@ function modal({ title, body, confirm = 'Confirm', danger = false, cancel = 'Can
 const txFilters = { q: '', type: '', method: '', status: '' };
 export async function financeTransactions() {
   const { $, esc, money, st, view, has } = C;
-  const rows = await rpc('finance_transactions', { p_limit: 300 });
+  /* A cancellation the hub could not deliver to the provider means a payment
+     link may still be live and the same thing can be paid twice. That is a
+     Finance fact, so it is said here rather than left in a queue nobody opens.
+     Fetched alongside the rows and silently ignored if the RPC is not there
+     yet, so an older deployment does not lose the screen. */
+  const [rows, openCancels] = await Promise.all([
+    rpc('finance_transactions', { p_limit: 300 }),
+    rpc('ph_cancellations_open').catch(() => []),
+  ]);
+  const stuck = (Array.isArray(openCancels) ? openCancels : []).filter((c) => c.status === 'failed');
   const manage = has('finance:manage');
   // per-currency figures: amounts are in the currency actually collected, never summed across currencies
   const byCcy = {};
@@ -114,6 +123,11 @@ export async function financeTransactions() {
   };
   view.innerHTML = `
     <div class="ad-head"><div><h1>Transactions</h1><p class="ad-muted">Every payment request across every rail, in the currency it is collected in. Status is BEAU PH's normalised state; the provider's own detail is one click away. No names, no contacts: only a masked hint.</p></div></div>
+    ${stuck.length ? `<div class="ad-panel" style="border-left:3px solid var(--warn,#b8860b);margin-bottom:14px">
+      <p style="margin:0 0 6px"><b>${stuck.length} payment link${stuck.length > 1 ? 's' : ''} could not be closed at the provider.</b></p>
+      <p class="ad-muted" style="margin:0">These orders were settled another way, but the original checkout page may still be payable — close ${stuck.length > 1 ? 'them' : 'it'} in the provider's dashboard.</p>
+      <ul class="ad-muted" style="margin:8px 0 0;padding-left:18px">${stuck.map((c) => `<li>${esc(c.order)} · ${esc(c.provider)} · ${money(c.amount, c.currency)} · ${esc(c.last_error || 'no reason recorded')}</li>`).join('')}</ul>
+    </div>` : ''}
     <div class="ad-kpis">${Object.entries(byCcy).map(([c, b]) => `<div class="ad-kpi"><b>${money(b.collected, c)}</b><span>Collected (${esc(c)})${b.refunded ? ` · refunded ${money(b.refunded, c)}` : ''}${b.open ? ` · open ${money(b.open, c)}` : ''}</span></div>`).join('') || '<div class="ad-kpi"><b>—</b><span>Nothing collected yet</span></div>'}</div>
     <div class="ad-panel">
       <div class="ad-filters" style="margin-bottom:12px">
@@ -536,7 +550,16 @@ function summarizeDiff(a, b, schema) {
 const mask = (v) => v ? '•••• ' + String(v).slice(-4) : '—';
 
 /* =============================== BEAU PH · RAILS =============================== */
-const railFilters = { country: '', currency: '', status: '', channel: '' };
+/* `dormant` is off by default: a rail nobody has onboarded is catalogue, not
+   work. Six of the fourteen rails BEAU PH knows are in that state on launch day
+   — never onboarded, or a placeholder — and a screen that opens on six dead
+   options reads as a broken product rather than as a roadmap. A rail with an
+   available capability the merchant simply has not added yet is real work and
+   stays on screen. The folded ones are one click away, counted, never removed —
+   this is a fold, not a deletion. Choosing their status in the filter unfolds
+   them too, so the filter never lies about what it is showing. */
+const railFilters = { country: '', currency: '', status: '', channel: '', dormant: false };
+const DORMANT = new Set(['not_onboarded', 'coming_soon']);
 let runtimeCache = null;   // one probe per admin session: presence of secrets per rail, never values
 async function runtimeProbe() {
   if (runtimeCache) return runtimeCache;
@@ -568,9 +591,12 @@ export async function phRails() {
   const allCurrencies = [...new Set(rails.flatMap((r) => listOf(r.provider_currencies).concat(listOf(r.merchant && r.merchant.currencies))))].sort();
   const channels = [...new Set(rails.map((r) => (r.channel_label || '').split('·')[0].trim()).filter(Boolean))];
   const f = railFilters;
+  const dormantCount = rails.filter((r) => DORMANT.has(railStatus(r, rt && rt.providers && rt.providers[r.provider]).key)).length;
+  const showDormant = f.dormant || DORMANT.has(f.status);
   const shown = rails.filter((r) => {
     const s = railStatus(r, rt && rt.providers && rt.providers[r.provider]);
     if (f.status && s.key !== f.status) return false;
+    if (!showDormant && DORMANT.has(s.key)) return false;
     if (f.channel && !(r.channel_label || '').startsWith(f.channel)) return false;
     if (f.country && !(r.provider_countries === null || listOf(r.provider_countries).includes(f.country)) ) return false;
     if (f.currency && !(r.provider_currencies === null || listOf(r.provider_currencies).includes(f.currency))) return false;
@@ -584,11 +610,15 @@ export async function phRails() {
       <select id="rf-country"><option value="">Any country</option>${allCountries.map((c) => `<option value="${c}" ${f.country === c ? 'selected' : ''}>${esc(countryName(c))}</option>`).join('')}</select>
       <select id="rf-currency"><option value="">Any currency</option>${allCurrencies.map((c) => `<option ${f.currency === c ? 'selected' : ''}>${c}</option>`).join('')}</select>
       <span class="ad-muted" style="font-size:12.5px">${shown.length} of ${rails.length}</span>
+      ${dormantCount && !showDormant ? `<button class="btn btn-line btn-xs" id="rf-dormant">Show ${dormantCount} rail${dormantCount > 1 ? 's' : ''} nobody has onboarded</button>` : ''}
+      ${showDormant && !f.status ? '<button class="btn btn-line btn-xs" id="rf-dormant">Hide the rails nobody has onboarded</button>' : ''}
     </div>
     <div class="ph-cards">${shown.map((r) => railCard(r, rt && rt.providers ? rt.providers[r.provider] : null, manage)).join('')}</div>
     <details class="ad-panel ph-details" id="rails-dest"><summary>Settlement destinations</summary><div id="rails-dest-body"><p class="ad-empty">Loading…</p></div></details>
     <details class="ad-panel ph-details" id="rails-audit"><summary>Configuration audit trail</summary><div id="rails-audit-body"><p class="ad-empty">Loading…</p></div></details>`;
   for (const id of ['status', 'channel', 'country', 'currency']) $(`#rf-${id}`).onchange = () => { railFilters[id] = $(`#rf-${id}`).value; phRails().catch(C.fail); };
+  const dormantBtn = $('#rf-dormant');
+  if (dormantBtn) dormantBtn.onclick = () => { railFilters.dormant = !railFilters.dormant; phRails().catch(C.fail); };
   view.querySelectorAll('.ph-card').forEach((card) => {
     const key = card.dataset.rail; const rail = rails.find((r) => r.provider === key); const rtp = rt && rt.providers ? rt.providers[key] : null;
     const ed = card.querySelector('[data-editor]');

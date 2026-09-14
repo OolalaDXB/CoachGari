@@ -70,6 +70,8 @@ jobs:
         run: node --experimental-strip-types scripts/test-agreement.mjs
       - name: PayPal and Wise rails — mode gate, order shape, signature verification (offline)
         run: node --experimental-strip-types scripts/test-paypal-wise.mjs
+      - name: Provider cancellation — key gate, queue-only work, no reference in a log (offline)
+        run: node scripts/test-ph-cancel.mjs
 
       - name: Verify config is valid ES module
         run: node --input-type=module -e "import('./config.js').then(m => { if (!m.CONFIG) { console.error('CONFIG export missing'); process.exit(1); } console.log('config.js OK'); })"

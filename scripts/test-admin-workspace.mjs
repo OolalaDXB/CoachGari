@@ -8,7 +8,7 @@
      Edit                   → payment_method_get for THAT method only; inline editor opens
      Save changes           → one confirmation with a change summary; payment_method_set once; editor collapses
      Remove                 → confirmation copy; payment_method_remove; history preserved wording
-     BEAU PH › Rails        → beau_ph_rails + one runtime probe; 11 cards; Configure loads that rail only
+     BEAU PH › Rails        → beau_ph_rails + one runtime probe; the rails nobody has onboarded are folded away; Configure loads that rail only
      BEAU PH › FX           → beau_ph_fx only
      Cache                  → returning to Transactions within the session does not refetch
      Secrets                → nothing secret-shaped is ever requested or rendered
@@ -44,6 +44,12 @@ const FIXTURES = {
   finance_transactions: [
     { reference: 'OR-1B7DDF', created_at: '2026-09-09T07:58:21Z', paid_at: '2026-09-09T07:58:34Z', public_reference: 'CG-1048', type: 'package', customer_hint: 'm***@e***.com', crm_contact_id: 'c1', item: '5-session pack', method: 'stripe', method_label: 'Card (Stripe)', method_kind: 'online', amount: 1000, currency: 'AED', pricing_amount: 1000, pricing_currency: 'AED', fx: false, status: 'refunded', order_status: 'refunded', refund_amount: 1000, chargeback_amount: 0, earning_status: 'open', fee_known: false, action: 'fee_pending', ph_reference: 'CG-1048', ph_request_id: 'r1', provider_reference: 'pi_x', reconciled: true, support_message: null },
     { reference: 'OR-AAAAAA', created_at: '2026-09-08T10:00:00Z', paid_at: null, public_reference: 'CG-1049', type: 'package', customer_hint: 'a***@b***.com', crm_contact_id: 'c2', item: '10-session pack', method: 'aani', method_label: 'Aani (UAE instant payment)', method_kind: 'manual', amount: 50000, currency: 'AED', pricing_amount: 50000, pricing_currency: 'AED', fx: false, status: 'pending', order_status: 'pending_payment', refund_amount: null, chargeback_amount: null, earning_status: null, fee_known: null, action: 'confirm_receipt', ph_reference: 'CG-1049', ph_request_id: 'r2', provider_reference: null, reconciled: false, support_message: null },
+  ],
+  /* A cancellation the hub could not deliver: the checkout page for an order
+     settled another way may still be payable. Finance has to say so. */
+  ph_cancellations_open: [
+    { id: 'x1', provider: 'stripe', status: 'failed', attempts: 5, reason: 'cancelled', last_error: 'stripe 500', created_at: '2026-09-14T10:00:00Z', order: 'OR-STUCK1', amount: 70000, currency: 'AED' },
+    { id: 'x2', provider: 'stripe', status: 'pending', attempts: 1, reason: 'cancelled', last_error: null, created_at: '2026-09-14T10:05:00Z', order: 'OR-TRYING', amount: 1000, currency: 'AED' },
   ],
   payment_methods_summary: [
     { provider: 'stripe', display_name: 'Card (Stripe)', channel_label: 'Online · Card', kind: 'online', readiness: 'available', enabled: true, countries: ['AE', 'GB', 'ZW'], currencies: ['AED', 'USD'], intents: null, health: 'configured', hint: null, history: 2, updated_at: '2026-09-09T00:00:00Z', updated_by: 'migration' },
@@ -104,6 +110,13 @@ await page.waitForFunction(() => document.querySelector('#view') && /Transaction
 check('Finance opens on Transactions by default', (await page.evaluate(() => location.hash)) === '#finance/transactions', await page.evaluate(() => location.hash));
 check('Finance open fetches transactions only', count('finance_transactions') === 1 && count('payment_methods_summary') === 0 && count('beau_ph_rails') === 0 && count('beau_ph_fx') === 0 && count('finance_orders') === 0 && count('payment_method_get') === 0, rpcNames().join(','));
 check('Transaction rows render with type, method, status', await page.evaluate(() => { const t = document.querySelector('#view').innerText; return t.includes('CG-1048') && t.includes('Package') && t.includes('Card (Stripe)') && t.includes('refunded'); }));
+/* Only what could NOT be closed is shouted about. A cancellation still being
+   retried is not the operator's problem yet — telling them about it would train
+   them to ignore the banner. */
+check('Finance warns about a payment link it could not close', await page.evaluate(() => {
+  const t = document.querySelector('#view').innerText;
+  return t.includes('could not be closed at the provider') && t.includes('OR-STUCK1') && !t.includes('OR-TRYING');
+}));
 check('Ledger is not fetched until opened', count('finance_orders') === 0);
 await page.click('#tx-ledger summary');
 await page.waitForFunction(() => document.querySelector('#tx-ledger-body') && /Settlements|Loading/.test(document.querySelector('#tx-ledger-body').innerText));
@@ -158,7 +171,23 @@ check('+ Add opens the BEAU PH catalogue (fetched now, once)', count('beau_ph_ra
 const before = count('beau_ph_rails');
 await page.click('#nav a[data-section="settings"]'); await page.waitForSelector('#subnav a[data-sub="rails"]'); await page.click('#subnav a[data-sub="rails"]');
 await page.waitForSelector('.ph-card[data-rail="stripe"]');
-check('Rails default tab, 11 rails rendered', (await page.evaluate(() => location.hash)) === '#settings/rails' && (await page.$$('.ph-card')).length === 11);
+/* The screen opens on the rails that are in play. The ones nobody has onboarded
+   are counted and one click away — a fold, not a deletion — because a back-office
+   that opens on eight dead payment options reads as broken rather than as a
+   roadmap. Selecting one of their statuses in the filter unfolds them, so the
+   filter is never showing less than it claims. */
+// Not onboarded at all (no capability is available) or a placeholder. A rail with an
+// available capability that the merchant simply has not added yet — Magnati, Network
+// International — is actionable work and stays on screen.
+const dormantKeys = ['mpesa', 'ozow', 'paynow', 'payshap', 'adyen', 'beau_wallet'];
+const liveCount = FIXTURES.beau_ph_rails.rails.length - FIXTURES.beau_ph_rails.rails.filter((r) => dormantKeys.includes(r.provider)).length;
+check('Rails opens on the rails in play, the rest folded', (await page.evaluate(() => location.hash)) === '#settings/rails'
+  && (await page.$$('.ph-card')).length === liveCount
+  && (await page.evaluate((keys) => keys.every((k) => !document.querySelector(`.ph-card[data-rail="${k}"]`)), dormantKeys))
+  && (await page.textContent('#rf-dormant')).includes('nobody has onboarded'));
+await page.click('#rf-dormant');
+await page.waitForSelector('.ph-card[data-rail="mpesa"]');
+check('One click shows every rail BEAU PH knows', (await page.$$('.ph-card')).length === FIXTURES.beau_ph_rails.rails.length);
 check('Rails uses the cached catalogue and one runtime probe (JWT sent)', count('beau_ph_rails') === before && count('fetch:ph-admin') === 1 && calls.find((c) => c.name === 'fetch:ph-admin').args.auth === true);
 check('Rail card shows LIVE, capability vs merchant coverage, checklist', await page.evaluate(() => { const c = document.querySelector('.ph-card[data-rail="stripe"]').textContent; return c.includes('LIVE') && c.includes('Active') && c.includes('Provider coverage') && c.includes('Merchant enabled') && c.includes('Credentials') && c.includes('Webhook') && c.includes('Merchant config') && c.includes('Last activity'); }));
 check('A not-onboarded rail is not pretended ready', await page.evaluate(() => { const c = document.querySelector('.ph-card[data-rail="mpesa"]').textContent; return c.includes('Not onboarded') && c.includes('Start onboarding') && !c.includes('Enable'); }));
@@ -167,7 +196,7 @@ await page.selectOption('#rf-status', 'active');
 await page.waitForFunction(() => document.querySelectorAll('.ph-card').length === 2);
 check('Filter by status works client-side (no refetch)', (await page.$$('.ph-card')).length === 2 && count('beau_ph_rails') === before);
 await page.selectOption('#rf-status', '');
-await page.waitForFunction(() => document.querySelectorAll('.ph-card').length === 11);
+await page.waitForFunction((n) => document.querySelectorAll('.ph-card').length === n, FIXTURES.beau_ph_rails.rails.length);
 const getsBefore = count('payment_method_get');
 await page.click('.ph-card[data-rail="aani"] [data-configure]');
 await page.waitForSelector('.ph-card[data-rail="aani"] form.ph-editor');
