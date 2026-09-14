@@ -2708,3 +2708,78 @@ the filter never shows less than it claims to.
 
 Finance › Payment methods, the screen actually used day to day, already listed
 only what Coach Gari had added. It was left alone.
+
+---
+
+## 2026-09-14 — The commission is 10 % of the net, even when the fee is late
+
+`recompute_earning` computes `net = gross − fee − refunds − chargebacks − tax`
+and takes the fee from `payments.fee_amount`. That column reads 0 until Stripe
+tells us the real figure, and `fee_known` is the flag that says whether 0 means
+"no fee" or "not yet". **Nothing read the flag.** On a card sale the net was
+therefore the gross, and the coach paid 10 % of Stripe's cut as well as of his
+own revenue — quietly, and never in his favour.
+
+The one live order is refunded, so the error is worth nothing there. It would
+have been worth something on every real sale.
+
+**Why the fee was missing.** Stripe creates the balance transaction
+asynchronously. The adapter retries three times over about 1.6 seconds inside
+the webhook and gives up, which is right — a webhook that waits minutes times
+out. The charge id arrived, the fee did not, and nothing ever went back for it.
+Giving up was correct; never returning was the defect.
+
+**Both halves are needed.** Either alone is worse than neither:
+
+- An earning whose fee is **expected but unknown** is `fee_pending`.
+  `create_settlement` sweeps `status = 'open'`, so such a row cannot be paid out
+  on a figure we know to be wrong. It is still computed and still shown — the
+  back-office must see the sale — it is simply not payable.
+- `payment_fee_record()` lets the fee land later, from the `stripe-fees` sweep
+  (every ten minutes, same key/cron pattern as the other outboxes), and
+  recomputes on the true net. The status returns to `open` by itself.
+
+"Expected" means the rail settles through a PSP — exactly the rails whose origin
+is `platform`. On cash, a bank transfer or Aani, `fee_known` is false for ever
+because there is no fee to know; blocking those would freeze the ledger over
+something that does not exist. A fully refunded order is the other exception:
+its net is zero whatever the fee turns out to be.
+
+The fee is refused if it arrives in a currency other than the one the payment
+was taken in. A Stripe account's settlement currency is a different number, not
+a converted one, and writing it here would move the net with nothing on the
+record to say why.
+
+## 2026-09-14 — What counts as audience
+
+Three corrections of the same kind: the website figures were counting things
+that are not the audience.
+
+1. **The history starts on 15 September.** Everything before it is the build —
+   our own visits, the checks before launch, the test payment. Left in, it
+   inflates the first month by roughly its own size, and afterwards nobody can
+   tell which visit was a client. The days already collected were deleted, not
+   hidden: a row nobody may count is a row someone will count.
+2. **The back-office is not traffic.** `/admin` is the coach at work. Counting
+   his working day as audience is the most flattering and least useful mistake a
+   dashboard can make — the number rises exactly when nobody new arrived. The
+   exclusion is a Plausible filter, applied inside the query, so it never
+   reaches our table. Filtering afterwards would not give the same answer: a
+   visitor who saw a public page and then an admin page is one visitor, and only
+   Plausible can decide which sessions that leaves.
+3. **Countries.** What to price in which currency and which rails to open are
+   questions about countries, and the answer was not being stored at all. Country
+   only — never the city or the region: neither would change a decision, and both
+   narrow a visitor further than a visitor count needs to.
+
+Both the start date and the exclusions are **configuration**, editable by
+`analytics:manage` and audited, because "when did this site go live" is a fact
+about this project and the next host will have another. The rule lives in the
+database and the sync asks for it, so the table can refuse a day before the
+start even if a future caller forgets. Moving the start date forward deletes the
+days behind it there and then — a chart must never disagree with the rule that
+produced it — and the back-office asks before doing it.
+
+The period-over-period comparison is now only claimed once a previous period
+actually exists. A chart showing +100 % because the month before was empty is
+worse than one showing nothing.

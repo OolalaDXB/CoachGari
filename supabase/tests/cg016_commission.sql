@@ -159,5 +159,60 @@ begin
   if (select count(*) from public.admin_audit where area = 'commission' and action like 'exemption_%') >= 4
     then ok := ok + 1; else fail := fail + 1; log := log || ' [exemption-audit]'; end if;
 
+  /* ---- 11. the commission is never charged on the gross because the fee is late ----
+     Stripe creates the balance transaction asynchronously, so fee_known stays
+     false for a while and fee_amount reads 0. Nothing used to read the flag, so
+     net = gross and the coach paid 10 % of the fee as well. */
+  oref := 'OR-F' || upper(substr(encode(extensions.gen_random_bytes(3),'hex'),1,5));
+  insert into public.orders (reference, order_reason, customer_name, customer_contact, currency, gross_amount, status, paid_at)
+  values (oref, 'support', 'Fee Payer', 'fee@example.com', 'EUR', 50000, 'paid', now()) returning id into xid;
+  insert into public.payments (order_id, provider, amount, currency, status, paid_at, fee_amount, fee_known)
+  values (xid, 'stripe', 50000, 'EUR', 'succeeded', now(), 0, false);
+  perform public.recompute_earning(xid);
+  select * into e from public.partner_earnings where order_id = xid;
+  --    the row exists and shows the sale — the back-office must not go blind
+  if found and e.gross_amount = 50000 then ok := ok + 1; else fail := fail + 1; log := log || ' [fee-pending-row-missing]'; end if;
+  --    but it is NOT payable: a provisional net cannot become a payout
+  if e.status = 'fee_pending' then ok := ok + 1; else fail := fail + 1; log := log || ' [fee-pending-status ' || e.status || ']'; end if;
+  --    and a settlement sweeps 'open' only, so it cannot pick this up
+  j := public.create_settlement('gari', (now() - interval '1 day')::date, (now() + interval '1 day')::date, 'EUR');
+  if not exists (select 1 from public.partner_settlement_items where earning_id = e.id) then ok := ok + 1; else fail := fail + 1; log := log || ' [fee-pending-settled]'; end if;
+  if (select status from public.partner_earnings where id = e.id) = 'fee_pending' then ok := ok + 1; else fail := fail + 1; log := log || ' [fee-pending-status-lost]'; end if;
+
+  --    the fee lands: the net is the true net, the commission follows it, and the row is payable
+  select id into moid from public.payments where order_id = xid;
+  j := public.payment_fee_record(moid, 1450, 'EUR', 'ch_late', 'txn_late');
+  select * into e from public.partner_earnings where order_id = xid;
+  if e.stripe_fee = 1450 and e.net_collected = 48550 and e.oolala_commission = 4855 and e.status = 'open'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [fee-landed ' || e.net_collected || '/' || e.oolala_commission || '/' || e.status || ']'; end if;
+  --    5000 would have been the figure without the fee: the coach is 145 better off, every time
+  if e.oolala_commission < 5000 then ok := ok + 1; else fail := fail + 1; log := log || ' [still-on-gross]'; end if;
+
+  --    a fee already known is never overwritten by a later sweep
+  j := public.payment_fee_record(moid, 9999, 'EUR');
+  if (j ->> 'already_known')::boolean and (select fee_amount from public.payments where id = moid) = 1450
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [fee-overwritten]'; end if;
+  --    a fee in another currency is refused: it is a different number, not a converted one
+  insert into public.orders (reference, order_reason, customer_name, customer_contact, currency, gross_amount, status, paid_at)
+  values (oref || 'B', 'support', 'X', 'x@example.com', 'EUR', 10000, 'paid', now()) returning id into moid;
+  insert into public.payments (order_id, provider, amount, currency, status, paid_at, fee_amount, fee_known)
+  values (moid, 'stripe', 10000, 'EUR', 'succeeded', now(), 0, false) returning id into packid;
+  begin perform public.payment_fee_record(packid, 300, 'AED'); fail := fail + 1; log := log || ' [fee-wrong-currency-accepted]';
+  exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.payment_fee_record(packid, 20000, 'EUR'); fail := fail + 1; log := log || ' [fee-larger-than-payment]';
+  exception when sqlstate '22023' then ok := ok + 1; end;
+
+  --    a MANUAL rail has no provider fee at all: fee_known is false for ever there,
+  --    and blocking it would freeze the ledger over a fee that does not exist
+  if public.fee_is_expected('stripe') and not public.fee_is_expected('cash') and not public.fee_is_expected('bank_transfer')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [fee-expected-mapping]'; end if;
+  select * into e from public.partner_earnings where order_id = (select id from public.orders where reference = mref);
+  if e.status = 'open' then ok := ok + 1; else fail := fail + 1; log := log || ' [cash-blocked-on-a-fee-it-never-has ' || e.status || ']'; end if;
+
+  --    the sweep asks only for what it can act on
+  j := public.payments_awaiting_fee(50);
+  if not exists (select 1 from jsonb_array_elements(j) x where (x ->> 'payment_id')::uuid = moid)          -- no payment intent: nothing to ask about
+     and jsonb_array_length(j) >= 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [awaiting-fee-shape]'; end if;
+
   raise exception 'CG016_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

@@ -13,6 +13,7 @@
    Instagram and TikTok have no API a solo coach can use without an app review;
    those numbers come in by CSV export or by hand, in the back-office. */
 import { createClient } from "npm:@supabase/supabase-js@2.116.0";
+import { cleanSecret, dateRange, excludeFilter } from "../_shared/plausible.ts";
 
 const env = (n: string) => Deno.env.get(n);
 const log = (event: string, data: Record<string, unknown> = {}) => console.log(JSON.stringify({ fn: "analytics-sync", event, ...data }));
@@ -21,18 +22,6 @@ const PLAUSIBLE_API = "https://plausible.io/api/v2/query";
 const YOUTUBE_API = "https://www.googleapis.com/youtube/v3/channels";
 
 type Sb = ReturnType<typeof createClient>;
-
-/* A secret pasted into `supabase secrets set` often arrives wrapped: a trailing
-   newline from a copy, or the quotes the shell was supposed to eat. Both are
-   invisible in every dashboard and both produce an authentication failure that
-   looks exactly like a wrong key, which is an hour of looking in the wrong
-   place. Trim, then drop ONE matching pair of surrounding quotes — never more,
-   because a quote can legitimately be part of a secret. */
-export function cleanSecret(raw: string | undefined): string {
-  let v = (raw ?? "").trim();
-  if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) v = v.slice(1, -1).trim();
-  return v;
-}
 
 /* PLAUSIBLE'S OWN WORDS, NOT OUR GUESS AT THEM.
    This used to report the status alone, then a sentence we had written for each
@@ -65,23 +54,40 @@ async function plausibleQuery(key: string, body: Record<string, unknown>) {
   return await r.json() as { results: { metrics: number[]; dimensions: string[] }[] };
 }
 
-/* Plausible: 60 days of daily visitors/pageviews/visits/bounce/duration, the top sources
-   and the goals of the last 30 days. site_id is the domain as registered in Plausible. */
-export async function syncPlausible(sb: Sb, key: string, siteId: string) {
-  const daily = await plausibleQuery(key, { site_id: siteId, metrics: ["visitors", "pageviews", "visits", "bounce_rate", "visit_duration"], date_range: "60d", dimensions: ["time:day"] });
+export async function syncPlausible(sb: Sb, key: string, siteId: string, startDate: string, excludePaths: string[]) {
+  const date_range = dateRange(startDate);
+  const filters = excludeFilter(excludePaths);
+  const base = { site_id: siteId, date_range, ...(filters.length ? { filters } : {}) };
+
+  const daily = await plausibleQuery(key, { ...base, metrics: ["visitors", "pageviews", "visits", "bounce_rate", "visit_duration"], dimensions: ["time:day"] });
   const rows = daily.results.map((x) => ({ day: x.dimensions[0], visitors: x.metrics[0], pageviews: x.metrics[1], visits: x.metrics[2], bounce_rate: x.metrics[3], visit_duration: x.metrics[4] }));
-  let sources: unknown = null, goals: unknown = null;
+
+  /* Sources, goals and countries are each optional: one of them failing must not
+     cost us the daily series, which is the part nothing else can reconstruct. */
+  let sources: unknown = null, goals: unknown = null, countries: unknown = null;
   try {
-    const s = await plausibleQuery(key, { site_id: siteId, metrics: ["visitors"], date_range: "30d", dimensions: ["visit:source"], order_by: [["visitors", "desc"]], pagination: { limit: 10 } });
+    const s = await plausibleQuery(key, { ...base, metrics: ["visitors"], dimensions: ["visit:source"], order_by: [["visitors", "desc"]], pagination: { limit: 10 } });
     sources = s.results.map((x) => ({ source: x.dimensions[0], visitors: x.metrics[0] }));
   } catch (e) { log("plausible_sources_failed", { error: String(e).slice(0, 60) }); }
   try {
-    const g = await plausibleQuery(key, { site_id: siteId, metrics: ["visitors", "events"], date_range: "30d", dimensions: ["event:goal"] });
+    const g = await plausibleQuery(key, { ...base, metrics: ["visitors", "events"], dimensions: ["event:goal"] });
     goals = g.results.map((x) => ({ goal: x.dimensions[0], visitors: x.metrics[0], events: x.metrics[1] }));
   } catch (e) { log("plausible_goals_failed", { error: String(e).slice(0, 60) }); }
-  const { data, error } = await sb.rpc("web_daily_upsert", { p_rows: rows, p_sources: sources, p_goals: goals });
+  try {
+    /* WHERE people are, never who. The country is the commercial question —
+       what to price in what currency, which rails to open — and it is also the
+       coarsest location Plausible reports. We deliberately do not ask for the
+       region or the city: neither would change a decision, and both narrow a
+       visitor down further than a visitor count needs to. */
+    const c = await plausibleQuery(key, { ...base, metrics: ["visitors"], dimensions: ["visit:country"], order_by: [["visitors", "desc"]], pagination: { limit: 30 } });
+    countries = c.results.map((x) => ({ country: x.dimensions[0], visitors: x.metrics[0] })).filter((x) => x.country);
+  } catch (e) { log("plausible_countries_failed", { error: String(e).slice(0, 60) }); }
+
+  const { data, error } = await sb.rpc("web_daily_upsert", { p_rows: rows, p_sources: sources, p_goals: goals, p_countries: countries });
   if (error) throw new Error(`db ${error.code}`);
-  return { days: data as number, sources: Array.isArray(sources) ? sources.length : 0, goals: Array.isArray(goals) ? goals.length : 0 };
+  return { days: data as number, sources: Array.isArray(sources) ? sources.length : 0,
+           goals: Array.isArray(goals) ? goals.length : 0, countries: Array.isArray(countries) ? countries.length : 0,
+           from: date_range[0], excluded: excludePaths };
 }
 
 /* YouTube: the channel's public counters, one snapshot for today. */
@@ -109,8 +115,13 @@ Deno.serve(async (req: Request) => {
   let body: Record<string, unknown> = {};
   try { body = JSON.parse(await req.text() || "{}"); } catch { return json(400, { ok: false, error: "invalid_json" }); }
 
-  const { data: cfgRows } = await sb.from("analytics_config").select("plausible_site_id,youtube_channel_id").eq("id", 1).maybeSingle();
-  const cfg = (cfgRows ?? {}) as { plausible_site_id?: string; youtube_channel_id?: string | null };
+  /* One RPC rather than a table read: the start date and the exclusions are the
+     rule the numbers are computed under, and the database is where that rule
+     lives. */
+  const { data: cfgRow } = await sb.rpc("analytics_sync_config");
+  const cfg = (cfgRow ?? {}) as { site_id?: string; start_date?: string; exclude_paths?: string[] | null; youtube_channel_id?: string | null };
+  const startDate = cfg.start_date || "2026-09-15";
+  const excludePaths = Array.isArray(cfg.exclude_paths) ? cfg.exclude_paths : ["/admin"];
   const plausibleRaw = env("PLAUSIBLE_API_KEY"), youtubeRaw = env("YOUTUBE_API_KEY");
   const plausibleKey = cleanSecret(plausibleRaw), youtubeKey = cleanSecret(youtubeRaw);
   const configured = { plausible: !!plausibleKey, youtube: !!youtubeKey && !!cfg.youtube_channel_id };
@@ -126,7 +137,7 @@ Deno.serve(async (req: Request) => {
   const out: Record<string, unknown> = { ok: true, configured };
   const errors: string[] = [];
   if (configured.plausible) {
-    try { out.plausible = await syncPlausible(sb, plausibleKey, cfg.plausible_site_id || "coachgari28.com"); }
+    try { out.plausible = await syncPlausible(sb, plausibleKey, cfg.site_id || "coachgari28.com", startDate, excludePaths); }
     catch (e) { const m = String(e).replace(/^Error:\s*/, "").slice(0, 200); errors.push(`Plausible — ${m}`); log("plausible_failed", { error: m }); }
   }
   if (configured.youtube) {

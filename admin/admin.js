@@ -1533,6 +1533,12 @@ async function analytics() {
 
   const srcRows = (web.sources || []).map((r) => `<tr><td>${esc(r.source || 'Direct')}</td><td class="num">${compact(r.visitors)}</td></tr>`);
   const goalRows = (web.goals || []).map((r) => `<tr><td>${esc(r.goal)}</td><td class="num">${compact(r.visitors)}</td><td class="num">${compact(r.events)}</td></tr>`);
+  /* Where people are is the commercial question — what to price in what
+     currency, which rails to open. Country only: the city would narrow a
+     visitor further without changing a single decision. */
+  const ctryList = (web.countries || []).filter((r) => r && r.visitors);
+  const ctryTotal = ctryList.reduce((t, r) => t + Number(r.visitors || 0), 0) || 1;
+  const ctryRows = ctryList.slice(0, 12).map((r) => `<tr><td>${esc(regionName(r.country))}</td><td class="num">${compact(r.visitors)}</td><td class="num">${Math.round((Number(r.visitors) / ctryTotal) * 100)}%</td></tr>`);
 
   view.innerHTML = `
     <div class="ad-head"><div><h1>Audience</h1><p class="ad-muted">The website and the social platforms, side by side. Aggregates only — no names, no messages.</p></div>
@@ -1544,7 +1550,7 @@ async function analytics() {
     ${cfg.last_sync_error ? `<p class="ad-note" style="color:#b3261e;margin:0 0 12px">Last sync: ${esc(cfg.last_sync_error)}</p>` : ''}
 
     <div class="ad-kpis">
-      <div class="ad-kpi"><b>${compact(web.visitors)}</b><span>Website visitors</span><span class="an-sub">${delta(web.visitors, web.visitors_prev) || `vs ${compact(web.visitors_prev)} before`}</span></div>
+      <div class="ad-kpi"><b>${compact(web.visitors)}</b><span>Website visitors</span><span class="an-sub">${web.has_previous ? (delta(web.visitors, web.visitors_prev) || `vs ${compact(web.visitors_prev)} before`) : 'no period to compare yet'}</span></div>
       <div class="ad-kpi"><b>${compact(web.pageviews)}</b><span>Pageviews</span></div>
       <div class="ad-kpi"><b>${web.bounce_rate != null ? web.bounce_rate + '%' : '—'}</b><span>Bounce rate</span></div>
       <div class="ad-kpi"><b>${compact(Object.values(social).reduce((t, v) => t + Number(v.latest?.followers || 0), 0))}</b><span>Followers, all platforms</span></div>
@@ -1582,6 +1588,11 @@ async function analytics() {
         ${goalRows.length ? `<h2 style="margin-top:18px">Goals</h2>${table(['Goal', 'Visitors', 'Events'], goalRows)}` : ''}</div>
     </div>
 
+    <div class="ad-panel"><h2>Which countries</h2>
+      ${ctryRows.length ? table(['Country', 'Visitors', 'Share'], ctryRows)
+        : '<p class="ad-empty">Synced with the website numbers.</p>'}
+      <p class="ad-note">Country only — never a city, never an address. This is the list to read before deciding what to price in which currency and which payment rails are worth opening.</p></div>
+
     <div class="ad-panel"><div class="ov-chart-head"><h2 style="margin:0">Snapshots</h2>
       ${canManage ? '<button class="btn btn-line btn-xs" id="an-import">Import a CSV export</button>' : ''}</div>
       ${table(['Date', 'Platform', 'Followers', 'Views', 'Likes', 'Source', ''], (a.recent || []).map((r) => `<tr>
@@ -1599,6 +1610,13 @@ async function analytics() {
           <label>TikTok handle <input name="tiktok_handle" value="${esc(cfg.tiktok_handle || '')}" placeholder="@coachgari28"></label></div>
         <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button></div>
       </form>
+      <h2 style="margin-top:20px">What counts as audience</h2>
+      <form id="an-win" class="ad-form">
+        <div class="row"><label>Counting starts on <input type="date" name="web_start_date" value="${esc(cfg.web_start_date || '')}" required></label>
+          <label>Pages that are work, not audience <input name="web_exclude_paths" value="${esc((cfg.web_exclude_paths || []).join(', '))}" placeholder="/admin"></label></div>
+        <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button></div>
+      </form>
+      <p class="ad-note">Everything before the start date is the build — our own visits and the checks before launch — so it is not counted, and moving the date forward deletes those days for good. The excluded pages are left out of the question asked to Plausible, so the back-office never shows up as traffic; separate several with commas.</p>
       <p class="ad-note">YouTube syncs on its own once a day (public counters). Instagram and TikTok have no open API for a single creator: export the numbers from the app and import the file, or type them in. ${cfg.youtube_synced_at ? 'YouTube synced ' + fmt(cfg.youtube_synced_at, 'Asia/Dubai', { dateStyle: 'medium' }) + '.' : ''}</p></div>` : ''}`;
 
   $('#an-days').onchange = (e) => { view.dataset.anDays = e.target.value; analytics().catch(fail); };
@@ -1622,6 +1640,18 @@ async function analytics() {
     e.preventDefault(); const d = new FormData(cf);
     const { error: e1 } = await sb.rpc('analytics_config_set', { p: Object.fromEntries(d.entries()) }); if (e1) return fail(e1);
     toast('Saved'); analytics().catch(fail);
+  };
+  const wf = $('#an-win'); if (wf) wf.onsubmit = async (e) => {
+    e.preventDefault(); const d = new FormData(wf);
+    const paths = String(d.get('web_exclude_paths') || '').split(',').map((x) => x.trim()).filter(Boolean);
+    /* Moving the start date deletes the days behind it, so it is asked for
+       once, plainly, rather than discovered afterwards in a chart. */
+    if (!confirm(paths.length
+      ? `Count from ${d.get('web_start_date')} and leave out ${paths.join(', ')}?\n\nDays before that date are deleted for good.`
+      : `Count from ${d.get('web_start_date')}?\n\nDays before that date are deleted for good, and nothing will be left out of the counting.`)) return;
+    const { error: e1 } = await sb.rpc('analytics_web_config_set', { p: { web_start_date: d.get('web_start_date'), web_exclude_paths: paths } });
+    if (e1) return fail(e1);
+    toast('Saved — sync to recount'); analytics().catch(fail);
   };
 }
 
@@ -2368,6 +2398,16 @@ async function pfAttribution() {
 /* ---- searchable country picker (same behaviour as the public form): a select-like trigger, a search box, a
    scrollable list; the input keeps carrying the value so the RPC payload is unchanged. Names from
    Intl.DisplayNames in the operator's language, English fallback. ---- */
+/* Plausible reports a country as an ISO 3166-1 alpha-2 code. Show it in the
+   operator's own language, and fall back to the code itself rather than to
+   nothing — an unknown code still says more than a blank cell. */
+let REGION_NAMES = null;
+function regionName(code) {
+  const c = String(code || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) return code || 'Unknown';
+  if (!REGION_NAMES) { try { REGION_NAMES = new Intl.DisplayNames([navigator.language, 'en'], { type: 'region' }); } catch { REGION_NAMES = null; } }
+  try { return (REGION_NAMES && REGION_NAMES.of(c)) || c; } catch { return c; }
+}
 let COUNTRY_NAMES = null;
 function countryNames() {
   if (COUNTRY_NAMES) return COUNTRY_NAMES;

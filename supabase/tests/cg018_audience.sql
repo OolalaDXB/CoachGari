@@ -20,6 +20,11 @@ begin
     ('anview@test.local','analytics:view'), ('anno@test.local','coach:operations')
   on conflict do nothing;
 
+  /* The counting window is configuration, and this suite writes days around
+     today, so it sets a start date well behind them. Section 9 tests the window
+     itself. */
+  update public.analytics_config set web_start_date = current_date - 400 where id = 1;
+
   /* ---- 1. the website series is written by the sync path only, and read back per period ---- */
   perform public.web_daily_upsert(jsonb_build_array(
     jsonb_build_object('day', (current_date - 1)::text, 'visitors', 100, 'pageviews', 250, 'visits', 120, 'bounce_rate', 40.0),
@@ -126,7 +131,7 @@ begin
   execute 'reset role';
 
   /* ---- 7. the sync path belongs to service_role; anon reaches nothing ---- */
-  if not has_function_privilege('authenticated', 'public.web_daily_upsert(jsonb, jsonb, jsonb)', 'execute')
+  if not has_function_privilege('authenticated', 'public.web_daily_upsert(jsonb, jsonb, jsonb, jsonb)', 'execute')
      and not has_function_privilege('authenticated', 'public.social_snapshot_api(text, jsonb)', 'execute')
      and not has_function_privilege('authenticated', 'public.analytics_sync_kick()', 'execute')
      and not has_function_privilege('authenticated', 'public.analytics_sync_authorize(text)', 'execute')
@@ -153,6 +158,62 @@ begin
   perform public.audience_snapshot_delete(sid);
   if not exists (select 1 from public.social_snapshots where id = sid)
      and exists (select 1 from public.social_snapshots where platform = 'tiktok') then ok := ok + 1; else fail := fail + 1; log := log || ' [delete]'; end if;
+  execute 'reset role';
+
+  /* ---- 9. what counts as audience: the start date, the exclusions, the countries ---- */
+  --    a day before the start date is refused by the table, not merely hidden by a query
+  update public.analytics_config set web_start_date = current_date - 5 where id = 1;
+  n := public.web_daily_upsert(jsonb_build_array(
+         jsonb_build_object('day', (current_date - 30)::text, 'visitors', 999, 'pageviews', 999, 'visits', 999),
+         jsonb_build_object('day', (current_date - 2)::text,  'visitors', 7,   'pageviews', 9,   'visits', 8)));
+  if n = 1 and not exists (select 1 from public.web_daily where day = current_date - 30)
+     and exists (select 1 from public.web_daily where day = current_date - 2)
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [start-date-not-enforced ' || n || ']'; end if;
+
+  --    countries are stored and read back, and only through the sync path
+  perform public.web_daily_upsert('[]'::jsonb, null, null,
+    jsonb_build_array(jsonb_build_object('country', 'AE', 'visitors', 12), jsonb_build_object('country', 'ZW', 'visitors', 5)));
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"anview@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.audience_overview(30);
+  if (j -> 'web' -> 'countries' -> 0 ->> 'country') = 'AE' and (j -> 'web' -> 'countries' -> 0 ->> 'visitors') = '12'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [countries-missing]'; end if;
+  --    the window is visible to the operator, so the screen can say what it is counting
+  if (j -> 'config' ->> 'web_start_date') is not null and (j -> 'config' -> 'web_exclude_paths') ? '/admin'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [window-not-exposed]'; end if;
+  --    a viewer cannot move the window
+  begin perform public.analytics_web_config_set('{"web_start_date":"2026-01-01"}'::jsonb); fail := fail + 1; log := log || ' [viewer-moved-window]';
+  exception when insufficient_privilege then ok := ok + 1; end;
+  execute 'reset role';
+
+  --    the manager can, and moving it forward deletes what is now uncountable
+  perform public.web_daily_upsert(jsonb_build_array(jsonb_build_object('day', (current_date - 4)::text, 'visitors', 3, 'pageviews', 3, 'visits', 3)));
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"anmanage@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.analytics_web_config_set(jsonb_build_object('web_start_date', (current_date - 3)::text));
+  if (j ->> 'web_start_date')::date = current_date - 3
+     and not exists (select 1 from public.web_daily where day < current_date - 3)
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [window-move]'; end if;
+  --    a start date in the future is refused: a site cannot have gone live tomorrow
+  begin perform public.analytics_web_config_set(jsonb_build_object('web_start_date', (current_date + 1)::text)); fail := fail + 1; log := log || ' [future-start]';
+  exception when sqlstate '22023' then ok := ok + 1; end;
+  --    an exclusion that is not a path is refused before it can break a Plausible query
+  begin perform public.analytics_web_config_set('{"web_exclude_paths":["admin"]}'::jsonb); fail := fail + 1; log := log || ' [exclusion-not-a-path]';
+  exception when sqlstate '22023' then ok := ok + 1; end;
+  j := public.analytics_web_config_set('{"web_exclude_paths":["/admin","/c"]}'::jsonb);
+  if (j -> 'web_exclude_paths') ? '/admin' and (j -> 'web_exclude_paths') ? '/c' then ok := ok + 1; else fail := fail + 1; log := log || ' [exclusion-save]'; end if;
+  execute 'reset role';
+  --    every change to what counts is audited: the numbers must never move anonymously.
+  --    Read as postgres, not as the operator — the audit trail is not theirs to read.
+  if exists (select 1 from public.admin_audit where area = 'analytics' and action = 'config' and changed_by = 'anmanage@test.local')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [window-not-audited]'; end if;
+
+  --    the sync reads the rule from the database, and only as service_role
+  if (public.analytics_sync_config() ->> 'start_date')::date = current_date - 3 then ok := ok + 1; else fail := fail + 1; log := log || ' [sync-config]'; end if;
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"anmanage@test.local"}', true);
+  execute 'set local role authenticated';
+  begin perform public.analytics_sync_config(); fail := fail + 1; log := log || ' [sync-config-open]';
+  exception when insufficient_privilege then ok := ok + 1; end;
   execute 'reset role';
 
   raise exception 'CG018_TESTS ok=% fail=% %', ok, fail, log;

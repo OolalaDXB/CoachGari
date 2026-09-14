@@ -62,8 +62,8 @@ jobs:
         run: node --experimental-strip-types scripts/test-stripe-embedded.mjs
       - name: Audience — platform CSV import (offline)
         run: node scripts/test-audience-csv.mjs
-      - name: Audience sync — key gate, secret hygiene, one source per failure (offline)
-        run: node scripts/test-audience-sync.mjs
+      - name: Audience sync — key gate, counting window, exclusions, secret hygiene (offline)
+        run: node --experimental-strip-types scripts/test-audience-sync.mjs
       - name: WhatsApp rail — key gate, template-only, consent before sending (offline)
         run: node scripts/test-whatsapp.mjs
       - name: Signed agreement — PDF validity, determinism, what it may claim (offline)
