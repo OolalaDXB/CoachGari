@@ -3,6 +3,15 @@
    private collaboration room link. No prices, no PII in analytics. */
 import { CONFIG } from '/config.js';
 
+/* The footer carries two links whose destination lives in config.js — the socials
+   profile and the Studio MT credit. site.js resolves these on the pages it runs on;
+   this page does not load it, so it does the same four lines here rather than pull
+   in the reveal, catalogue, WhatsApp and enquiry-form machinery it has no use for. */
+document.querySelectorAll('[data-config-href]').forEach((el) => {
+  const v = CONFIG[el.getAttribute('data-config-href')];
+  if (v) el.setAttribute('href', v);
+});
+
 const form = document.querySelector('[data-collab]');
 const statusEl = document.querySelector('.form-status');
 const live = document.querySelector('.cl-live');

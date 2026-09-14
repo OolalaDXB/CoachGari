@@ -98,6 +98,13 @@ p{margin:0 0 1em;}
 .doc-foot a{color:var(--black);text-decoration:none;font-weight:600;}
 .doc-foot a:hover{color:var(--accent);}
 
+/* The footer on a standalone page carries the wordmark and the bottom bar, not the
+   three link columns: those are home-page anchors, a newsletter form and a Support
+   dialog that do not exist there. Without .f-top above it the 70px opening padding
+   and the wordmark's own 64px stacked into 134px of empty grey. */
+footer.f-slim{padding-top:0;}
+footer.f-slim .wordmark{margin-top:40px;}
+
 .nav{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--line);
   transition:background .35s ease,border-color .35s ease,box-shadow .35s ease;}
 .nav-in{display:flex;align-items:center;gap:38px;height:78px;transition:height .35s cubic-bezier(.2,.7,.2,1);}

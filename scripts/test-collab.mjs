@@ -61,16 +61,22 @@ check('the redirects are temporary: /collab is noindex, and a cached 308 would b
 check('no rule redirects the apex itself to the subdomain',
   !vercel.redirects.some((r) => String(r.destination).includes('//' + SUB)));
 
-/* The page carries the same footer as the other standalone pages, from the same
-   stylesheet. It used to live in legal.css, which collab does not load — a site
-   footer is not a legal-page element, and a second copy would have drifted. */
-const legalFoot = read('../legal.html').match(/<footer class="doc-foot">[\s\S]*?<\/footer>/)?.[0];
-const collabFoot = page.match(/<footer class="doc-foot">[\s\S]*?<\/footer>/)?.[0];
-check('collab carries the document footer', !!collabFoot);
-check('it is identical to the one on legal and privacy', collabFoot === legalFoot);
-check('the footer is styled from the shared sheet, not legal.css',
-  /\.doc-foot\{/.test(read('../assets/coach-gari.css')) && !/doc-foot/.test(read('../assets/legal.css')));
-check('collab does not have to pull legal.css in for it', !/legal\.css/.test(page));
+/* The page carries the site footer, not the plain document one: the wordmark and the
+   bottom bar, lifted from index.html unchanged so the two cannot drift. What it does
+   NOT carry is .f-top — three columns of home-page anchors, a newsletter form and the
+   Support dialog, none of which exist on this page. */
+const home = read('../index.html');
+const lift = (src, re) => src.match(re)?.[0]?.replace(/\s+/g, ' ').trim();
+const BOT = /<div class="f-bot">[\s\S]*?\n {4}<\/div>/;
+check('collab carries the site footer', /<footer class="f-slim">/.test(page));
+check('the wordmark is there', /<div class="wordmark">Coach Gari\.<\/div>/.test(page));
+check('the bottom bar is the home one, unchanged', lift(page, BOT) === lift(home, BOT));
+check('it does not drag in the home-page link columns', !/f-top|f-news|data-support-open/.test(page));
+check('no dead home-page anchor is left in the footer', !/href="#(book|programme|about|contact|support)"/.test(page));
+check('collab does not have to pull legal.css or site.js in for it',
+  !/legal\.css/.test(page) && !/site\.js/.test(page));
+check('the two config-driven footer links are resolved on this page',
+  /data-config-href/.test(page) && /data-config-href/.test(read('../assets/collab.js')));
 check('the page opens with the accent badge the rest of the site uses',
   /<span class="badge">Collaborations<\/span>/.test(page));
 check('public copy always writes "Coach Gari", never a bare first name as the brand', !/\bGari\b(?!\s*[<·])/.test(page.replace(/Coach Gari/g, '')));
