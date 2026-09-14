@@ -68,8 +68,13 @@ await page.goto(`${base}/admin/`);
 const reg = await page.evaluate(async () => { const r = await navigator.serviceWorker.ready; return { scope: r.scope, active: !!r.active }; });
 check('service worker registered with scope /admin/', reg.active && reg.scope === `${base}/admin/`, JSON.stringify(reg));
 check('manifest linked from the admin page', await page.$eval('link[rel=manifest]', (l) => l.getAttribute('href')) === '/admin/manifest.webmanifest');
-await page.waitForFunction(async () => { const c = await caches.open('cg-admin-v3'); return (await c.keys()).length >= 8; });
-const cached = await page.evaluate(async () => { const c = await caches.open('cg-admin-v3'); return (await c.keys()).map((k) => new URL(k.url).pathname); });
+/* The cache name follows the worker: read it from the source rather than pinning a
+   literal here, which would quietly test a stale cache after the next bump. */
+const swSrc = await readFile(join(ROOT, 'admin/sw.js'), 'utf8');
+const CACHE = swSrc.match(/const VERSION = '([^']+)'/)[1];
+check('the service worker names its cache version', /^cg-admin-v[0-9]+$/.test(CACHE), CACHE);
+await page.waitForFunction(async (name) => { const c = await caches.open(name); return (await c.keys()).length >= 8; }, CACHE);
+const cached = await page.evaluate(async (name) => { const c = await caches.open(name); return (await c.keys()).map((k) => new URL(k.url).pathname); }, CACHE);
 check('shell cached after install (html, css, js, config, manifest, icons)', ['/admin/index.html', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/config.js', '/assets/coach-gari.css', '/admin/manifest.webmanifest'].every((p) => cached.includes(p)), cached.join(' '));
 // a data request through the page: fetched, never stored
 await page.evaluate(() => fetch('https://acrjrlgeeyseyolmofuq.supabase.co/rest/v1/contacts?select=id').catch(() => {}));
@@ -110,6 +115,33 @@ const src = await readFile(join(ROOT, 'admin/admin.js'), 'utf8');
 check('offerInstall() is called from one place only, after the permission check',
   (src.match(/^\s*offerInstall\(\);/gm) || []).length === 1);
 check('the login screen never calls it', !/#login[\s\S]{0,400}offerInstall/.test(src));
+
+/* Notifications: the permission prompt is shown once per browser and remembered, so
+   spending it on someone who does not work here would be worse than the install
+   banner. Same gate, plus the worker has to be able to receive and open one. */
+const notif = await page.evaluate(() => {
+  const box = document.querySelector('#notify');
+  return { existe: !!box, cache: box ? box.hidden : null, dansApp: box ? !!box.closest('#app') : null };
+});
+check('the notifications invitation exists in the admin shell', notif.existe);
+check('it sits inside #app, hidden until there is a session with access', notif.dansApp);
+check('a visitor who is not signed in is never asked for notification permission', notif.cache === true);
+check('offerNotifications() is called from one place only, after the permission check',
+  (src.match(/^\s*offerInstall\(\); offerNotifications\(\);/gm) || []).length === 1);
+check('Notification.requestPermission is only reached from that banner button',
+  (src.match(/requestPermission/g) || []).length === 1 && /#notify-go[\s\S]{0,400}requestPermission/.test(src));
+check('the subscription is written through push_subscribe, which pins it to the caller',
+  /rpc\('push_subscribe'/.test(src) && !/from\('push_subscriptions'\)[\s\S]{0,80}insert/.test(src));
+check('a failed save unsubscribes the device rather than leaving it half-registered',
+  /if \(e2\)[\s\S]{0,60}unsubscribe\(\)/.test(src));
+
+check('the worker handles push and notificationclick', /addEventListener\('push'/.test(swSrc) && /addEventListener\('notificationclick'/.test(swSrc));
+check('a push with no readable payload still shows something', /New activity in the back-office/.test(swSrc));
+check('the worker shows only the sentence it was sent, never a field of its own',
+  /body: d\.t/.test(swSrc) && !/body:\s*`/.test(swSrc));
+check('the notification stores nothing on the device', !/caches\.(open|put)[\s\S]{0,200}notification/i.test(swSrc));
+check('tapping it opens the back-office, which still asks for a session',
+  /clients\.openWindow/.test(swSrc) && !/token|session|jwt/i.test(swSrc.slice(swSrc.indexOf("addEventListener('push'"))));
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e)));
 await page.reload(); await page.waitForTimeout(300);

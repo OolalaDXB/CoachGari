@@ -76,6 +76,19 @@
             <button class="btn btn-line btn-sm" id="install-no">Not now</button>
           </div>
         </aside>
+        <!-- Same gate as the install banner: unhidden from render(), after the
+             permission check. Asking for notification permission is a prompt the
+             browser shows once, so it is never spent on a stranger. -->
+        <aside class="ad-install" id="notify" hidden>
+          <div class="ad-install-txt">
+            <b>Turn on notifications</b>
+            <span id="notify-how">A buzz when an enquiry, a booking or a payment comes in. No names on the lock screen.</span>
+          </div>
+          <div class="ad-install-act">
+            <button class="btn btn-dark btn-sm" id="notify-go">Turn on</button>
+            <button class="btn btn-line btn-sm" id="notify-no">Not now</button>
+          </div>
+        </aside>
         <div id="view"></div>
       </section>
     </main>

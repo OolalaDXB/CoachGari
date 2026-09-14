@@ -118,6 +118,52 @@ function offerInstall() {
     if (outcome !== 'accepted') { try { localStorage.setItem('cg-install', 'no'); } catch {} }
   };
 }
+
+/* ---------- push notifications --------------------------------------------
+   Gated exactly like the install banner, and for a sharper reason: asking for
+   notification permission is a prompt the browser shows once and remembers, so
+   it must never be spent on someone who does not work here.
+
+   The subscription is written by push_subscribe, which pins it to the caller's
+   own signed-in identity — a device cannot be subscribed on someone else's
+   behalf. What arrives is a fixed sentence chosen server-side, never a name. */
+function urlB64ToUint8Array(s) {
+  const p = (s + '='.repeat((4 - s.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(p), (c) => c.charCodeAt(0));
+}
+
+async function offerNotifications() {
+  const box = $('#notify'); if (!box) return;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return;
+  if (isIOS && !standalone) return;                     // iOS only allows push once installed to the Home Screen
+  let dismissed = false;
+  try { dismissed = !!localStorage.getItem('cg-notify'); } catch {}
+  if (Notification.permission === 'denied' || dismissed) { box.hidden = true; return; }
+
+  const reg = await navigator.serviceWorker.ready.catch(() => null);
+  if (!reg) return;
+  const existing = await reg.pushManager.getSubscription().catch(() => null);
+  if (existing) { box.hidden = true; return; }           // already on, on this device
+
+  box.hidden = false;
+  $('#notify-no').onclick = () => { box.hidden = true; try { localStorage.setItem('cg-notify', 'no'); } catch {} };
+  $('#notify-go').onclick = async () => {
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') { box.hidden = true; return; }
+      const { data: vapid, error: e1 } = await sb.rpc('push_vapid_public');
+      if (e1 || !vapid) throw e1 || new Error('notifications are not configured yet');
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(vapid) });
+      const j = sub.toJSON();
+      const { error: e2 } = await sb.rpc('push_subscribe', {
+        p_endpoint: j.endpoint, p_p256dh: j.keys.p256dh, p_auth: j.keys.auth, p_user_agent: navigator.userAgent,
+      });
+      if (e2) { await sub.unsubscribe().catch(() => {}); throw e2; }
+      box.hidden = true;
+      toast('Notifications are on for this device');
+    } catch (e) { toast(e.message || 'Could not turn notifications on', true); }
+  };
+}
 async function boot() {
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -203,7 +249,7 @@ async function render(session) {
     $('#nav').onclick = (e) => { const a = e.target.closest('[data-section]'); if (a) { go(a.dataset.section); closeDrawer(); } };
     $('#side-foot').textContent = session.user.email;
     $('#sidebar').hidden = false; $('#topbar').hidden = false; $('#app').hidden = false;
-    offerInstall();                                   // signed in, and NAV is not empty: this person works here
+    offerInstall(); offerNotifications();              // signed in, and NAV is not empty: this person works here
     renderAccount(session);
     $('#burger').onclick = () => { $('#sidebar').classList.add('open'); $('#scrim').hidden = false; };
     $('#scrim').onclick = closeDrawer;

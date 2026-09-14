@@ -42,6 +42,8 @@ jobs:
         run: node scripts/test-url-scrub.mjs
       - name: IP identity — trusted hop, fail-closed salt, no PII in logs (offline)
         run: node scripts/test-contact-ip.mjs
+      - name: Web Push sender — encryption round-trip and VAPID (offline)
+        run: node --experimental-strip-types scripts/test-push.mjs
       - name: Transactional email rendering and outbox drain (offline)
         run: node --experimental-strip-types scripts/test-email.mjs
       # The three suites below drive a real browser. The runner ships neither Playwright nor

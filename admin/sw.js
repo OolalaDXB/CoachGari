@@ -8,7 +8,7 @@
    Functions) goes to the network untouched and is never stored — nothing from the CRM,
    the calendar, the finance or the emails lives in this cache. Offline, a data request
    simply fails and the app shows its own error; the shell still opens. */
-const VERSION = 'cg-admin-v3';
+const VERSION = 'cg-admin-v4';
 const SHELL = [
   '/admin/', '/admin/index.html', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/admin/collab.js',
   '/admin/manifest.webmanifest', '/admin/icons/icon-192.png', '/admin/icons/icon-512.png', '/admin/icons/maskable-512.png',
@@ -48,4 +48,34 @@ self.addEventListener('fetch', (e) => {
     const refresh = fetch(req).then((r) => { if (r.ok) c.put(req, r.clone()); return r; }).catch(() => cached);
     return cached || refresh;
   }));
+});
+
+/* ---------- push notifications ----------
+   The payload is decided by the sender and is a kind, never a row: it arrives as
+   {t,u} where t is a fixed sentence and u the workspace to open. Nothing from it is
+   stored — the notification is shown and forgotten, in keeping with this worker
+   never keeping data on the device. Tapping it opens the back-office, which asks
+   for a session as usual; the notification carries no access of its own. */
+self.addEventListener('push', (e) => {
+  let d = { t: 'New activity in the back-office', u: '/admin/' };
+  try { if (e.data) { const j = e.data.json(); if (j && typeof j.t === 'string') d = { t: j.t, u: typeof j.u === 'string' ? j.u : '/admin/' }; } } catch {}
+  e.waitUntil(self.registration.showNotification('Coach Gari.', {
+    body: d.t,
+    icon: '/admin/icons/icon-192.png',
+    badge: '/admin/icons/icon-192.png',
+    tag: 'cg-admin',            // one at a time: a quiet hour should not leave a stack
+    renotify: true,
+    data: { url: d.u },
+  }));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/admin/';
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const open = all.find((c) => new URL(c.url).pathname.startsWith('/admin'));
+    if (open) { await open.focus(); if (open.navigate) await open.navigate(url).catch(() => {}); return; }
+    await self.clients.openWindow(url);
+  })());
 });
