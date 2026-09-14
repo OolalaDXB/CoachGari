@@ -38,6 +38,28 @@ for (const [n, src] of [['collab.html', page], ['c.html', room], ['collab.js', p
 check('collab.html uses the canonical prompt "What would you like to explore together?"', /What would you like to explore together\?/.test(page));
 check('collab.html headline is "Collaborate with me." — first person, like the rest of the site', /<h1[^>]*>Collaborate with me\.<\/h1>/.test(page));
 check('the brand still carries the page for search and sharing, via <title>', /<title>[^<]*Coach Gari[^<]*<\/title>/.test(page));
+
+/* collab.coachgari28.com is an alias to say out loud, not a second site. Everything on
+   it lands on the one page at the apex. The checks that matter are that the rules are
+   scoped by host — a source of /(.*) with no host condition would swallow the whole
+   site — and that a room link typed against the subdomain keeps its token instead of
+   dropping the visitor on the intake form. */
+const vercel = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+const SUB = 'collab.coachgari28.com';
+const subRules = vercel.redirects.filter((r) => (r.has || []).some((h) => h.type === 'host' && h.value === SUB));
+check('the subdomain has its redirect rules', subRules.length === 2, String(subRules.length));
+check('every rule carrying a bare /(.*) source is scoped to a host',
+  vercel.redirects.every((r) => r.source !== '/(.*)' || (r.has || []).some((h) => h.type === 'host')));
+check('the catch-all sends the subdomain to the collab page',
+  subRules.some((r) => r.source === '/(.*)' && r.destination === 'https://coachgari28.com/collab'));
+check('a deal-room link on the subdomain keeps its token',
+  subRules.some((r) => r.source === '/c/:token' && r.destination === 'https://coachgari28.com/c/:token'));
+check('the token rule comes before the catch-all, or it would never be reached',
+  vercel.redirects.findIndex((r) => r.source === '/c/:token') < vercel.redirects.findIndex((r) => r.source === '/(.*)'));
+check('the redirects are temporary: /collab is noindex, and a cached 308 would block serving the page here later',
+  subRules.every((r) => r.permanent === false));
+check('no rule redirects the apex itself to the subdomain',
+  !vercel.redirects.some((r) => String(r.destination).includes('//' + SUB)));
 check('public copy always writes "Coach Gari", never a bare first name as the brand', !/\bGari\b(?!\s*[<·])/.test(page.replace(/Coach Gari/g, '')));
 
 /* ---- edge function security ---- */

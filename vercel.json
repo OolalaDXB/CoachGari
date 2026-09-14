@@ -7,6 +7,8 @@
     { "source": "/c/:token", "destination": "/c" }
   ],
   "redirects": [
+    { "source": "/c/:token", "has": [{ "type": "host", "value": "collab.coachgari28.com" }], "destination": "https://coachgari28.com/c/:token", "permanent": false },
+    { "source": "/(.*)", "has": [{ "type": "host", "value": "collab.coachgari28.com" }], "destination": "https://coachgari28.com/collab", "permanent": false },
     { "source": "/routes/c", "destination": "/", "permanent": true },
     { "source": "/routes/c/(.*)", "destination": "/", "permanent": true },
     { "source": "/coach-gari-online(\\.html)?", "destination": "/", "permanent": true },

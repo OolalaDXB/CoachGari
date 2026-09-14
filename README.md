@@ -754,6 +754,31 @@ shows Safari's Share → Add to Home Screen instruction instead. iOS also only
 delivers push to a site added to the Home Screen, so the notifications banner
 waits until the app is installed there.
 
+### `collab.coachgari28.com`
+
+An address to say out loud, not a second site. Two host-scoped rules in
+`vercel.json` send everything on the subdomain to the one page at the apex, so
+there is no duplicate page, no second origin to allow through CORS, and no room
+link to reissue.
+
+| Typed | Lands on |
+|---|---|
+| `collab.coachgari28.com` (any path) | `coachgari28.com/collab` |
+| `collab.coachgari28.com/c/<token>` | `coachgari28.com/c/<token>` — the token is kept |
+
+Both are **307, not 308**. `/collab` is `noindex` in the meta and in its
+`X-Robots-Tag`, so there is no ranking to consolidate — and a permanent redirect
+would sit in the cache of every browser that ever followed it, which would fight
+us the day this subdomain is asked to serve the page itself.
+
+Seven checks in `test-collab.mjs` hold the shape, including that no rule carries
+a bare `/(.*)` source without a host condition — that one would swallow the whole
+site — and that the token rule stays ahead of the catch-all.
+
+**Owner side, not in this repo:** a `CNAME` for `collab` at the registrar, and
+the domain attached to the `coachgari_v0` project in Vercel. Until both are done
+the rules are inert; nothing else breaks in the meantime.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml`, three jobs.
