@@ -36,7 +36,8 @@ const FORBIDDEN = /what do you want from coach gari/i;
 for (const [n, src] of [['collab.html', page], ['c.html', room], ['collab.js', pageJs], ['collab-room.js', roomJs]])
   check(`${n} never uses the forbidden prompt`, !FORBIDDEN.test(src));
 check('collab.html uses the canonical prompt "What would you like to explore together?"', /What would you like to explore together\?/.test(page));
-check('collab.html headline is "Collaborate with Coach Gari"', /Collaborate with Coach Gari/.test(page));
+check('collab.html headline is "Collaborate with me." — first person, like the rest of the site', /<h1[^>]*>Collaborate with me\.<\/h1>/.test(page));
+check('the brand still carries the page for search and sharing, via <title>', /<title>[^<]*Coach Gari[^<]*<\/title>/.test(page));
 check('public copy always writes "Coach Gari", never a bare first name as the brand', !/\bGari\b(?!\s*[<·])/.test(page.replace(/Coach Gari/g, '')));
 
 /* ---- edge function security ---- */

@@ -15,7 +15,11 @@
     body { background: var(--grey-bg); }
     .cl-shell { max-width: 760px; margin: 0 auto; padding: 40px 24px 80px; }
     .cl-home { display: inline-block; font-weight: 800; letter-spacing: -.02em; font-size: 20px; color: var(--black); text-decoration: none; margin-bottom: 28px; }
-    .cl-home span { color: var(--accent); }
+    .cl-home i { font-style: normal; }
+    /* The page h1 inherits the home hero scale, but it lives in a 712px column
+       above a form. At 64px it pushed the first field under the fold on a phone.
+       This holds one line from 320px up and reads as a heading, not a banner. */
+    .cl-title { font-size: clamp(min(1.75rem, 8.6vw - 4.1px), 7vw, 2.6rem); margin-bottom: 14px; }
     .cl-intro { color: var(--grey-text); font-size: 18px; margin: 0 0 28px; max-width: 60ch; }
     .cl-card { background: var(--white); border-radius: 22px; padding: 32px 28px; }
     .cl-legend { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--grey-text); margin: 24px 0 12px; }
@@ -31,9 +35,9 @@
 </head>
 <body>
   <main class="cl-shell">
-    <a class="cl-home" href="/">Coach <span>Gari</span></a>
+    <a class="cl-home" href="/">Coach Gari<i>.</i></a>
     <div class="cl-live">
-      <h1>Collaborate with Coach Gari.</h1>
+      <h1 class="cl-title">Collaborate with me.</h1>
       <p class="cl-intro">Have an idea for a collaboration, event, campaign or partnership? Tell us a little about it and we can explore whether there is a good fit.</p>
       <div class="cl-card">
         <form data-collab novalidate>
