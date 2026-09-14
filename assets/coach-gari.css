@@ -337,8 +337,6 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .f-social a{display:inline-flex;color:var(--grey-text);transition:color .2s ease;}
 .f-social a:hover,.f-social a:focus-visible{color:var(--accent);}
 .credit{display:flex;align-items:center;gap:9px;}
-/* the photography credit sits quieter than the build credit: no accent rule, grey, same line */
-.credit-photo{color:var(--grey-text);font-weight:500;}
 .credit a{font-weight:700;color:var(--black);text-decoration:none;border-bottom:1.5px solid var(--accent);padding-bottom:1px;}
 
 /* back-to-proposal button */
@@ -403,8 +401,11 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .sp-box{position:relative;width:100%;max-width:440px;max-height:calc(100vh - 40px);overflow:auto;background:#fff;border-radius:20px;padding:28px 26px 24px;box-shadow:0 30px 80px rgba(10,10,11,.25);}
 .sp-x{position:absolute;top:12px;right:12px;width:36px;height:36px;border:0;border-radius:50%;background:var(--accent-pale);font-size:20px;line-height:1;cursor:pointer;color:var(--black);}
 .sp-box h3{font-size:22px;margin:0 32px 6px 0;display:flex;align-items:center;gap:9px;}
-/* two figures leaning into each other — the hug the box is asking for, at heading size */
-.sp-hug{flex:none;width:24px;height:24px;color:var(--accent,#1540E8);}
+/* the hug emoji marks Support wherever it is offered: the header button, the footer
+   call to action, the box itself. An emoji, so it keeps the platform's own artwork —
+   sized in em so it follows whatever type it sits next to, and never squeezed by flex. */
+.hug{flex:none;font-size:1.15em;line-height:1;margin-right:.4em;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;}
+.sp-box h3 .hug{margin-right:0;font-size:1.05em;}
 .sp-sub{margin:0 0 18px;font-size:14.5px;color:var(--grey-text);font-weight:500;line-height:1.5;}
 .sp-amounts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
 .sp-amt{font-family:inherit;font-weight:700;font-size:14.5px;padding:12px 6px;border-radius:10px;border:1.5px solid var(--line);background:#fff;cursor:pointer;color:var(--black);}
