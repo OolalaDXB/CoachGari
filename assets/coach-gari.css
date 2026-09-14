@@ -307,7 +307,9 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 .f-top a.f-lead span{display:inline-block;transition:transform .25s cubic-bezier(.2,.7,.2,1);}
 .f-top a.f-lead:hover span,.f-top a.f-lead:focus-visible span{transform:translateX(3px);}
 /* Support Coach Gari: a distinct, discreet CTA (design-system button), not a list link */
-.f-support-cta{margin-top:16px;}
+/* Trim the left inset so the hug sits closer to the button's edge; the right
+   side keeps the full padding, which is what shifts the label left with it. */
+.f-support-cta{margin-top:16px;padding-left:15px;}
 .f-news{display:flex;gap:10px;margin-top:16px;}
 .f-news input{flex:1;min-width:0;padding:15px 18px;border:1.5px solid var(--line);border-radius:9px;
   font-family:inherit;font-size:14.5px;background:#fff;}
@@ -404,7 +406,12 @@ footer{background:var(--grey-bg);padding:70px 0 0;overflow:hidden;}
 /* the hug emoji marks Support wherever it is offered: the header button, the footer
    call to action, the box itself. An emoji, so it keeps the platform's own artwork —
    sized in em so it follows whatever type it sits next to, and never squeezed by flex. */
-.hug{flex:none;font-size:1.15em;line-height:1;margin-right:.4em;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;}
+/* The button centres its flex items on their boxes, which left the hug off the
+   label's optical centre — emoji sit low in their em box. Align it on the text
+   baseline instead, which is where emoji are designed to sit and, unlike a
+   pixel nudge, holds across Apple Color Emoji, Segoe and Noto alike (their
+   metrics differ, so a hard-coded offset tuned on one is wrong on the others). */
+.hug{flex:none;align-self:baseline;font-size:1.15em;line-height:1;margin-right:.4em;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif;}
 .sp-box h3 .hug{margin-right:0;font-size:1.05em;}
 .sp-sub{margin:0 0 18px;font-size:14.5px;color:var(--grey-text);font-weight:500;line-height:1.5;}
 .sp-amounts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;}
