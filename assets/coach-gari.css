@@ -54,6 +54,12 @@ p{margin:0 0 1em;}
 .sub{color:var(--grey-text);font-size:1.09rem;font-weight:500;max-width:60ch;}
 .center{text-align:center;}
 .center .sub{margin-left:auto;margin-right:auto;}
+/* A heading and the line under it sat flush in six places — the gap existed only
+   where a block happened to set one, giving 0, 12, 18 or 20px around the page.
+   This is the floor, at the 18px the tuned blocks already use; those blocks keep
+   winning on specificity, so nothing that was deliberate moves. */
+:is(h1,h2,h3) + .sub,
+:is(h1,h2,h3) + .sp-sub{margin-top:18px;}
 
 .badge{
   display:inline-block;font-size:12.5px;font-weight:800;letter-spacing:.06em;
