@@ -2,7 +2,9 @@
    Coach Gari — transactional email (Resend) shared by the Edge Functions.
 
    Sender    EMAIL_FROM      = Coach Gari <yoursession@coachgari28.com>
-   Reply-To  EMAIL_REPLY_TO  = letsgo@coachgari28.com
+   Reply-To  EMAIL_REPLY_TO  = letsgo@coachgari28.com          (general)
+             …_COLLAB        = collab@coachgari28.com          (collaborations)
+             …_HUGS          = hugs@coachgari28.com            (support thank-you)
    Key       RESEND_API_KEY  (server-side only; never logged, never returned)
 
    Nothing here decides WHETHER an email is due: the database queues rows in
@@ -23,6 +25,11 @@ export type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
 export const DEFAULT_FROM = "Coach Gari <yoursession@coachgari28.com>";
 export const DEFAULT_REPLY_TO = "letsgo@coachgari28.com";
+/* A reply should land in the mailbox that owns the conversation, not in one general
+   inbox: a collaboration reply belongs with the collaborations, a thank-you reply with
+   the people saying hello. Both are overridable by env, like the general reply-to. */
+export const COLLAB_REPLY_TO = "collab@coachgari28.com";
+export const HUGS_REPLY_TO = "hugs@coachgari28.com";
 const RESEND_API = "https://api.resend.com";
 
 export type EmailConfig = { ready: boolean; missing: string[]; from: string; replyTo: string; hasKey: boolean };
@@ -43,6 +50,22 @@ export function emailConfig(env: Env): EmailConfig {
   return { ready: !!key, missing, from, replyTo, hasKey: !!key };
 }
 export const fromDomain = (from: string) => (from.match(/@([^>\s]+)/)?.[1] ?? "").toLowerCase();
+
+const address = (raw: string | undefined, fallback: string) =>
+  ((raw ?? "").trim().match(/[^\s<>"']+@[^\s<>"']+\.[^\s<>"']{2,}/)?.[0] ?? fallback).toLowerCase();
+
+/** Which mailbox a reply to this message should reach. */
+export function replyToFor(kind: string, payload: Payload, cfg: EmailConfig, env: Env): string {
+  // an enquiry notification is answered by writing back to the person who sent it
+  if (kind === "lead_notification") {
+    const contact = payload?.contact;
+    if (typeof contact === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(contact)) return contact;
+    return cfg.replyTo;
+  }
+  if (kind.startsWith("collab_")) return address(env("EMAIL_REPLY_TO_COLLAB"), COLLAB_REPLY_TO);
+  if (kind === "support_thanks") return address(env("EMAIL_REPLY_TO_HUGS"), HUGS_REPLY_TO);
+  return cfg.replyTo;
+}
 
 /* ---- rendering --------------------------------------------- */
 export type Payload = Record<string, unknown>;
@@ -237,7 +260,7 @@ export async function drainOutbox(db: Db, env: Env, filter: Filter = {}, log: (e
     let rendered: Rendered;
     try { rendered = render(row.kind, row.payload ?? {}); }
     catch (e) { await db.rpc("email_outbox_result", { p_id: row.id, p_ok: false, p_error: `render ${(e as Error).message}`.slice(0, 120) }); out.failed++; continue; }
-    const replyTo = row.kind === "lead_notification" && typeof row.payload?.contact === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(row.payload.contact) ? row.payload.contact : undefined;
+    const replyTo = replyToFor(row.kind, row.payload ?? {}, cfg, env);
     const res = await sendResend(cfg, { to: row.to_address, ...rendered, idempotencyKey: row.dedupe_key ?? row.id, replyTo, refId: row.dedupe_key ?? row.id }, env, fetchImpl);
     const { data } = await db.rpc("email_outbox_result", { p_id: row.id, p_ok: res.ok, p_provider_message_id: res.ok ? res.id : null, p_error: res.ok ? null : res.error });
     const state = data?.status ?? (res.ok ? "sent" : "pending");

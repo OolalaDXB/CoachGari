@@ -8,7 +8,7 @@
               Authorization header; a 500 → retry state; a network error → retry state; a success → sent with the provider id;
               the API key never appears in logs or in results; not configured → nothing claimed, nothing sent
    Run: node scripts/test-email.mjs  (exit 1 on any failure). Prints EMAIL_TESTS ok=… fail=…   */
-import { emailConfig, render, drainOutbox, emailStatus, normaliseFrom, DEFAULT_FROM, DEFAULT_REPLY_TO } from '../supabase/functions/_shared/email.ts';
+import { emailConfig, render, drainOutbox, emailStatus, normaliseFrom, DEFAULT_FROM, DEFAULT_REPLY_TO, COLLAB_REPLY_TO, HUGS_REPLY_TO } from '../supabase/functions/_shared/email.ts';
 
 let ok = 0, fail = 0;
 const check = (name, cond, extra = '') => { if (cond) ok++; else fail++; console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond ? '' : ' ' + extra}`); };
@@ -131,6 +131,30 @@ const ENV = envWith({ RESEND_API_KEY: KEY, EMAIL_FROM: 'Coach Gari <yoursession@
   const db = fakeDb([{ id: 'e7', contact_id: 'c7', kind: 'lead_notification', to_address: 'letsgo@coachgari28.com', payload: { name: 'Lee', contact: 'lee@example.com', message: 'hi' }, dedupe_key: 'contact:c7:lead_notification' }]);
   const sent = []; await drainOutbox(db, ENV, {}, () => {}, async (u, i) => { sent.push(JSON.parse(i.body)); return new Response('{"id":"m"}'); });
   check('lead notification to the owner replies to the customer', sent[0].reply_to === 'lee@example.com' && sent[0].to[0] === 'letsgo@coachgari28.com');
+}
+/* a reply lands in the mailbox that owns the conversation, not in one general inbox */
+{
+  const rows = [
+    { id: 'c1', kind: 'collab_ack',           to_address: 'brand@example.com', payload: { name: 'Ada', public_ref: 'CL-1' },              dedupe_key: 'k-c1' },
+    { id: 'c2', kind: 'collab_payment_ready', to_address: 'brand@example.com', payload: { name: 'Ada', public_ref: 'CL-1', amount: 100, currency: 'AED' }, dedupe_key: 'k-c2' },
+    { id: 'c3', kind: 'collab_received',      to_address: 'letsgo@coachgari28.com', payload: { name: 'Ada', public_ref: 'CL-1' },        dedupe_key: 'k-c3' },
+    { id: 'h1', kind: 'support_thanks',       to_address: 'fan@example.com',   payload: { amount: 2500, currency: 'AED', public_ref: 'SP-1' }, dedupe_key: 'k-h1' },
+    { id: 'b1', kind: 'booking_confirmed',    to_address: 'x@example.com',     payload: booking,                                          dedupe_key: 'k-b1' },
+  ];
+  const db = fakeDb(rows);
+  const sent = []; await drainOutbox(db, ENV, {}, () => {}, async (u, i) => { sent.push(JSON.parse(i.body)); return new Response('{"id":"m"}'); });
+  const by = Object.fromEntries(sent.map((m, n) => [rows[n].kind + ':' + rows[n].id, m.reply_to]));
+  check('the canonical mailboxes are collab@ and hugs@', COLLAB_REPLY_TO === 'collab@coachgari28.com' && HUGS_REPLY_TO === 'hugs@coachgari28.com');
+  check('every collaboration message replies to collab@, to the requester and to the owner alike',
+    by['collab_ack:c1'] === COLLAB_REPLY_TO && by['collab_payment_ready:c2'] === COLLAB_REPLY_TO && by['collab_received:c3'] === COLLAB_REPLY_TO,
+    JSON.stringify(by));
+  check('the support thank-you replies to hugs@', by['support_thanks:h1'] === HUGS_REPLY_TO, by['support_thanks:h1']);
+  check('everything else still replies to the general mailbox', by['booking_confirmed:b1'] === DEFAULT_REPLY_TO, by['booking_confirmed:b1']);
+  const overridden = [];
+  await drainOutbox(fakeDb([rows[0], rows[3]]), envWith({ RESEND_API_KEY: KEY, EMAIL_FROM: DEFAULT_FROM, EMAIL_REPLY_TO: DEFAULT_REPLY_TO, EMAIL_REPLY_TO_COLLAB: 'partners@coachgari28.com', EMAIL_REPLY_TO_HUGS: 'thanks@coachgari28.com' }),
+    {}, () => {}, async (u, i) => { overridden.push(JSON.parse(i.body).reply_to); return new Response('{"id":"m"}'); });
+  check('both mailboxes stay overridable by env, like the general one',
+    overridden[0] === 'partners@coachgari28.com' && overridden[1] === 'thanks@coachgari28.com', JSON.stringify(overridden));
 }
 
 /* ---- 4. status: presence only ---- */
