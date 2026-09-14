@@ -191,7 +191,7 @@ async function ledgerPanel(host, manage) {
   const today = new Date(); const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
   const isoDate = (d) => d.toISOString().slice(0, 10);
   host.innerHTML = `
-    <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Net after fees, refunds and chargebacks, and the Oolala commission at the rate of the origin (see Commissions). A settlement moves money Oolala collected and holds; what Gari collected himself is a receivable and is never swept into one. Each line is in the currency it was collected in.</p>
+    <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Net after fees, refunds and chargebacks, and the Oolala commission — ${esc(C.config.COMMISSION_RATE)} on every payment, less any signed exemption. A settlement moves money Oolala collected and holds; what Gari collected himself is a receivable and is never swept into one. Each line is in the currency it was collected in.</p>
     <p class="ad-muted" style="font-size:13px;margin:0 0 12px">Payable to Gari, not yet settled: <b>${Object.entries(open.filter((o) => o.direction !== 'receivable').reduce((m, o) => { m[o.ledger_currency] = (m[o.ledger_currency] || 0) + (o.gari_payable || 0); return m; }, {})).map(([c, v]) => money(v, c)).join(' · ') || '—'}</b>
       · receivable by Studio on money Gari collected: <b>${Object.entries(open.filter((o) => o.direction === 'receivable').reduce((m, o) => { m[o.ledger_currency] = (m[o.ledger_currency] || 0) + (o.studio_receivable || 0); return m; }, {})).map(([c, v]) => money(v, c)).join(' · ') || '—'}</b></p>
     <h2 style="font-size:15px">Settlements</h2>
@@ -230,8 +230,10 @@ async function ledgerPanel(host, manage) {
 }
 
 /* =============================== FINANCE · COMMISSIONS =============================== */
-/* The Oolala commission on every payment, month × currency × origin × type. The rate follows the
-   ORIGIN of the money, never the technical rail:
+/* The Oolala commission on every payment, month × currency × origin × type.
+
+   ONE rate — 10 % — whatever the money came through. What the ORIGIN decides is the accounting
+   DIRECTION, not the rate:
      · platform  — Oolala collected it (Stripe). Oolala holds the cash, keeps its commission and OWES
                    Gari the net. Direction: payable.
      · direct    — Gari collected it himself (cash, Aani, bank transfer, in-person terminal). Gari holds
@@ -239,22 +241,28 @@ async function ledgerPanel(host, manage) {
                    is Studio's to pay out.
    The two directions are never mixed: money Oolala owes Gari is not money Gari owes Studio, and a single
    blended figure would invent a balance that exists nowhere. Settled = included in a settlement to Gari;
-   open = not yet. Never summed across currencies either. */
+   open = not yet. Never summed across currencies either.
+
+   A client or a single line can sit outside the commission, but no one grants that alone: an exemption
+   needs Coach Gari's signature AND Studio MT's. Until both are in it changes nothing, and the page
+   shows exactly which signature is missing. */
 const DIRECTION_LABEL = { payable: 'Payable to Gari', receivable: 'Receivable by Studio' };
 const ORIGIN_LABEL = { platform: 'Oolala collected', direct: 'Gari collected' };
+const SIDE_LABEL = { gari: 'Coach Gari', studio: 'Studio MT' };
 
 export async function financeCommissions() {
   const { esc, money, view } = C;
-  const d = await rpc('finance_commissions');
+  const [d, x] = await Promise.all([rpc('finance_commissions'), rpc('commission_exemptions_list')]);
   const rows = d.rows || [], totals = d.totals || [], rates = d.rates || [];
   const pct = (v) => Math.round(Number(v || 0) * 10000) / 100;
-  const rateLine = rates.length
-    ? rates.map((r) => `${esc(String(pct(r.rate)))} % ${esc(ORIGIN_LABEL[r.origin] || r.origin)}`).join(' · ')
-    : 'no rate configured';
+  const flat = rates.length && rates.every((r) => r.rate === rates[0].rate);
+  const rateLine = !rates.length ? 'no rate configured'
+    : flat ? `${esc(String(pct(rates[0].rate)))} % on every payment, whatever the origin`
+    : rates.map((r) => `${esc(String(pct(r.rate)))} % ${esc(ORIGIN_LABEL[r.origin] || r.origin)}`).join(' · ');
   const kpi = (dir) => totals.filter((t) => t.direction === dir).map((t) => `<div class="ad-kpi"><b>${money(t.commission, t.currency)}</b><span>${esc(DIRECTION_LABEL[dir] || dir)} · ${esc(t.currency)} · settled ${money(t.commission_settled, t.currency)} · open ${money(t.commission_open, t.currency)} · on ${money(t.net, t.currency)} net from ${t.payments} payment${t.payments === 1 ? '' : 's'}</span></div>`).join('');
   const payable = kpi('payable'), receivable = kpi('receivable');
   view.innerHTML = `
-    <div class="ad-head"><div><h1>Oolala commissions</h1><p class="ad-muted">Commission by origin of the money — ${rateLine} — after Stripe fees, refunds and chargebacks. What Oolala collected it owes Gari net of commission; what Gari collected himself leaves Studio with a receivable, not funds to pay out. Figures stay in the currency collected.</p></div></div>
+    <div class="ad-head"><div><h1>Oolala commissions</h1><p class="ad-muted">${rateLine}, after Stripe fees, refunds and chargebacks. What Oolala collected it owes Gari net of commission; what Gari collected himself leaves Studio with a receivable, not funds to pay out. Figures stay in the currency collected.</p></div></div>
     <h2 style="font-size:15px;margin-top:4px">Oolala collected — commission kept, net payable to Gari</h2>
     <div class="ad-kpis">${payable || '<div class="ad-kpi"><b>—</b><span>Nothing collected by Oolala yet</span></div>'}</div>
     <h2 style="font-size:15px;margin-top:20px">Gari collected — commission receivable by Studio</h2>
@@ -268,7 +276,59 @@ export async function financeCommissions() {
         <td class="num">${money(r.net, r.currency)}</td><td class="num"><b>${money(r.commission, r.currency)}</b></td><td class="num">${money(r.commission_settled, r.currency)}</td><td class="num">${money(r.commission_open, r.currency)}</td>
         <td class="num">${r.direction === 'payable' ? money(r.gari_payable, r.currency) : '—'}${r.adjusted ? `<div class="msg" style="font-size:12px">${r.adjusted} adjusted after settlement</div>` : ''}</td>
         <td class="num">${r.direction === 'receivable' ? `<b>${money(r.studio_receivable, r.currency)}</b>` : '—'}</td></tr>`), 'No commission yet.')}
-    </div>`;
+    </div>
+    <div id="cx-host">${exemptionsPanel(x)}</div>`;
+  bindExemptions();
+}
+
+/* Exemptions: who is outside the commission, and whether both sides have actually said so. */
+function exemptionsPanel(x) {
+  const { esc, st, has } = C;
+  const side = x.side, rows = x.rows || [], manage = has('finance:manage');
+  const sig = (who, at, label) => who
+    ? `<div>✓ ${esc(label)} <span class="ad-muted" style="font-size:12px">${esc(who)}${at ? ' · ' + when(at) : ''}</span></div>`
+    : `<div class="ad-muted">— ${esc(label)} has not signed</div>`;
+  return `
+    <h2 style="font-size:15px;margin-top:22px">Outside the commission</h2>
+    <p class="ad-muted" style="font-size:13px;margin:0 0 12px">A client or a single line can be held out of the commission, but never by one side alone: it takes Coach Gari's signature and Studio MT's. A request on its own changes nothing — only the second signature makes it bite, and either side can end it, which puts the standard commission back.${side ? '' : ' You are signed in as neither party, so you can read this but not sign.'}</p>
+    ${C.table(['Scope', 'Rate', 'Reason', 'Signatures', 'Status', ''], rows.map((r) => `<tr>
+      <td>${r.scope === 'client' ? 'Client · ' + esc(r.client_name || '—') : 'Line · ' + esc(r.order_reference || '—')}</td>
+      <td class="num">${esc(String(Math.round(Number(r.rate || 0) * 10000) / 100))} %</td>
+      <td>${esc(r.reason)}${r.closed_reason ? `<div class="msg" style="font-size:12px">${esc(r.closed_reason)}</div>` : ''}</td>
+      <td style="font-size:12.5px">${sig(r.gari_by, r.gari_at, 'Coach Gari')}${sig(r.studio_by, r.studio_at, 'Studio MT')}</td>
+      <td>${st(r.status)}</td>
+      <td class="acts">${manage && r.can_sign ? `<button class="btn btn-accent btn-xs" data-cx-sign="${esc(r.id)}">Sign as ${esc(SIDE_LABEL[side] || side)}</button>` : ''}${manage && r.can_close ? `<button class="btn btn-dark btn-xs" data-cx-close="${esc(r.id)}">${r.status === 'pending' ? 'Reject' : 'End'}</button>` : ''}</td></tr>`), 'Everyone is on the standard commission.')}
+    ${manage ? `<form id="cx-form" class="ad-form" style="margin-top:16px"><div class="row">
+      <label>Scope <select name="scope"><option value="order">One line (order reference)</option><option value="client">A client (all their lines)</option></select></label>
+      <label>Target <input name="target" required placeholder="OR-ABC123 or the client id"></label>
+      <label>Rate % <input name="rate" type="number" min="0" max="100" step="0.01" value="0"></label></div>
+      <div class="row"><label style="flex:1">Reason <input name="reason" required minlength="3" maxlength="2000" placeholder="Why this is outside the commission"></label></div>
+      <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Request an exemption</button></div></form>
+      <p class="ad-note">Your request is recorded and signed by your side straight away. It starts applying only once the other side signs too.</p>` : ''}`;
+}
+
+function bindExemptions() {
+  const { $, sb } = C;
+  const reload = () => financeCommissions().catch(C.fail);
+  C.view.querySelectorAll('[data-cx-sign]').forEach((b) => b.onclick = async () => {
+    if (!(await modal({ title: 'Sign this exemption', body: '<p>Your signature is one of the two this exemption needs. If the other side has already signed, it starts applying immediately.</p>', confirm: 'Sign' }))) return;
+    const { error } = await sb.rpc('commission_exemption_approve', { p_id: b.dataset.cxSign }); if (error) return C.fail(error);
+    C.toast('Signed'); invalidate('finance_commissions', 'commission_exemptions_list'); reload();
+  });
+  C.view.querySelectorAll('[data-cx-close]').forEach((b) => b.onclick = async () => {
+    const why = window.prompt('Why is this exemption ending? (optional)'); if (why === null) return;
+    const { error } = await sb.rpc('commission_exemption_close', { p_id: b.dataset.cxClose, p_reason: why }); if (error) return C.fail(error);
+    C.toast('Closed — the standard commission applies again'); invalidate('finance_commissions', 'commission_exemptions_list'); reload();
+  });
+  const form = $('#cx-form');
+  if (form) form.onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(form);
+    const scope = f.get('scope'), target = String(f.get('target') || '').trim();
+    const p = { scope, reason: f.get('reason'), rate: Number(f.get('rate') || 0) / 100 };
+    if (scope === 'client') p.crm_contact_id = target; else p.order_reference = target;
+    const { error } = await sb.rpc('commission_exemption_request', { p }); if (error) return C.fail(error);
+    C.toast('Requested — it needs both signatures to apply'); invalidate('finance_commissions', 'commission_exemptions_list'); reload();
+  };
 }
 
 /* =============================== FINANCE · PAYMENT METHODS =============================== */
