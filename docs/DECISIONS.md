@@ -100,7 +100,17 @@ efficace, pas d'overengineering". `20261034_cg_collab_workflow.sql`:
 - **Whose move, in the list.** `waiting_on` / `waiting_since` computed in
   `collab_admin_list` from the latest version, no stored field. Colours live in
   `.cl-st` (admin) and `.cr-badge` (room); `new` counts as in progress (violet).
-- Suites: `cg015_collaborations.sql` 58 → **72**, `test-collab.mjs` 59 → **94**.
+- **Close, Reopen, Delete on the right states (`20261038`).** Seen on a
+  real deal: agreed, checkout abandoned by the partner, the list said
+  "waiting on payment", the admin offered only Reopen. Now: Close on any open
+  deal, Reopen on closed/declined, Delete (`collab_admin_delete`) everywhere
+  except where money was collected — that one closes, the ledger keeps its
+  order. And `collab_payment_sync`, which nothing in production called, is
+  driven by a trigger on `orders`: paid → *paid*; cancelled / failed →
+  back to *requested* (the request stands, `collab_pay_start` replaces the
+  closed order). An abandoned checkout is therefore still "waiting on
+  payment" — that is the truth; the deal itself was never cancelled.
+- Suites: `cg015_collaborations.sql` 58 → **79**, `test-collab.mjs` 59 → **97**.
 
 ---
 

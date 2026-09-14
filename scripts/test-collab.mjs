@@ -21,7 +21,7 @@ const COVERED = [
   '20261013_cg_collaborations.sql', '20261014_cg_finance_collab_label.sql', '20261015_cg_collab_room_link.sql',
   '20261016_cg_collab_token_at_rest.sql', '20261017_cg_collab_operator_grant.sql', '20261019_cg_collab_link_retrieval.sql',
   '20261021_cg_collab_pay_start_resume.sql', '20261022_cg_collab_payment_bound_to_accepted.sql',
-  '20261023_cg_collab_intake_ip_and_throttle.sql', '20261034_cg_collab_workflow.sql',
+  '20261023_cg_collab_intake_ip_and_throttle.sql', '20261034_cg_collab_workflow.sql', '20261038_cg_collab_close_delete_and_payment_state.sql',
 ];
 check('the foundation migration is present', !!mig);
 check('every collaboration migration on disk is covered by this suite', migFiles.every((f) => COVERED.includes(f)),
@@ -173,6 +173,14 @@ check('non-cash consideration is never turned into a payment (payment_request ne
   check('admin: Decline politely (with an optional personal line) sits next to Close, and Close sends nothing',
     /id="cl-decline">Decline politely/.test(adminJs) && /collab_admin_decline/.test(adminJs) && /p_note: note\.trim\(\) \|\| null/.test(adminJs) && /No email is sent/.test(adminJs));
   check('admin: the list shows whose move and for how long', /'Waiting on'/.test(adminJs) && /Your move/.test(adminJs) && /Their reply/.test(adminJs) && /waiting_since/.test(adminJs));
+  const m38 = M['20261038_cg_collab_close_delete_and_payment_state.sql'];
+  check('20261038 keeps the payment row in step with its order through a trigger (no more stale "waiting on payment")',
+    /create trigger orders_collab_payment_sync after update of status on public\.orders/.test(m38) && /o\.status not in \('paid','partially_refunded','refunded'\)/.test(m38) && /then 'requested'/.test(m38));
+  check('20261038 delete is collab:manage only and refuses a deal that collected money',
+    /function public\.collab_admin_delete/.test(m38) && /has_permission\('collab:manage'\)/.test(m38) && /close it instead of deleting it/.test(m38) && /'delete', e,/.test(m38));
+  check('admin: Close on every open deal (agreed included), Reopen only on closed/declined, Delete with the paid guard',
+    /d\.status !== 'closed' \? `<button[^`]*id="cl-close"/.test(adminJs) && /\['closed', 'declined'\]\.includes\(d\.status\) \? `<button[^`]*id="cl-reopen"/.test(adminJs)
+    && /collab_admin_delete/.test(adminJs) && /paidAny/.test(adminJs));
   check('room: same palette, and a settled room says so in one line',
     /\.cr-badge\.new, \.cr-badge\.negotiating, \.cr-badge\.reviewing \{ background: #EFE8FB/.test(room) && /\.cr-badge\.declined/.test(room)
     && /id="settled"/.test(room) && /declined: 'This collaboration was declined/.test(roomJs));

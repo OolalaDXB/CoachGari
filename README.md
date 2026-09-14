@@ -722,7 +722,7 @@ Every offline suite, the same ones CI runs:
 
 ```
 node scripts/test-webhook-signature.mjs   # WEBHOOK_SIGNATURE_TESTS ok=24
-node scripts/test-collab.mjs              # COLLAB_TESTS ok=94
+node scripts/test-collab.mjs              # COLLAB_TESTS ok=97
 node scripts/test-url-scrub.mjs           # URL_SCRUB_TESTS ok=21
 node scripts/test-contact-ip.mjs          # CONTACT_IP_TESTS ok=31
 node scripts/test-email.mjs               # EMAIL_TESTS ok=41
@@ -801,8 +801,18 @@ waits until the app is installed there.
 - **Decline politely** (back-office, `collab_admin_decline(id, note)`): settles
   the deal and sends the requester one courteous email; the optional note is
   quoted inside it. Idempotent. An agreed deal cannot be declined — it is
-  closed. **Close** files a deal with no email. A decline from the room tells
-  the coach (internal mail + push).
+  closed. **Close** files any open deal (agreed included) with no email;
+  **Reopen** brings a closed or declined one back. **Delete**
+  (`collab_admin_delete`, `collab:manage`) removes a deal for good — request,
+  every version, payment requests — and is refused when a payment was
+  collected (the ledger keeps its order; close it instead). A decline from
+  the room tells the coach (internal mail + push).
+- **Payment state follows the order** (`20261038`): a trigger on `orders`
+  runs `collab_payment_sync` — a paid order settles the payment row, an
+  abandoned or expired checkout puts it back to *requested* (the coach's
+  request stands; the room starts a fresh checkout). "Waiting on: payment"
+  and the payment reminder mean *requested and not paid*, whatever happened
+  to a previous checkout.
 - **Whose move.** `collab_admin_list` returns `waiting_on` (`you` · `them` ·
   `payment`) and `waiting_since`; the list shows it as *Your move · 4 days*.
 - **Reminders** (`collab_reminders()`, pg_cron `cg-collab-reminders`, daily):

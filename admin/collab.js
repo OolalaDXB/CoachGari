@@ -58,6 +58,8 @@ async function openDeal(id) {
   const latest = d.latest;
   const canPropose = !['agreed', 'declined', 'closed'].includes(d.status);
   const counterToAccept = latest && latest.proposed_by === 'counterparty' && canPropose ? latest.version : null;
+  const has = (p) => C.has(p);
+  const paidAny = (d.payments || []).some((p) => ['paid', 'partially_refunded', 'refunded'].includes(p.order_status || ''));
 
   const consChips = (arr, kind) => (arr || []).filter((c) => c && c.type === kind).map((c) =>
     `<span class="cr-chip">${esc(c.description || (kind === 'monetary' ? 'Fee' : 'Item'))}${c.amount != null && c.currency ? ' · ' + esc(money(c.amount, c.currency)) : ''}</span>`).join('');
@@ -84,9 +86,12 @@ async function openDeal(id) {
         <div class="cg-actions" style="margin-top:14px">
           <button class="btn btn-line btn-sm" id="cl-copy">Copy room link</button>
           <button class="btn btn-line btn-sm" id="cl-reset">Reset link</button>
-          ${canPropose ? `<button class="btn btn-line btn-sm" id="cl-decline">Decline politely</button><button class="btn btn-line btn-sm" id="cl-close">Close</button>` : `<button class="btn btn-line btn-sm" id="cl-reopen">Reopen</button>`}
+          ${canPropose ? `<button class="btn btn-line btn-sm" id="cl-decline">Decline politely</button>` : ''}
+          ${d.status !== 'closed' ? `<button class="btn btn-line btn-sm" id="cl-close">Close</button>` : ''}
+          ${['closed', 'declined'].includes(d.status) ? `<button class="btn btn-line btn-sm" id="cl-reopen">Reopen</button>` : ''}
+          ${has('collab:manage') ? `<button class="btn btn-line btn-sm" id="cl-delete">Delete</button>` : ''}
         </div>
-        ${canPropose ? `<p class="ad-muted" style="font-size:12px;margin-top:8px"><b>Decline</b> sends ${d.contact_email ? 'a courteous email' : 'nothing (no email on file)'} and settles it in red. <b>Close</b> just files it, no email.</p>` : ''}
+        <p class="ad-muted" style="font-size:12px;margin-top:8px">${canPropose ? `<b>Decline</b> sends ${d.contact_email ? 'a courteous email' : 'nothing (no email on file)'} and settles it in red. ` : ''}${d.status !== 'closed' ? '<b>Close</b> files it in grey, no email. ' : ''}<b>Delete</b> removes it for good${paidAny ? ' — not this one: a payment was collected, close it instead' : ''}.</p>
         <p id="cl-linkout" class="ad-muted" style="font-size:13px;margin-top:8px;word-break:break-all">${d.room_active ? 'An active link exists. Copy to reveal it (access is logged).' : 'No active link — reset to issue one.'}</p>
         <p class="ad-muted" style="font-size:12px;margin-top:4px">The room link is included in every proposal and payment email automatically. It is never displayed at rest; Copy retrieves it through an audited action.</p>
       </div>
@@ -154,6 +159,11 @@ async function openDeal(id) {
     C.toast(d.contact_email ? 'Declined — email queued' : 'Declined'); openDeal(id);
   };
   const closeBtn = C.$('#cl-close'); if (closeBtn) closeBtn.onclick = async () => { if (!confirm('Close this collaboration? No email is sent.')) return; const { error: e2 } = await C.sb.rpc('collab_set_status', { p_id: id, p_status: 'closed' }); if (e2) return C.fail(e2); C.toast('Closed'); openDeal(id); };
+  const delBtn = C.$('#cl-delete'); if (delBtn) delBtn.onclick = async () => {
+    if (!confirm(`Delete ${d.public_ref} for good?\n\nThe request, every proposal version and the payment requests are removed. No email is sent.${paidAny ? '\n\nA payment was collected on it: the server will refuse — close it instead.' : ''}`)) return;
+    const { error: e2 } = await C.sb.rpc('collab_admin_delete', { p_id: id }); if (e2) return C.fail(e2);
+    C.toast('Collaboration deleted'); collabList().catch(C.fail);
+  };
   const reopenBtn = C.$('#cl-reopen'); if (reopenBtn) reopenBtn.onclick = async () => { const { error: e2 } = await C.sb.rpc('collab_set_status', { p_id: id, p_status: 'reviewing' }); if (e2) return C.fail(e2); C.toast('Reopened'); openDeal(id); };
   const acceptBtn = C.$('#cl-accept'); if (acceptBtn) acceptBtn.onclick = async () => { if (!confirm('Accept this counter-offer? It freezes the agreed terms.')) return; const { error: e2 } = await C.sb.rpc('collab_admin_accept', { p_id: id, p_version: Number(acceptBtn.dataset.v) }); if (e2) return C.fail(e2); C.toast('Agreed'); openDeal(id); };
 

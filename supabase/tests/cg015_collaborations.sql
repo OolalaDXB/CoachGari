@@ -213,8 +213,8 @@ begin
   if s <> ord and (select status from public.orders where reference = ord) = 'cancelled'
      and not exists (select 1 from beau_ph.payment_requests where external_reference = ord and status in ('created','pending','requires_action'))
     then ok := ok + 1; else fail := fail + 1; log := log || ' [expired-checkout-not-replaced]'; end if;
-  update public.orders set status = 'paid', paid_at = now() where reference = s;
-  begin perform public.collab_pay_start(tok4, 'AE', rt); fail := fail + 1; log := log || ' [settled-payment-recharged]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  update public.orders set status = 'paid', paid_at = now() where reference = s;   -- the order trigger (20261038) settles the payment row too
+  begin perform public.collab_pay_start(tok4, 'AE', rt); fail := fail + 1; log := log || ' [settled-payment-recharged]'; exception when sqlstate 'P0003' or sqlstate 'P0002' then ok := ok + 1; end;   -- "already settled" or "no payment is awaiting": never a second charge
 
   -- 21. a payment request is bound to the ACCEPTED proposal, never to the caller's numbers
   --     (a) non-cash-only agreed terms are never charged (did2 agreed a non-cash proposal)
@@ -306,6 +306,40 @@ begin
     then ok := ok + 1; else fail := fail + 1; log := log || ' [waiting-on]'; end if;
   perform public.collab_propose(did3, jsonb_build_object('monetary_amount',1000,'currency','AED'));
   if (public.collab_admin_list(null, 'Silent Co') -> 0 ->> 'waiting_on') = 'them' then ok := ok + 1; else fail := fail + 1; log := log || ' [waiting-on-them]'; end if;
+
+  -- 23. close / delete any deal; the payment row follows its order (20261038)
+  --     (a) Gear Co starts a checkout and abandons it: the order is cancelled, the request goes back to 'requested'
+  --         (still awaited, still nudged, still payable from the room); a paid order settles the row without the webhook path
+  toknew := public.collab_regenerate_token(did) ->> 'token';
+  j := public.collab_pay_start(toknew, 'AE', rt); ord := j -> 'order' ->> 'reference';
+  if (public.collab_admin_list(null, 'Gear Co') -> 0 ->> 'waiting_on') = 'payment'
+     and (select status from public.collaboration_payments where collaboration_id = did) = 'checkout' then ok := ok + 1; else fail := fail + 1; log := log || ' [checkout-not-waiting]'; end if;
+  update public.orders set status = 'cancelled' where reference = ord;
+  if (select status from public.collaboration_payments where collaboration_id = did) = 'requested'
+     and (public.collab_admin_list(null, 'Gear Co') -> 0 ->> 'waiting_on') = 'payment'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [abandoned-checkout-state]'; end if;
+  j := public.collab_pay_start(toknew, 'AE', rt); s := j -> 'order' ->> 'reference';   -- a fresh checkout after the abandoned one
+  update public.orders set status = 'paid', paid_at = now() where reference = s;        -- no explicit sync call: the trigger does it
+  if s <> ord and (select status from public.collaboration_payments where collaboration_id = did) = 'paid'
+     and (public.collab_admin_list(null, 'Gear Co') -> 0 ? 'waiting_on') = false
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [trigger-did-not-settle]'; end if;
+  --     (b) a deal that collected money cannot be deleted (ACME, §10 paid) — it closes instead
+  select id into did from public.collaboration_deals where contact_email = 'brand@example.com';
+  begin perform public.collab_admin_delete(did); fail := fail + 1; log := log || ' [deleted-a-paid-deal]'; exception when sqlstate 'P0003' then ok := ok + 1; end;
+  perform public.collab_set_status(did, 'closed');
+  if (select status from public.collaboration_deals where id = did) = 'closed' then ok := ok + 1; else fail := fail + 1; log := log || ' [agreed-cannot-close]'; end if;
+  --     (c) a deal without money deletes for good, cascades, audits by reference only
+  j := public.collab_admin_delete(did2);   -- Slow Co: proposals, no payment
+  if (j ->> 'ok') = 'true' and not exists (select 1 from public.collaboration_deals where id = did2)
+     and not exists (select 1 from public.collaboration_proposals where collaboration_id = did2)
+     and exists (select 1 from public.admin_audit where area = 'collaboration' and entity_id = did2::text and action = 'delete' and not (summary ? 'contact_email'))
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [collab-delete]'; end if;
+  --     (d) collab:view cannot delete
+  set local role authenticated;
+  perform set_config('request.jwt.claims', '{"email":"collabviewer@test.dev","role":"authenticated"}', true);
+  begin perform public.collab_admin_delete(did3); fail := fail + 1; log := log || ' [view-deleted]'; exception when sqlstate '42501' then ok := ok + 1; end;
+  reset role;
+  perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
 
   raise exception 'CG015_TESTS ok=% fail=% %', ok, fail, log;
 end $$;
