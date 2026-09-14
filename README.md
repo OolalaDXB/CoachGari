@@ -106,8 +106,18 @@ a service role. All secrets live in the Supabase Edge Function environment.
 
 | Address | Role |
 |---|---|
-| `letsgo@` | Leads and every human exchange. Shown on the site. Reply-To on all mail. |
+| `letsgo@` | Leads and every human exchange. Shown on the site. Reply-To on all mail by default. |
 | `yoursession@` | Transactional sender: confirmations, cancellations, reschedules, receipts. |
+| `collab@` | Reply-To on every collaboration mail (`collab_*` kinds), to the requester and to the owner alike. |
+| `hugs@` | Reply-To on the support thank-you (`support_thanks`). |
+
+`collab@` and `hugs@` are routed by message kind in
+`reply_to_for()` (`supabase/functions/_shared/email.ts`) and each stays
+overridable by its own secret — `EMAIL_REPLY_TO_COLLAB`, `EMAIL_REPLY_TO_HUGS`
+— exactly like `EMAIL_REPLY_TO` for the general mailbox. A lead notification
+still replies to the customer who wrote in; everything else falls back to
+`letsgo@`. **Both mailboxes must exist and be read** — the repo cannot check
+that.
 
 **Sender domain — to be confirmed by the owner.** The site's `mailto:` link
 and the code defaults use `@coachgari28.com`
@@ -438,10 +448,11 @@ title; an enquiry-only product cannot be held). The upload-token block proves th
 expired tokens are refused, re-issuing rotates the token, and PDF, SVG, EXE,
 HTML, octet-stream and MKV are rejected by the RPC, the table constraint and
 the bucket. It also proves booking correctness does not depend on `pg_cron`.
-CI runs `scripts/db-tests.sh` when the `SUPABASE_DB_URL` repository secret
-(session-pooler URI) is set and fails the build otherwise-than-`fail=0`;
-without the secret the job is skipped with a notice. The suite runner also
-runs `cg002_booking` (28), `cg003_payments` (24) and `cg009_crm` (43).
+The suite runner also runs `cg002_booking` (28), `cg003_payments` (24) and
+`cg009_crm` (43).
+
+**These suites are run by hand, not by CI** — see "Continuous integration"
+below for why, and what CI does gate instead.
 
 ## CRM, client profile & progress (CG-009)
 
@@ -539,8 +550,8 @@ Project: `acrjrlgeeyseyolmofuq` (eu-central-1).
    — the script builds the same multi-file bundle (entrypoint + relative
    imports from `_shared/` and `beau-ph/`) the project has always deployed;
    `--list` shows the bundles without deploying, `--changed <ref>` picks only
-   the functions a diff touched. CI runs it on every push to `main` once the
-   `SUPABASE_ACCESS_TOKEN` secret exists (skipped, with a notice, until then).
+   the functions a diff touched. CI runs it on every push to `main`, and on
+   demand — see "Continuous integration" below.
    The function uses `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` that Supabase
    injects automatically — do not set or copy them anywhere.
 3. **Secrets** — set by the operator, never committed:
@@ -673,6 +684,61 @@ Clean-up of the test row: `delete from public.contacts where interest = 'TEST �
 ## Local checks
 
 ```
-npx htmlhint "index.html" "p/**/*.html" "routes/**/*.html"
+npx htmlhint "index.html" "routes/**/*.html"
 node scripts/check-links.mjs
 ```
+
+Every offline suite, the same ones CI runs:
+
+```
+node scripts/test-webhook-signature.mjs   # WEBHOOK_SIGNATURE_TESTS ok=24
+node scripts/test-collab.mjs              # COLLAB_TESTS ok=59
+node scripts/test-url-scrub.mjs           # URL_SCRUB_TESTS ok=21
+node scripts/test-contact-ip.mjs          # CONTACT_IP_TESTS ok=31
+node scripts/test-email.mjs               # EMAIL_TESTS ok=41
+node scripts/test-admin-workspace.mjs     # ADMIN_WORKSPACE_TESTS ok=34   ┐
+node scripts/test-admin-pwa.mjs           # ADMIN_PWA_TESTS ok=18         ├ need Playwright
+node scripts/test-booking-picker.mjs      # BOOKING_PICKER_TESTS ok=41    ┘
+node --experimental-strip-types scripts/test-stripe-embedded.mjs   # STRIPE_EMBEDDED_TESTS ok=42
+```
+
+The three marked suites drive a real browser. They find Playwright in the
+project if it is installed there, otherwise through `npm root -g` — no
+download, no network. Without it they fail loudly rather than skipping.
+
+## Continuous integration
+
+`.github/workflows/ci.yml`, three jobs.
+
+**`static-checks`** — every offline suite listed above, plus HTML lint, the
+link/asset check, and a parse of `config.js`. Runs on every push and pull
+request. It installs Playwright and Chromium itself (pinned, ~20 s), because
+the runner has neither and the repo has no `package.json` to install from.
+
+**`db-boundary-tests`** — runs `scripts/db-tests.sh` **only if** a
+`SUPABASE_DB_URL` secret is set. It is deliberately **not** set: this project
+has one database and it is production, so satisfying that job would mean
+storing a production Postgres password in GitHub Actions — readable by every
+workflow — to automate suites that are already run by hand on every change,
+against the live schema, in rolled-back transactions. The job therefore emits
+a `::warning::` saying the boundaries were not verified here, and passes. It
+does not gate the deploy. Setting the secret (session-pooler URI, IPv4 —
+GitHub runners have no IPv6) starts running them for real with no other
+change. Reasoning in `docs/DECISIONS.md`.
+
+**`deploy-edge-functions`** — `main` only, after `static-checks`, when
+`SUPABASE_ACCESS_TOKEN` is set. On a push it deploys only the functions whose
+bundle contains a changed file. It can also be run from the Actions tab
+(*Run workflow*) with a `functions` input — `all`, or a comma-separated list
+passed to `--only` — for when something changed outside a push: a secret
+added late, or a function deployed by hand that has drifted from the repo.
+
+Repository secrets, both optional, neither committed:
+
+| Secret | Effect when set | When missing |
+|---|---|---|
+| `SUPABASE_ACCESS_TOKEN` | Edge Functions deploy from `main` | job notices and skips |
+| `SUPABASE_DB_URL` | database suites run in CI | job warns and passes |
+
+`SUPABASE_PROJECT_REF` is optional too — the workflow defaults to
+`acrjrlgeeyseyolmofuq`.
