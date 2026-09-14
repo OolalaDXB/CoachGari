@@ -204,10 +204,8 @@ function navModel() {
               { key: 'contacts', label: 'Contacts', show: () => has('client_profile:view'), run: crmContacts } ] },
     { key: 'schedule', label: 'Schedule', icon: '◷', show: () => has('coach:operations'),
       subs: [ { key: 'calendar', label: 'Calendar', show: () => true, run: calendar },
-              { key: 'bookings', label: 'Bookings', show: () => true, run: bookings },
               { key: 'sessions', label: 'Sessions', show: () => true, run: sessionsList },
-              { key: 'availability', label: 'Availability', show: () => true, run: availability },
-              { key: 'exceptions', label: 'Exceptions', show: () => true, run: exceptions },
+              { key: 'hours', label: 'Hours', show: () => true, run: hours },
               { key: 'tours', label: 'Tour stops', show: () => true, run: tours } ] },
     { key: 'collab', label: 'Collaborations', icon: '⇄', show: () => has('collab:view'), run: collabList },
     // Finance = the daily business surface (Transactions first, never the infrastructure).
@@ -280,7 +278,9 @@ function renderAccount(session) {
 // route to a section (and optional sub-tab); keeps the hash in sync
 function go(sectionKey, subKey) {
   // sections that moved keep their old hashes landing: #bookings → Schedule, #services / #access / #beauph → Settings
-  if (sectionKey === 'bookings') { sectionKey = 'schedule'; subKey = 'bookings'; }
+  if (sectionKey === 'bookings') { sectionKey = 'schedule'; subKey = 'sessions'; }
+  if (sectionKey === 'schedule' && subKey === 'bookings') subKey = 'sessions';                       // Bookings folded into Sessions
+  if (sectionKey === 'schedule' && (subKey === 'availability' || subKey === 'exceptions')) subKey = 'hours';   // both folded into Hours
   if (sectionKey === 'services') { sectionKey = 'settings'; subKey = 'services'; }
   if (sectionKey === 'access') { sectionKey = 'settings'; subKey = 'access'; }
   if (sectionKey === 'beauph') { sectionKey = 'settings'; subKey = subKey === 'fx' ? 'fx' : 'rails'; }
@@ -558,7 +558,7 @@ async function overview() {
         ${online && s.meeting_url ? `<a class="btn btn-line btn-sm" href="${esc(s.meeting_url)}" target="_blank" rel="noopener">Join</a>` : (!online && (s.location_name || s.location_address) ? `<a class="btn btn-line btn-sm" href="${ml.gmaps}" target="_blank" rel="noopener">Directions</a>` : '')}</div></div>`;
   };
   const kpis = [];
-  if (o) kpis.push(['New leads · 7 days', o.new_leads_7d, () => go('crm', 'dashboard')], ["Today's sessions", o.today_sessions, () => go('schedule')], ['Upcoming bookings', o.upcoming_bookings, () => go('schedule', 'bookings')]);
+  if (o) kpis.push(['New leads · 7 days', o.new_leads_7d, () => go('crm', 'dashboard')], ["Today's sessions", o.today_sessions, () => go('schedule')], ['Upcoming bookings', o.upcoming_bookings, () => go('schedule', 'sessions')]);
   if (f) kpis.push(['Orders awaiting payment', f.pending_payment_orders, () => go('finance', 'transactions')], ['Unsettled Gari payable', money(f.unsettled_payable), () => go('finance', 'commissions')]);
   if (c) kpis.push(['Contacts', c.total_contacts, () => { view.dataset.cReview = ''; go('crm', 'contacts'); }], ['Flagged for review', c.needs_review, () => { view.dataset.cReview = '1'; go('crm', 'contacts'); }]);
 
@@ -602,7 +602,7 @@ async function overview() {
     <div class="ad-head"><div><h1>${hello}</h1><p class="ad-muted">${esc(today)} · ${esc(tz)}</p></div></div>
     ${upcoming.length ? `<div class="ov-nextwrap"><div class="ov-lbl">Next session${upcoming.length > 1 ? 's' : ''}</div>
       <div class="ov-nextrow">${upcoming.map(nextCard).join('')}</div></div>` : ''}
-    ${has('coach:operations') ? `<div class="ad-panel"><div class="ov-chart-head"><div class="ov-lbl">Upcoming bookings${nextBookings.length ? ` (${nextBookings.length})` : ''}</div><div class="cg-actions"><button class="btn btn-line btn-xs" id="ov-bk">All bookings</button><button class="btn btn-line btn-xs" id="ov-cal">Calendar</button></div></div>
+    ${has('coach:operations') ? `<div class="ad-panel"><div class="ov-chart-head"><div class="ov-lbl">Upcoming bookings${nextBookings.length ? ` (${nextBookings.length})` : ''}</div><div class="cg-actions"><button class="btn btn-line btn-xs" id="ov-bk">All sessions</button><button class="btn btn-line btn-xs" id="ov-cal">Calendar</button></div></div>
       ${nextBookings.length ? table(['Time', 'Session', 'Client', 'Ref · status', 'Price'], nextBookings.map((b) => bookingRow(b, tz, false)), '') : '<p class="ad-empty">No booking ahead.</p>'}</div>` : ''}
     ${crmLine}
     ${revenueHtml || pipelineHtml ? `<div class="ad-grid2 ov-charts">${revenueHtml}${pipelineHtml}</div>` : ''}
@@ -613,7 +613,7 @@ async function overview() {
   view.querySelectorAll('.ov-next').forEach((el) => { const openBtn = el.querySelector('[data-open]'); const go2 = () => openSession(el.dataset.sess); el.onclick = go2; if (openBtn) openBtn.onclick = (e) => { e.stopPropagation(); go2(); }; el.querySelectorAll('a').forEach((a) => a.onclick = (e) => e.stopPropagation()); });
   const on = (id, fn) => { const el = $('#' + id); if (el) el.onclick = fn; };
   on('ov-crm', () => go('crm', 'dashboard')); on('ov-crm2', () => go('crm', 'dashboard'));
-  on('ov-bk', () => go('schedule', 'bookings')); on('ov-cal', () => go('schedule', 'calendar'));
+  on('ov-bk', () => go('schedule', 'sessions')); on('ov-cal', () => go('schedule', 'calendar'));
   on('ov-fin', () => go('finance', 'transactions'));
   if (revSeries.length) wireChart('ov-rev', revLabels, revSeries, revSeries._fmt);
   if (pipeSeries.length) wireChart('ov-pipe', pipeLabels, pipeSeries, (v) => String(v));
@@ -653,7 +653,7 @@ function bindBookingActions() {
     const { error } = await sb.rpc('ops_set_booking_status', { p_reference: ref, p_status: act, p_reason: reason || null });
     if (error) return fail(error);
     toast(`${ref} → ${act.replace('_', ' ')}${act === 'cancelled' && reason !== null ? '. Refunds, if any, are handled by Oolala.' : ''}`);
-    bookings().catch(fail);
+    sessionsList().catch(fail);
   });
   // "Price & package": jump to the client's Sessions tab to build a priced hours package and issue a pay link
   view.querySelectorAll('[data-pack-crm]').forEach((btn) => btn.onclick = () => openProfile(btn.dataset.packCrm, null, 'sessions'));
@@ -1081,45 +1081,41 @@ async function packForm(contactId, onCreated) {
 
 /* ---- Sessions list sub-tab ---- */
 async function sessionsList() {
-  const q = view.dataset.slQ || ''; const status = view.dataset.slStatus || ''; const mode = view.dataset.slMode || '';
-  const { data, error } = await sb.rpc('sessions_list', { p: { q: q || null, status: status || null, delivery_mode: mode || null } }); if (error) throw error;
-  const rows = data || [];
+  const q = view.dataset.slQ || ''; const status = view.dataset.slStatus || ''; const mode = view.dataset.slMode || ''; const origin = view.dataset.slOrigin || '';
+  const tz = view.dataset.tz || 'Asia/Dubai';
+  // one list of the time: coaching sessions (a confirmed website booking IS a session), plus the
+  // website bookings that have not become one yet — a hold or an unpaid booking — shown on top with their actions
+  const [{ data, error }, pR] = await Promise.all([
+    sb.rpc('sessions_list', { p: { q: q || null, status: status || null, delivery_mode: mode || null, origin: origin || null } }),
+    sb.from('bookings').select(BOOKING_COLS).in('status', ['hold', 'pending_payment']).order('start_at', { ascending: true }).limit(50),
+  ]); if (error) throw error;
+  const rows = data || [], pending = pR.data || [];
   const opts = ['scheduled', 'completed', 'cancelled', 'no_show'];
+  const payChip = (b) => !b ? '—' : `${b.price_amount == null ? 'on request' : esc(money(b.price_amount, b.currency))}<br>${st(b.status)}`;
   view.innerHTML = `
-    <div class="ad-head"><div><h1>Sessions</h1><p class="ad-muted">Search and history across all coaching sessions.</p></div>
-      <div class="ad-filters"><input id="sl-q" placeholder="Client or title…" value="${esc(q)}">
+    <div class="ad-head"><div><h1>Sessions</h1><p class="ad-muted">Every session — booked on the site or entered here — with its payment. Click a row to open it.</p></div>
+      <div class="ad-filters"><input id="sl-q" placeholder="Client, title or reference…" value="${esc(q)}">
+        <select id="sl-origin"><option value="">All origins</option><option value="site" ${origin==='site'?'selected':''}>Booked on the site</option><option value="manual" ${origin==='manual'?'selected':''}>Entered by the coach</option></select>
         <select id="sl-status"><option value="">All statuses</option>${opts.map((o) => `<option value="${o}" ${o === status ? 'selected' : ''}>${o.replace('_',' ')}</option>`).join('')}</select>
         <select id="sl-mode"><option value="">All modes</option><option value="in_person" ${mode==='in_person'?'selected':''}>In person</option><option value="online" ${mode==='online'?'selected':''}>Online</option></select></div></div>
-    <div class="ad-panel">${table(['Date', 'Time', 'Client', 'Type', 'Package', 'Status'], rows.map((s) => {
-      const t = lp(s.start_at), e = lp(s.end_at);
+    ${pending.length ? `<div class="ad-panel"><div class="ov-lbl">Site bookings not confirmed yet (${pending.length})</div><p class="ad-muted" style="font-size:13px;margin:0 0 8px">A hold or an unpaid booking. It becomes a session once confirmed.</p>
+      ${table(['Time', 'Session', 'Client', 'Ref · status', 'Price', ''], pending.map((b) => bookingRow(b, tz)), '')}</div>` : ''}
+    <div class="ad-panel">${table(['Date', 'Time', 'Client', 'Type', 'Origin', 'Package', 'Payment', 'Status'], rows.map((s) => {
+      const t = lp(s.start_at), e = lp(s.end_at); const b = s.booking;
       return `<tr class="clik" data-sess="${s.id}"><td>${prettyDay(t.date)}</td><td>${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}–${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')}</td>
         <td><b>${esc(s.client_name || '—')}</b></td><td>${esc(s.title || '—')} · ${s.delivery_mode === 'online' ? 'online' : 'in person'}</td>
-        <td>${s.pack ? `${s.pack.used}/${s.pack.total_sessions}` : '—'}</td><td>${st(s.status)}</td></tr>`;
+        <td>${b ? `Site<br><span class="ad-muted" style="font-size:12px">${esc(b.reference)}</span>` : '<span class="ad-muted">Coach</span>'}</td>
+        <td>${s.pack ? `${s.pack.used}/${s.pack.total_sessions}` : '—'}</td><td>${payChip(b)}</td><td>${st(s.status)}</td></tr>`;
     }), 'No sessions match.')}</div>`;
   $('#sl-q').onchange = (e) => { view.dataset.slQ = e.target.value.trim(); sessionsList().catch(fail); };
+  $('#sl-origin').onchange = (e) => { view.dataset.slOrigin = e.target.value; sessionsList().catch(fail); };
   $('#sl-status').onchange = (e) => { view.dataset.slStatus = e.target.value; sessionsList().catch(fail); };
   $('#sl-mode').onchange = (e) => { view.dataset.slMode = e.target.value; sessionsList().catch(fail); };
   view.querySelectorAll('tr.clik').forEach((tr) => tr.onclick = async () => { await calPreloadFor(tr.dataset.sess); openSession(tr.dataset.sess); });
+  bindBookingActions();
 }
 // the Sessions list isn't a calendar range, so seed calData so openSession's summary lookups work
 async function calPreloadFor(id) { if (!calData.sessions.find((x) => x.id === id)) calData.sessions = []; }
-
-async function bookings() {
-  const tz = view.dataset.tz || 'Asia/Dubai'; const status = view.dataset.bkStatus || ''; const search = view.dataset.bkSearch || '';
-  let q = sb.from('bookings').select(BOOKING_COLS).order('start_at', { ascending: false }).limit(200);
-  if (status) q = q.eq('status', status);
-  if (search) q = q.or(`reference.ilike.%${search}%,customer_name.ilike.%${search}%,customer_contact.ilike.%${search}%`);
-  const { data, error } = await q; if (error) throw error;
-  const opts = ['hold', 'pending_payment', 'confirmed', 'completed', 'no_show', 'cancelled', 'expired'];
-  view.innerHTML = `
-    <div class="ad-head"><div><h1>Bookings</h1><p class="ad-muted">Every booking, newest session first.</p></div>
-      <div class="ad-filters"><input id="bk-search" placeholder="Reference, name or contact" value="${esc(search)}"><select id="bk-status"><option value="">All statuses</option>${opts.map((o) => `<option value="${o}" ${o === status ? 'selected' : ''}>${o.replace('_', ' ')}</option>`).join('')}</select>${tzSelect('tz', tz)}</div></div>
-    <div class="ad-panel">${table(['Time', 'Session', 'Client', 'Ref · status', 'Price', ''], data.map((b) => bookingRow(b, tz)), 'No bookings match.')}</div>`;
-  $('#bk-status').onchange = (e) => { view.dataset.bkStatus = e.target.value; bookings().catch(fail); };
-  $('#bk-search').onchange = (e) => { view.dataset.bkSearch = e.target.value.trim(); bookings().catch(fail); };
-  $('select[name=tz]', view).onchange = (e) => { view.dataset.tz = e.target.value; bookings().catch(fail); };
-  bindBookingActions();
-}
 
 /* =============================== AVAILABILITY RULES =============================== */
 // Days off, Outlook-style: a grid of the next weeks; one click blocks a whole day (a closed
@@ -1143,19 +1139,18 @@ function dayOffGrid(exceptions) {
   }
   return `<div class="doff-head">${DOW_SHORT.map((x) => `<span>${x}</span>`).join('')}</div><div class="doff-grid">${cells.join('')}</div>`;
 }
-async function availability() {
+async function availability(root = view) {
   const from = new Date(Date.now() - 8 * 864e5).toISOString();
   const [{ data, error }, exR] = await Promise.all([
     sb.from('availability_rules').select('id,weekday,start_time,end_time,timezone,service_ids,valid_from,valid_to,active,notes,created_at').order('weekday').order('start_time'),
     sb.from('availability_exceptions').select('id,kind,start_at,end_at,timezone,reason,active').eq('kind', 'closed').gte('end_at', from).order('start_at'),
   ]); if (error) throw error;
   const editing = view.dataset.editRule ? data.find((r) => r.id === view.dataset.editRule) : null;
-  view.innerHTML = `
-    <div class="ad-head"><div><h1>Availability</h1><p class="ad-muted">Weekly hours the booking engine offers. Slots follow each service's duration. Closed exceptions punch holes in these.</p></div></div>
-    <div class="ad-panel"><div class="ov-chart-head"><div><h2 style="margin:0">Days off</h2><p class="ad-muted" style="font-size:13px;margin:2px 0 0">Click a day to block it entirely (${DAYOFF_TZ}); click again to free it. Part of a day → an exception below.</p></div></div>
+  root.innerHTML = `
+    <div class="ad-panel"><div class="ov-chart-head"><div><h2 style="margin:0">Days off</h2><p class="ad-muted" style="font-size:13px;margin:2px 0 0">Click a day to block it entirely (${DAYOFF_TZ}); click again to free it. Part of a day, or extra hours → an exception, further down.</p></div></div>
       ${dayOffGrid(exR.data || [])}</div>
     <div class="ad-grid2">
-      <div class="ad-panel">${table(['Day', 'Hours', 'Zone', 'Services', 'Valid', 'Active', ''], data.map((r) => `<tr>
+      <div class="ad-panel"><h2>Weekly hours</h2><p class="ad-muted" style="font-size:13px;margin:-6px 0 10px">What the booking engine offers; slots follow each service's duration.</p>${table(['Day', 'Hours', 'Zone', 'Services', 'Valid', 'Active', ''], data.map((r) => `<tr>
         <td><b>${WEEKDAYS[r.weekday]}</b></td><td>${esc(r.start_time.slice(0, 5))}–${esc(r.end_time.slice(0, 5))}</td><td>${esc(r.timezone)}</td>
         <td>${r.service_ids?.length ? r.service_ids.map(svcTitle).map(esc).join('<br>') : 'all'}</td>
         <td>${r.valid_from || r.valid_to ? `${r.valid_from || '…'} → ${r.valid_to || '…'}` : 'always'}</td>
@@ -1174,51 +1169,50 @@ async function availability() {
           <label>Notes <input name="notes" value="${esc(editing?.notes || '')}"></label>
           <div class="actions"><button class="btn btn-accent btn-sm" type="submit">${editing ? 'Save' : 'Add'}</button>${editing ? '<button class="btn btn-line btn-sm" type="button" data-cancel-edit>Cancel</button>' : ''}</div>
         </form></div></div>`;
-  view.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => { view.dataset.editRule = b.dataset.edit; availability().catch(fail); });
-  view.querySelectorAll('.doff:not([disabled])').forEach((b) => b.onclick = async () => {
+  root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => { view.dataset.editRule = b.dataset.edit; availability(root).catch(fail); });
+  root.querySelectorAll('.doff:not([disabled])').forEach((b) => b.onclick = async () => {
     const day = b.dataset.day;
     if (b.dataset.ex) {
-      if (b.dataset.mine !== '1') return toast('This day is blocked by a hand-written exception — edit it in Exceptions', true);
+      if (b.dataset.mine !== '1') return toast('This day is blocked by a hand-written exception — edit it in the exceptions below', true);
       const { error: e1 } = await sb.from('availability_exceptions').delete().eq('id', b.dataset.ex); if (e1) return fail(e1);
       toast(`${prettyDay(day)} is open again`);
     } else {
       const { error: e1 } = await sb.from('availability_exceptions').insert({ kind: 'closed', timezone: DAYOFF_TZ, start_at: zonedToUtc(day + 'T00:00', DAYOFF_TZ), end_at: zonedToUtc(new Date(Date.parse(day + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10) + 'T00:00', DAYOFF_TZ), reason: DAYOFF_REASON, service_ids: null, active: true }); if (e1) return fail(e1);
       toast(`${prettyDay(day)} blocked`);
     }
-    availability().catch(fail);
+    availability(root).catch(fail);
   });
-  const b247 = $('#rule-247'); if (b247) b247.onclick = async () => {
+  const b247 = root.querySelector('#rule-247'); if (b247) b247.onclick = async () => {
     if (!(await confirmAct('Replace every weekly rule with 00:00–24:00, seven days (Asia/Dubai)? Exceptions and bookings are untouched.'))) return;
     const { error: e1 } = await sb.from('availability_rules').delete().not('id', 'is', null); if (e1) return fail(e1);
     const rows = [1, 2, 3, 4, 5, 6, 7].map((w) => ({ weekday: w, start_time: '00:00', end_time: '24:00', timezone: 'Asia/Dubai', service_ids: null, notes: 'Around the clock — set from the back-office' }));
     const { error: e2 } = await sb.from('availability_rules').insert(rows); if (e2) return fail(e2);
-    toast('Available 24/7'); availability().catch(fail);
+    toast('Available 24/7'); availability(root).catch(fail);
   };
-  view.querySelector('[data-cancel-edit]')?.addEventListener('click', () => { delete view.dataset.editRule; availability().catch(fail); });
-  view.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = async () => { const { error } = await sb.from('availability_rules').update({ active: b.dataset.to === 'true' }).eq('id', b.dataset.toggle); if (error) return fail(error); toast('Saved'); availability().catch(fail); });
-  view.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (!(await confirmAct('Delete this rule? Existing bookings are not affected.'))) return; const { error } = await sb.from('availability_rules').delete().eq('id', b.dataset.del); if (error) return fail(error); toast('Deleted'); availability().catch(fail); });
-  $('#rule-form').onsubmit = async (e) => {
+  root.querySelector('[data-cancel-edit]')?.addEventListener('click', () => { delete view.dataset.editRule; availability(root).catch(fail); });
+  root.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = async () => { const { error } = await sb.from('availability_rules').update({ active: b.dataset.to === 'true' }).eq('id', b.dataset.toggle); if (error) return fail(error); toast('Saved'); availability(root).catch(fail); });
+  root.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (!(await confirmAct('Delete this rule? Existing bookings are not affected.'))) return; const { error } = await sb.from('availability_rules').delete().eq('id', b.dataset.del); if (error) return fail(error); toast('Deleted'); availability(root).catch(fail); });
+  root.querySelector('#rule-form').onsubmit = async (e) => {
     e.preventDefault(); const f = new FormData(e.target);
     const ids = f.getAll('service_ids');
     const row = { weekday: +f.get('weekday'), start_time: f.get('start_time'), end_time: f.get('end_time'), timezone: f.get('timezone'), valid_from: f.get('valid_from') || null, valid_to: f.get('valid_to') || null, service_ids: ids.length ? ids : null, notes: f.get('notes') || null };
     if (row.end_time <= row.start_time) return toast('End must be after start', true);
     const { error } = editing ? await sb.from('availability_rules').update(row).eq('id', editing.id) : await sb.from('availability_rules').insert(row);
-    if (error) return fail(error); toast('Saved'); delete view.dataset.editRule; availability().catch(fail);
+    if (error) return fail(error); toast('Saved'); delete view.dataset.editRule; availability(root).catch(fail);
   };
 }
 
 /* =============================== EXCEPTIONS =============================== */
-async function exceptions() {
+async function exceptions(root = view) {
   const [{ data, error }, { data: stops }] = await Promise.all([
     sb.from('availability_exceptions').select('id,kind,start_at,end_at,timezone,reason,service_ids,tour_stop_id,active,tour_stops(city,slug)').gte('end_at', new Date(Date.now() - 7 * 864e5).toISOString()).order('start_at'),
     sb.from('tour_stops').select('id,slug,city,status').order('start_at'),
   ]); if (error) throw error;
   const editing = view.dataset.editExc ? data.find((r) => r.id === view.dataset.editExc) : null;
   const tz = editing?.timezone || 'Asia/Dubai';
-  view.innerHTML = `
-    <div class="ad-head"><div><h1>Exceptions</h1><p class="ad-muted"><b>Closed</b> blocks time (holiday, travel, a day off). <b>Open</b> adds bookable time outside your weekly hours — link it to a tour stop to make it a tour window.</p></div></div>
+  root.innerHTML = `
     <div class="ad-grid2">
-      <div class="ad-panel">${table(['Kind', 'From', 'To', 'Zone', 'Reason', 'Tour stop', ''], data.map((r) => `<tr>
+      <div class="ad-panel"><h2>Exceptions</h2><p class="ad-muted" style="font-size:13px;margin:-6px 0 10px"><b>Closed</b> blocks time (part of a day, travel). <b>Open</b> adds bookable time outside the weekly hours — link it to a tour stop to make it a tour window.</p>${table(['Kind', 'From', 'To', 'Zone', 'Reason', 'Tour stop', ''], data.map((r) => `<tr>
         <td>${st(r.kind)}${r.active ? '' : ' ' + st('cancelled')}</td><td>${fmt(r.start_at, r.timezone)}</td><td>${fmt(r.end_at, r.timezone)}</td><td>${esc(r.timezone)}</td>
         <td>${esc(r.reason || '')}${r.service_ids?.length ? `<div class="msg">${r.service_ids.map(svcTitle).map(esc).join(', ')}</div>` : ''}</td>
         <td>${r.tour_stops ? esc(r.tour_stops.city) : '—'}</td>
@@ -1233,16 +1227,24 @@ async function exceptions() {
           <label>Services (none = all)<div style="display:grid;gap:6px">${serviceChecks('service_ids', editing?.service_ids || [])}</div></label>
           <div class="actions"><button class="btn btn-accent btn-sm" type="submit">${editing ? 'Save' : 'Add'}</button>${editing ? '<button class="btn btn-line btn-sm" type="button" data-cancel-edit>Cancel</button>' : ''}</div>
         </form><p class="ad-note">Times are entered in the chosen timezone and stored in UTC.</p></div></div>`;
-  view.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => { view.dataset.editExc = b.dataset.edit; exceptions().catch(fail); });
-  view.querySelector('[data-cancel-edit]')?.addEventListener('click', () => { delete view.dataset.editExc; exceptions().catch(fail); });
-  view.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (!(await confirmAct('Delete this exception?'))) return; const { error } = await sb.from('availability_exceptions').delete().eq('id', b.dataset.del); if (error) return fail(error); toast('Deleted'); exceptions().catch(fail); });
-  $('#exc-form').onsubmit = async (e) => {
+  root.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => { view.dataset.editExc = b.dataset.edit; exceptions(root).catch(fail); });
+  root.querySelector('[data-cancel-edit]')?.addEventListener('click', () => { delete view.dataset.editExc; exceptions(root).catch(fail); });
+  root.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (!(await confirmAct('Delete this exception?'))) return; const { error } = await sb.from('availability_exceptions').delete().eq('id', b.dataset.del); if (error) return fail(error); toast('Deleted'); exceptions(root).catch(fail); });
+  root.querySelector('#exc-form').onsubmit = async (e) => {
     e.preventDefault(); const f = new FormData(e.target); const z = f.get('timezone'); const ids = f.getAll('service_ids');
     const row = { kind: f.get('kind'), timezone: z, start_at: zonedToUtc(f.get('start'), z), end_at: zonedToUtc(f.get('end'), z), reason: f.get('reason') || null, tour_stop_id: f.get('kind') === 'open' ? (f.get('tour_stop_id') || null) : null, service_ids: ids.length ? ids : null, active: true };
     if (row.end_at <= row.start_at) return toast('End must be after start', true);
     const { error } = editing ? await sb.from('availability_exceptions').update(row).eq('id', editing.id) : await sb.from('availability_exceptions').insert(row);
-    if (error) return fail(error); toast('Saved'); delete view.dataset.editExc; exceptions().catch(fail);
+    if (error) return fail(error); toast('Saved'); delete view.dataset.editExc; exceptions(root).catch(fail);
   };
+}
+
+/* =============================== HOURS (days off · weekly hours · exceptions) =============================== */
+async function hours() {
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Hours</h1><p class="ad-muted">When Gari can be booked: block whole days in one click, set the weekly hours, add exceptions for the rest.</p></div></div>
+    <div id="hours-av"></div><div id="hours-ex"></div>`;
+  await Promise.all([availability($('#hours-av')), exceptions($('#hours-ex'))]);
 }
 
 /* =============================== TOUR STOPS =============================== */

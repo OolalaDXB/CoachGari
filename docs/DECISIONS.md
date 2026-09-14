@@ -5,6 +5,27 @@ documented but deliberately **not** implemented. Newest sprint first.
 
 ---
 
+## Schedule — four tabs, not six (2026-09-14)
+
+Owner's review: "voir ce que nous pourrions simplifier". Schedule had
+Calendar · Bookings · Sessions · Availability · Exceptions · Tour stops.
+
+- **Sessions absorbs Bookings.** A confirmed website booking *is* a session
+  (`coaching_sessions.booking_id`), so two lists showed the same hour with
+  two vocabularies. `sessions_list` (`20261039`) now returns each session's
+  booking — reference, status, price — plus an `origin` filter; the list
+  shows Origin (Site · ref / Coach) and Payment. Site bookings that are not
+  sessions yet (a hold, an unpaid booking) sit in a panel on top with their
+  actions, so nothing that needed a click is lost. The standalone Bookings
+  view is deleted; `#bookings` and `#schedule/bookings` alias to Sessions.
+- **Hours absorbs Availability and Exceptions.** Both answered "when can
+  Gari be booked": days off in one click, weekly rules, exceptions — one
+  screen, top to bottom. The two renderers now take a root element instead
+  of owning the view; `#schedule/availability` / `exceptions` alias to Hours.
+- No table, RPC or permission changed beyond the `sessions_list` join.
+
+---
+
 ## Overview — a cockpit with two charts; Bookings under Schedule (2026-09-14)
 
 The owner: "trop d'overview" (the word appeared three times on one screen),

@@ -350,8 +350,12 @@ the page; the page never writes permissions directly. Navigation:
 Settings**. Settings holds what is configured once — Services (catalogue),
 Access, and the BEAU PH payment infrastructure as Payment rails + FX — each
 tab on its own permission; the old `#services`, `#access` and `#beauph`
-hashes still land there. Schedule merges the four time-management domains
-(Calendar, Weekly availability, Exceptions, Tour stops) as sub-tabs; Clients (the CRM — section key `crm`) has
+hashes still land there. Schedule has four tabs — **Calendar**, **Sessions**
+(one list of the time: sessions booked on the site and sessions entered by
+the coach, with origin and payment; unconfirmed site bookings sit on top
+with their actions), **Hours** (days off in one click, weekly hours,
+exceptions) and Tour stops; the old `#schedule/bookings`, `availability` and
+`exceptions` hashes alias into Sessions / Hours; Clients (the CRM — section key `crm`) has
 Dashboard (default) + Leads + Contacts; Finance has Transactions (default) + Payment methods; BEAU PH
 has Rails + FX (the embedded payment hub's operator workspace, see
 `beau-ph/docs/`). Both launch users — Gari (`grej28roux@gmail.com`) and Mickaël
@@ -361,7 +365,7 @@ magic-link sign-in.
 
 | Permission | What it unlocks in `/admin` |
 |---|---|
-| `coach:operations` | CRM › Leads (enquiries, clickable to the client popup), Schedule (Calendar / Bookings / Sessions / Availability / Exceptions / Tour stops); the Enquiries / Bookings / Media / Attribution sections of a client profile |
+| `coach:operations` | CRM › Leads (enquiries, clickable to the client popup), Schedule (Calendar / Sessions / Hours / Tour stops); the Enquiries / Bookings / Media / Attribution sections of a client profile |
 | `client_profile:view` | CRM › Contacts (canonical people with enquiry/booking counts) and the profile Overview / Notes |
 | `client_profile:manage` | Edit a canonical profile, create a contact, add / edit internal notes (all through audited RPCs) |
 | `health_metrics:view` | The Progress section of a profile: weight, BMI, body-fat, muscle history |
@@ -525,8 +529,10 @@ to it through a back-filled `crm_contact_id`.
   'self'`): ≤ 24px columns, 4px caps, hairline grid, a legend for ≥ 2 series,
   hover tooltip per column, values in text tokens; the blue / orange / green
   triple passes the six colour checks. **Bookings moved under Schedule** as a
-  list view of the same time (Calendar · Bookings · Sessions · …); the old
-  `#bookings` link and the push notification deep links still land there.
+  list view of the same time; since folded into **Sessions** (`20261039`:
+  `sessions_list` returns each session's booking — reference, status, price
+  — and filters by origin); the old `#bookings` link and the push deep links
+  land on Sessions.
   **Delete** (`lead_delete`, `coach:operations`) removes the enquiry for good:
   the row, its attachment rows by cascade, and the files through the Storage
   API (SQL cannot delete `storage.objects`; a scoped delete policy on the
