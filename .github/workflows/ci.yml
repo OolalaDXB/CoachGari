@@ -4,6 +4,16 @@ on:
   push:
     branches: [main, "claude/**"]
   pull_request:
+  # Deploying only what a push touched is right for ordinary work, but it leaves no way to
+  # redeploy after something changed outside a push — a secret arriving late, a function
+  # deployed by hand that has drifted from the repo. This gives one.
+  workflow_dispatch:
+    inputs:
+      functions:
+        description: 'Edge Functions to deploy: a comma-separated list, or "all"'
+        required: true
+        default: all
+        type: string
 
 jobs:
   static-checks:
@@ -87,7 +97,7 @@ jobs:
   # SUPABASE_ACCESS_TOKEN secret is set; only the functions whose bundle
   # contains a changed file are redeployed. Never on pull requests or branches.
   deploy-edge-functions:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [static-checks]   # the offline suites gate production; the DB suites are run by hand (see above)
     runs-on: ubuntu-latest
     env:
@@ -104,5 +114,13 @@ jobs:
         if: env.SUPABASE_ACCESS_TOKEN == ''
         run: echo "::notice::SUPABASE_ACCESS_TOKEN not set — Edge Functions are not deployed automatically. Add the secret to enable it."
       - name: Deploy the functions touched by this push
-        if: env.SUPABASE_ACCESS_TOKEN != ''
+        if: env.SUPABASE_ACCESS_TOKEN != '' && github.event_name == 'push'
         run: node scripts/deploy-functions.mjs --changed "${{ github.event.before }}"
+      - name: Deploy on request
+        if: env.SUPABASE_ACCESS_TOKEN != '' && github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ inputs.functions }}" = "all" ]; then
+            node scripts/deploy-functions.mjs
+          else
+            node scripts/deploy-functions.mjs --only "${{ inputs.functions }}"
+          fi
