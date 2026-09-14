@@ -82,7 +82,7 @@ export const CONFIG = {
   SUPABASE_URL: 'https://acrjrlgeeyseyolmofuq.supabase.co',   // back-office
   SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_…',               // public by design; RLS protects every row
   STUDIO_URL: 'https://thestudio.mt',    // "Studio MT" footer credit
-  SOCIAL_URL: 'https://myoolala.com/u/coachgari',
+  SOCIAL_URL: 'https://myoolala.com/u/coachgari28',
   COMMISSION_RATE: '10%',                // shown in the proposal
   PLAUSIBLE_SCRIPT: 'https://plausible.io/js/pa--….js',   // '' = analytics off; the site's script URL from Plausible
 };
@@ -705,6 +705,54 @@ node --experimental-strip-types scripts/test-stripe-embedded.mjs   # STRIPE_EMBE
 The three marked suites drive a real browser. They find Playwright in the
 project if it is installed there, otherwise through `npm root -g` — no
 download, no network. Without it they fail loudly rather than skipping.
+
+## Push notifications for the back-office (CG-017)
+
+A buzz on the phone when an enquiry, a booking, a payment or a collaboration comes
+in. Offered from the back-office itself, to someone already signed in with access —
+the browser shows the permission prompt once and remembers the answer, so it is
+never spent on whoever loads the URL.
+
+**A notification carries a kind, never a row.** `push_events` has no payload column
+at all; the Edge Function turns the kind into a fixed sentence — "New booking",
+"Payment received", "New enquiry". A notification lands on a lock screen, which is
+not a private place, and the service worker already makes a point of keeping no
+data on the device. Tapping one opens `/admin/`, which asks for a session as
+usual: the notification carries no access of its own.
+
+**One hook, not a dozen.** A trigger on `email_events` queues a push whenever a row
+is addressed to `email_owner_address()`. Every owner-facing event, present and
+future, reaches the phone without a second wiring to remember.
+
+| Piece | Where |
+|---|---|
+| Sender: VAPID (RFC 8292) + aes128gcm (RFC 8188/8291), Web Crypto only | `supabase/functions/_shared/webpush.ts` |
+| Drain + status, keyed like the email outbox | `supabase/functions/push/index.ts` |
+| Subscriptions, outbox, trigger, RLS | `supabase/migrations/20261033_cg_push_notifications.sql` |
+| `push` / `notificationclick` handlers | `admin/sw.js` |
+| Banner, permission request, subscribe | `admin/admin.js` (`offerNotifications`) |
+
+**Keys.** The VAPID private key and the drain key live in Supabase Vault
+(`push_vapid_private`, `outbox_push_key`); `public.outbox_keys` keeps only a
+SHA-256 and authorisation compares in constant time, the shape 20261018 set for
+the email drain. Only the public half sits in a table, because the browser needs
+it to subscribe. Rotating either is a Vault update plus the matching hash.
+
+```
+node --experimental-strip-types scripts/test-push.mjs   # PUSH_TESTS ok=22 — encryption round-trip, VAPID
+psql "$DATABASE_URL" -f supabase/tests/cg017_push.sql   # CG017_TESTS ok=25 — boundaries, queue, rolls back
+```
+
+The offline suite plays the browser: it generates a subscription keypair, has the
+sender encrypt to it, decrypts with the private half and compares, and checks
+another browser's keys cannot read the same record. If any of the five key
+derivation steps were wrong the decryption would fail and the suite would go red.
+
+**Installing the back-office** is offered by the same banner, under the same gate.
+On Android Chrome it is a button; on iOS there is no such browser event, so it
+shows Safari's Share → Add to Home Screen instruction instead. iOS also only
+delivers push to a site added to the Home Screen, so the notifications banner
+waits until the app is installed there.
 
 ## Continuous integration
 

@@ -2197,3 +2197,35 @@ the PWA shell, the booking picker, and the Stripe signature and embedded-checkou
 contracts. The database boundaries are covered by the suites in
 `supabase/tests/`, run manually — `scripts/db-tests.sh` with a `DATABASE_URL`, or
 one at a time through the Supabase MCP.
+
+## Push notifications carry a kind, never a row (14/09/2026)
+
+The back-office can now buzz a phone when an enquiry, a booking, a payment or a
+collaboration comes in. Two decisions shaped it.
+
+**What a notification says.** A push payload is encrypted end to end — the push
+service relays bytes it cannot read — but it still lands on a lock screen, which
+is not a private place. So `push_events` has no payload column at all: it stores
+a kind, and the Edge Function turns that kind into a fixed sentence chosen in the
+code. "New booking", never "New booking from Sarah". This follows the line the
+service worker already took in not caching a single row of data on the device: a
+lost or lent phone gives up nothing, and no coaching note has to be reasoned
+about under GDPR because none is there.
+
+**What triggers one.** Rather than queue a push at each of a dozen call sites, a
+trigger on `email_events` queues one whenever a row is addressed to the owner.
+Every owner-facing event, present and future, reaches the phone without a second
+wiring to remember — and the rule is legible: if the owner gets an email about
+it, the owner's phone can buzz about it.
+
+Two smaller notes. The sender is written against Web Crypto rather than an npm
+package: the two Node libraries that do this reach for `node:crypto` and
+`node:https`, and VAPID plus aes128gcm is small enough to own and test. The test
+suite plays the browser — it decrypts what the sender produced and compares — so
+the crypto is proven rather than trusted.
+
+And the first draft of the migration put the VAPID private key and the drain key
+in a table. The database refused it: the clear `key` column it wanted no longer
+exists, because 20261018 moved that secret to Vault and left only a hash behind.
+The hardening caught a regression written by someone who had read the original
+migration and not its successor.
