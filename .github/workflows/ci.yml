@@ -34,6 +34,12 @@ jobs:
         run: node scripts/test-contact-ip.mjs
       - name: Transactional email rendering and outbox drain (offline)
         run: node --experimental-strip-types scripts/test-email.mjs
+      # The three suites below drive a real browser. The runner ships neither Playwright nor
+      # a browser, and the repo has no package.json to install from, so both are installed
+      # here explicitly. If this step fails the job fails: a browser suite that cannot run
+      # must not look like a browser suite that passed.
+      - name: Install Playwright and Chromium
+        run: npm install -g playwright@1.56.1 && playwright install --with-deps chromium
       - name: Back-office workspace — RPC surface and secret hygiene (offline)
         run: node scripts/test-admin-workspace.mjs
       - name: Back-office PWA shell (offline)
