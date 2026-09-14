@@ -574,6 +574,12 @@ async function overview() {
   const [chR, uR, lR, bR] = await Promise.all(jobs);
   charts = chR.data || {};
   if (uR) { upcoming = uR.data || []; newLeads = lR.count || 0; nextBookings = bR.data || []; }
+  // what already happened and nobody closed: the daily gesture, not a list to browse
+  let toClose = [];
+  if (has('coach:operations')) {
+    const { data: tc } = await sb.rpc('sessions_to_close', { p_hours: 72, p_limit: 6 });
+    toClose = tc || [];
+  }
   if (c) review = c.needs_review || 0;
 
   const nextCard = (s) => {
@@ -587,6 +593,29 @@ async function overview() {
       <div class="cg-actions"><button class="btn btn-accent btn-sm" data-open>Open</button>
         ${online && s.meeting_url ? `<a class="btn btn-line btn-sm" href="${esc(s.meeting_url)}" target="_blank" rel="noopener">Join</a>` : (!online && (s.location_name || s.location_address) ? `<a class="btn btn-line btn-sm" href="${ml.gmaps}" target="_blank" rel="noopener">Directions</a>` : '')}</div></div>`;
   };
+  /* A session that has happened and is still 'scheduled'. Two buttons and one
+     line — done, no-show, and what we worked on — without opening anything.
+     The note input is always there: the line is worth writing whether or not
+     the status changes, and asking for a second click to reveal it is how a
+     daily gesture stops being daily. */
+  const canNote = has('client_profile:manage');
+  const closeCard = (s) => {
+    const t = lp(s.start_at);
+    return `<div class="ov-close" data-close="${s.id}">
+      <div class="ov-close-top"><div class="ov-when">${prettyDay(t.date)} · ${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}</div>
+        <button class="btn btn-line btn-xs" data-open>Open</button></div>
+      <div class="ov-name">${esc(s.client_name || 'Client')}</div>
+      <div class="ov-type">${esc(s.title || 'Session')}</div>
+      <div class="cg-actions ov-close-acts">
+        <button class="btn btn-accent btn-sm" data-done>Done</button>
+        <button class="btn btn-line btn-sm" data-noshow>No-show</button>
+      </div>
+      ${canNote ? `<div class="ov-noteline">
+        <input class="ad-input" data-note maxlength="500" placeholder="What did you work on?" value="${esc(s.note || '')}" aria-label="Session note">
+        <button class="btn btn-line btn-sm" data-savenote>Save</button></div>` : ''}
+    </div>`;
+  };
+
   const kpis = [];
   if (o) kpis.push(['New leads · 7 days', o.new_leads_7d, () => go('crm', 'dashboard')], ["Today's sessions", o.today_sessions, () => go('schedule')], ['Upcoming bookings', o.upcoming_bookings, () => go('schedule', 'sessions')]);
   if (f) kpis.push(['Orders awaiting payment', f.pending_payment_orders, () => go('finance', 'transactions')], ['Unsettled Gari payable', money(f.unsettled_payable), () => go('finance', 'commissions')]);
@@ -630,6 +659,8 @@ async function overview() {
 
   view.innerHTML = `
     <div class="ad-head"><div><h1>${hello}</h1><p class="ad-muted">${esc(today)} · ${esc(tz)}</p></div></div>
+    ${toClose.length ? `<div class="ov-nextwrap ov-closewrap"><div class="ov-lbl">To close${toClose.length > 1 ? ` · ${toClose.length}` : ''}</div>
+      <div class="ov-nextrow">${toClose.map(closeCard).join('')}</div></div>` : ''}
     ${upcoming.length ? `<div class="ov-nextwrap"><div class="ov-lbl">Next session${upcoming.length > 1 ? 's' : ''}</div>
       <div class="ov-nextrow">${upcoming.map(nextCard).join('')}</div></div>` : ''}
     ${has('coach:operations') ? `<div class="ad-panel"><div class="ov-chart-head"><div class="ov-lbl">Upcoming bookings${nextBookings.length ? ` (${nextBookings.length})` : ''}</div><div class="cg-actions"><button class="btn btn-line btn-xs" id="ov-bk">All sessions</button><button class="btn btn-line btn-xs" id="ov-cal">Calendar</button></div></div>
@@ -641,6 +672,40 @@ async function overview() {
   // next-session cards
   calData = { sessions: upcoming, blocks: [] };
   view.querySelectorAll('.ov-next').forEach((el) => { const openBtn = el.querySelector('[data-open]'); const go2 = () => openSession(el.dataset.sess); el.onclick = go2; if (openBtn) openBtn.onclick = (e) => { e.stopPropagation(); go2(); }; el.querySelectorAll('a').forEach((a) => a.onclick = (e) => e.stopPropagation()); });
+  // to-close cards: done · no-show · one line, each one call, no popup
+  view.querySelectorAll('.ov-close').forEach((el) => {
+    const id = el.dataset.close;
+    const noteEl = el.querySelector('[data-note]');
+    const drop = () => {
+      const wrap = el.closest('.ov-closewrap'); el.remove();
+      if (wrap && !wrap.querySelector('.ov-close')) wrap.remove();
+    };
+    // the line is worth keeping even when the status changes in the same breath
+    const saveNote = async () => {
+      const txt = (noteEl && noteEl.value || '').trim();
+      if (!txt) return true;
+      const { error } = await sb.rpc('session_note_quick', { p_id: id, p_text: txt });
+      if (error) { fail(error); return false; }
+      return true;
+    };
+    const mark = async (status, label) => {
+      if (!await saveNote()) return;
+      const { error } = await sb.rpc('session_set_status', { p_id: id, p_status: status, p_chargeable: false });
+      if (error) return fail(error);
+      toast(label); drop();
+    };
+    const openBtn = el.querySelector('[data-open]');
+    if (openBtn) openBtn.onclick = () => openSession(id);
+    el.querySelector('[data-done]').onclick = () => mark('completed', 'Marked done');
+    el.querySelector('[data-noshow]').onclick = () => mark('no_show', 'Marked no-show — open it to charge the session');
+    const saveBtn = el.querySelector('[data-savenote]');
+    if (saveBtn) saveBtn.onclick = async () => {
+      if (!(noteEl.value || '').trim()) return toast('Nothing to save yet');
+      if (await saveNote()) toast('Noted');
+    };
+    if (noteEl) noteEl.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); if (saveBtn) saveBtn.click(); } };
+  });
+
   const on = (id, fn) => { const el = $('#' + id); if (el) el.onclick = fn; };
   on('ov-crm', () => go('crm', 'dashboard')); on('ov-crm2', () => go('crm', 'dashboard'));
   on('ov-bk', () => go('schedule', 'sessions')); on('ov-cal', () => go('schedule', 'calendar'));
@@ -914,7 +979,11 @@ async function openSession(id) {
       ${(online && s.meeting_url) ? `<div class="cg-sec"><div class="cg-sec-t">Online</div>
         <div class="cg-actions"><button class="btn btn-line btn-sm" data-copylink>Copy link</button>
           <a class="btn btn-line btn-sm" href="${esc(s.meeting_url)}" target="_blank" rel="noopener">Open meeting</a></div></div>` : ''}
-      ${s.note ? `<div class="cg-sec"><div class="cg-sec-t">Note</div><p style="margin:0;white-space:pre-wrap">${esc(s.note)}</p></div>` : ''}
+      ${has('client_profile:manage')
+        ? `<div class="cg-sec"><div class="cg-sec-t">What we worked on</div>
+             <div class="ov-noteline"><input class="ad-input" data-note maxlength="500" placeholder="One line — it goes to the client's history" value="${esc(s.note || '')}" aria-label="Session note">
+               <button class="btn btn-line btn-sm" data-savenote>Save</button></div></div>`
+        : (s.note ? `<div class="cg-sec"><div class="cg-sec-t">Note</div><p style="margin:0;white-space:pre-wrap">${esc(s.note)}</p></div>` : '')}
       <div class="cg-actions cg-actions-grid">
         ${has('client_profile:view') ? '<button class="btn btn-line" data-open>Open client</button>' : ''}
         ${ph ? `<a class="btn btn-line" href="${waHref(ph)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
@@ -933,6 +1002,16 @@ async function openSession(id) {
   on('[data-copyaddr]', async () => { try { await navigator.clipboard.writeText(ml.addr); toast('Address copied'); } catch {} });
   on('[data-copylink]', async () => { try { await navigator.clipboard.writeText(s.meeting_url); toast('Link copied'); } catch {} });
   on('[data-open]', () => { closeSheet(); openProfile(s.crm_contact_id, null, 'overview'); });
+  // one line, written here, landing in the client's history against this session
+  const noteEl = sheet.querySelector('[data-note]');
+  on('[data-savenote]', async () => {
+    const txt = (noteEl.value || '').trim();
+    if (!txt) return toast('Nothing to save yet');
+    const { error } = await sb.rpc('session_note_quick', { p_id: id, p_text: txt });
+    if (error) return fail(error);
+    toast('Noted');
+  });
+  if (noteEl) noteEl.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); const b = sheet.querySelector('[data-savenote]'); if (b) b.click(); } };
   on('[data-complete]', () => sessStatus(id, 'completed'));
   // Session → Collect payment → (Tap to Pay in the PSP app) → paid → pack/ledger updated. Same BEAU PH capability as from the client profile.
   on('[data-collect]', () => { pfPackActions(pack, () => calRender().catch(fail)); pfCollectInPerson(pack, () => calRender().catch(fail)); });
@@ -1940,12 +2019,26 @@ async function pfOverview() {
         <div class="pf-cacts"><a class="pf-cbtn call" href="mailto:${esc(c.email)}">${ICO.mail} Email</a><button class="pf-cbtn" data-copy="${esc(c.email)}">${ICO.copy} Copy</button></div></div>` : ''}
       ${(!c.phone && !c.email) ? '<p class="pf-sec-empty">No phone or email on file.</p>' : ''}
     </div>
+    ${has('client_profile:manage') ? `<div class="pf-group pf-msg"><div class="pf-group-t">Reminders</div>
+      <label class="pf-check"><input type="checkbox" id="pf-rem" ${c.reminders_opt_out ? '' : 'checked'}> Send a reminder the day before a session</label>
+      <label class="pf-check"><input type="checkbox" id="pf-wa" ${c.whatsapp_opt_in ? 'checked' : ''} ${c.phone ? '' : 'disabled'}> Also by WhatsApp${c.phone ? '' : ' — no phone number on file'}</label>
+      <p class="ad-muted" style="font-size:12px;margin:6px 0 0">WhatsApp is off until this person says yes. A number on file is not consent.${c.whatsapp_opt_in_at ? ` Recorded ${esc(fmt(c.whatsapp_opt_in_at, 'Asia/Dubai', { dateStyle: 'medium' }))}${c.whatsapp_opt_in_by ? ' by ' + esc(c.whatsapp_opt_in_by) : ''}.` : ''}</p></div>` : ''}
     <div class="pf-groups">
       ${groups.map(([t, items]) => `<div class="pf-group"><div class="pf-group-t">${esc(t)}</div><div class="pf-glist">${items.map(([k, v]) => gitem(k, v)).join('')}</div></div>`).join('')}
     </div>
     <details class="pf-tech"><summary>Technical</summary><dl class="pf-kv" style="margin-top:10px"><dt>CRM id</dt><dd>${esc(c.id)}</dd><dt>Created by</dt><dd>${esc(c.created_by || '—')}</dd><dt>Updated by</dt><dd>${esc(c.updated_by || '—')}</dd></dl></details>`;
   $('#pf-body').querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied'); } catch {} });
   if (canMerge) $('#pf-merge-open').onclick = () => pfMergePicker(c);
+  // reminders: one RPC, audited, and the checkbox goes back if the server says no
+  const rem = $('#pf-rem'), wa = $('#pf-wa');
+  const saveMsg = async (el, args, revert) => {
+    const { error } = await sb.rpc('contact_messaging_set', { p_contact_id: c.id, ...args });
+    if (error) { el.checked = revert; return fail(error); }
+    Object.assign(c, { reminders_opt_out: !rem.checked, whatsapp_opt_in: !!(wa && wa.checked) });
+    toast('Saved');
+  };
+  if (rem) rem.onchange = () => saveMsg(rem, { p_reminders_opt_out: !rem.checked }, !rem.checked);
+  if (wa) wa.onchange = () => saveMsg(wa, { p_whatsapp_opt_in: wa.checked }, !wa.checked);
 }
 
 // Manual merge of a needs-review record INTO an existing contact. The DB does

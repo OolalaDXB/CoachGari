@@ -125,6 +125,13 @@ export function render(kind: string, p: Payload): Rendered {
           `<p style="margin:0 0 20px">It was ${esc(prev.date)} · ${esc(prev.time)}. Here are the new details.</p>${table(s.html)}${replyNote("If the new time doesn't work,")}`),
         text: `Your session has moved, ${firstName(p)}.\nIt was ${prev.date} · ${prev.time}.\n\n${s.text}\n\nIf the new time doesn't work, just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
     }
+    case "session_reminder": {   // the day before — one per session, ever
+      const s = sessionRows(p);
+      return { subject: `Tomorrow — ${str(p, "service_title")}, ${s.w.time}`,
+        html: wrap("Reminder", `See you tomorrow, ${esc(firstName(p))}.`,
+          `<p style="margin:0 0 20px">A quick reminder of your session. Nothing to do — just turn up.</p>${table(s.html)}${replyNote("Can't make it?")}`),
+        text: `See you tomorrow, ${firstName(p)}.\n\n${s.text}\n\nCan't make it? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+    }
     case "booking_cancelled": {
       const s = sessionRows(p, "Was");
       const by = str(p, "cancelled_by") === "coach" ? "Coach Gari had to cancel this session. Sorry about that — reply and we'll find another time." : "Your session is cancelled, as requested.";

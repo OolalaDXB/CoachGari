@@ -460,3 +460,22 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
 .an-fun span,.an-fun b{position:relative;font-size:14px;} .an-fun b{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums;}
 .an-fun.clik{cursor:pointer;} .an-fun.clik:hover .an-fun-bar{background:var(--accent-pale);box-shadow:inset 0 0 0 1px var(--accent);}
 .an-fun i.an-rate{position:relative;font-style:normal;font-size:11.5px;color:var(--grey-text);margin-left:8px;}
+
+/* ---- Overview: sessions waiting to be closed (CG-019) ----
+   The same card as "next session", turned the other way round: it is about
+   something that already happened, so it carries the two verdicts and the one
+   line to type rather than directions and a join link. Amber, not red — an
+   unclosed session is a chore, not a problem. */
+.ov-closewrap .ov-lbl{color:var(--accent);}
+.ov-close{flex:0 0 268px;background:#fff;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:16px;padding:16px;}
+.ov-close-top{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.ov-close .ov-name{margin-top:6px;}
+.ov-close-acts{margin:0 0 10px;}
+.ov-noteline{display:flex;gap:8px;align-items:center;}
+.ov-noteline .ad-input{flex:1 1 auto;min-width:0;font-size:13.5px;padding:8px 10px;}
+@media (max-width:760px){ .ov-close{flex-basis:82vw;} }
+/* client profile: reminder channels (CG-019) */
+.pf-msg{margin-top:14px;}
+.pf-check{display:flex;align-items:center;gap:9px;font-size:14px;padding:7px 0;cursor:pointer;}
+.pf-check input{width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto;}
+.pf-check input:disabled{opacity:.45;} .pf-check:has(input:disabled){color:var(--grey-text);cursor:default;}
