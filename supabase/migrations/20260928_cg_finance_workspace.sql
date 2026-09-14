@@ -35,16 +35,19 @@ alter table public.admin_audit add constraint admin_audit_area_check
   check (area in ('crm_contact','crm_note','body_measurement','permission','consent','merge','coaching_session','session_pack','block','report','payment','payment_method',
                   'beau_ph_rail','beau_ph_fx','settlement_destination'));
 
--- Launch access for the coach (CG-006 / CG-007 / CG-009 / CG-010 sets): identical business access, expressed as the granular permissions.
-insert into public.app_users (email, display_name, party, active) values ('grej28roux@gmail.com', 'Gari', 'gari', true)
-on conflict (email) do update set active = true;
-insert into public.app_permissions (email, permission)
-select 'grej28roux@gmail.com', p from unnest(array['coach:operations','client_profile:view','client_profile:manage','health_metrics:view','health_metrics:manage',
-                                                   'coaching_sensitive:view','coaching_sensitive:manage','finance:view','finance:manage','analytics:view',
-                                                   'catalog:view','catalog:manage']) p
-on conflict do nothing;
-insert into public.admin_audit (area, entity_id, action, changed_by, summary)
-values ('permission', 'grej28roux@gmail.com', 'provision', 'migration:20260928', '{"launch_set":true}'::jsonb);
+/* WHO holds which permission is not schema, and it used to be written here: this
+   migration granted the launch coach's set by naming his personal email address.
+   Three things were wrong with that. A migration is permanent, so the address
+   outlives the person and cannot be corrected without rewriting history. A
+   fresh database — a CI replay, a second environment, a demo — would create a
+   real person's account in it. And anyone who reads the repository reads his
+   address for no reason connected to the code.
+
+   Provisioning is now an operational act, performed against the project with
+   scripts/provision-user.sql and recorded in admin_audit like any other grant.
+   The rows already created by this migration on the live project are untouched;
+   only the seeding is gone. The launch set the coach holds is listed in
+   scripts/provision-user.sql, where it can be read without naming anyone. */
 
 -- ---------- 1. the ledger is in the collected currency ----------
 create or replace function public.recompute_earning(p_order_id uuid)

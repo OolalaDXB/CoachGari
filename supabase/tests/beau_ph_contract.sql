@@ -21,6 +21,13 @@ declare
   q1 jsonb; q2 jsonb; qid uuid; mid uuid; nA int; p5 uuid; tok5 text; j5 jsonb; rC uuid;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
+  /* The Aani rail is MERCHANT CONFIGURATION, not schema: it is set in the
+     back-office and its proxy is a real person's mobile number. The suite
+     therefore configures its own, with a fictitious number, instead of
+     depending on a production row — and asserts against what it set. */
+  perform beau_ph.merchant_method_configure('coach_gari', 'aani',
+    '{"enabled":true,"currency":"AED","countries":["AE"],"currencies":["AED"],
+      "instructions":{"proxy_type":"mobile","proxy_value":"+971500000000","display_value":"+971 50 000 0000"}}'::jsonb, 'suite');
   insert into beau_ph.merchants (key, name, country, default_currency, mode) values (mk, 'Contract Test', 'ZW', 'USD', 'test');
   -- merchant configuration is explicit (countries + currencies persisted); a provider's open coverage is never read as "any"
   perform beau_ph.merchant_method_configure(mk, 'stripe', '{"enabled":true,"countries":["AE","ZW"],"currencies":["AED","USD"]}'::jsonb, 't');
@@ -200,7 +207,9 @@ begin
      and (select count(*) from public.payments where order_id = ordid and provider = 'bank_transfer' and ph_event_id is not null) = 1
      and beau_ph.is_reconciled((select ph_event_id from public.payments where order_id = ordid))
      and exists (select 1 from beau_ph.payment_events pe where pe.id = (select ph_event_id from public.payments where order_id = ordid) and pe.actor = 'operator' and pe.actor_id = 'fin@test.local')
-     and (select count(*) from public.partner_earnings where order_id = ordid) = 0
+     -- a direct rail does carry an earning since 20261027; what marks it as direct is the DIRECTION:
+     -- Oolala is owed its commission, it holds no cash to pay out
+     and (select count(*) from public.partner_earnings where order_id = ordid and collection_origin = 'direct' and direction = 'receivable' and gari_payable = 0) = 1
      and (select status from beau_ph.payment_requests where external_reference = oref2 and provider_key = 'stripe') = 'cancelled'
      and (select status from beau_ph.payment_requests where external_reference = oref2 and provider_key = 'bank_transfer') = 'paid'
      then ok := ok + 1; else fail := fail + 1; log := log || ' [host manual ' || j::text || ']'; end if;
@@ -278,7 +287,10 @@ begin
   perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
   execute 'set local role authenticated';
   j := public.cg_ph_collect_options(p3, 'ios_pwa');
-  if jsonb_array_length(j -> 'options') = 0 and (j ->> 'amount')::int = 85000 then ok := ok + 1; else fail := fail + 1; log := log || ' [collect before setup ' || j::text || ']'; end if;
+  -- before a card-present rail is configured there is no card-present option. Cash is always
+  -- there and is not what this checks: asking for zero options only held before the cash rail existed.
+  if not exists (select 1 from jsonb_array_elements(j -> 'options') o where o ->> 'capability' in ('softpos','tap_to_pay','card_present'))
+     and (j ->> 'amount')::int = 85000 then ok := ok + 1; else fail := fail + 1; log := log || ' [collect before setup ' || j::text || ']'; end if;
   perform public.payment_method_set(jsonb_build_object('method', 'magnati', 'enabled', true, 'handoff_app', 'SwipeX', 'handoff_url', 'swipex://', 'currency', 'AED'));
   begin perform public.payment_method_set(jsonb_build_object('method', 'magnati', 'enabled', true, 'handoff_app', 'SwipeX', 'handoff_url', 'javascript alert'));
         fail := fail + 1; log := log || ' [bad handoff url accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
@@ -296,7 +308,7 @@ begin
      and (select capability from public.payments where order_id = ordid) = 'softpos'
      and (select provider from public.payments where order_id = ordid) = 'magnati'
      and beau_ph.is_reconciled((select ph_event_id from public.payments where order_id = ordid))
-     and (select count(*) from public.partner_earnings where order_id = ordid) = 0
+     and (select count(*) from public.partner_earnings where order_id = ordid and collection_origin = 'direct' and direction = 'receivable') = 1
      and (select channel from beau_ph.payment_requests where id = (j ->> 'request_id')::uuid) = 'in_person'
      then ok := ok + 1; else fail := fail + 1; log := log || ' [host collect ' || j::text || ']'; end if;
   -- the client's report page still never lists an in-person capability
@@ -332,7 +344,7 @@ begin
   e2 := public.process_stripe_event(ev || jsonb_build_object('id', 'evt_race_1b'));
   if (e1 ->> 'status') = 'ignored' and (e1 ->> 'note') like 'rejected:illegal_transition%' and (e2 ->> 'status') = 'ignored'
      and (select count(*) from public.payments where order_id = ordid) = 1                                                   -- no duplicate host payment
-     and (select count(*) from public.partner_earnings where order_id = ordid) = 0                                           -- no partner earning (Aani money never passed through Oolala)
+     and (select count(*) from public.partner_earnings where order_id = ordid and direction = 'receivable') = 1              -- Aani money never passed through Oolala: the commission is receivable, not payable
      and (select count(*) from beau_ph.reconciliations rc join beau_ph.payment_requests r on r.id = rc.request_id where r.external_reference = oref4) = 1
      and (select count(*) from beau_ph.payment_events pe join beau_ph.payment_requests r on r.id = pe.request_id where r.external_reference = oref4 and pe.to_status = 'paid') = 1
      and (select status from public.orders where id = ordid) = 'paid'

@@ -33,12 +33,9 @@ alter table public.admin_audit add constraint admin_audit_area_check check (area
   'session_pack','block','report','payment','payment_method','beau_ph_rail','beau_ph_fx',
   'settlement_destination','collaboration'));
 
--- Grant the launch coach the new permissions (Mickaël is provisioned operationally, see README).
-insert into public.app_permissions (email, permission)
-select 'grej28roux@gmail.com', p from unnest(array['collab:view','collab:manage']) p
-on conflict do nothing;
-insert into public.admin_audit (area, entity_id, action, changed_by, summary)
-values ('permission', 'grej28roux@gmail.com', 'provision', 'migration:20261013', '{"collab":true}'::jsonb);
+/* collab:view / collab:manage are granted operationally, not here — see the
+   note in 20260928 and scripts/provision-user.sql. A migration is the wrong
+   place to name a person. */
 
 -- ---------- the Stripe rail opts in to the 'other' intent (collaboration payments map to it) ----------
 do $$

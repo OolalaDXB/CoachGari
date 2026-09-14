@@ -231,13 +231,13 @@ create policy admin_audit_view on public.admin_audit for select to authenticated
 -- ---------- 9. write RPCs (permission-checked, audited) ----------
 create or replace function public.crm_save_contact(p jsonb)
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare e text := public.current_email(); id uuid := nullif(p ->> 'id','')::uuid; before jsonb; row public.crm_contacts%rowtype; changed text[];
+declare e text := public.current_email(); v_id uuid := nullif(p ->> 'id','')::uuid; before jsonb; row public.crm_contacts%rowtype; changed text[];
 begin
   if not public.has_permission('client_profile:manage') then raise exception 'forbidden' using errcode = '42501'; end if;
   if coalesce(btrim(p ->> 'display_name'),'') = '' then raise exception 'display name is required' using errcode = '22023'; end if;
   if p ? 'status' and (p ->> 'status') not in ('lead','active','past','archived') then raise exception 'invalid status' using errcode = '22023'; end if;
-  if id is not null then
-    select * into row from public.crm_contacts where id = id for update;
+  if v_id is not null then
+    select * into row from public.crm_contacts where id = v_id for update;
     if not found then raise exception 'contact not found' using errcode = 'P0002'; end if;
     before := to_jsonb(row);
     update public.crm_contacts set
@@ -268,7 +268,7 @@ begin
     changed := array['created'];
   end if;
   insert into public.admin_audit (area, entity_id, action, changed_by, summary)
-  values ('crm_contact', row.id::text, case when id is null then 'create' else 'update' end, e,
+  values ('crm_contact', row.id::text, case when v_id is null then 'create' else 'update' end, e,
           jsonb_build_object('changed', to_jsonb(changed)));
   return to_jsonb(row);
 end $$;

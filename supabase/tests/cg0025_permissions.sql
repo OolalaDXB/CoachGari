@@ -421,9 +421,17 @@ begin
 
   /* ---- 10. Finance + BEAU PH workspace: both launch users reach it through finance:view / finance:manage, never through platform:admin;
              a coach-only user, an access administrator and anon are refused; nothing secret-shaped leaves the server; every change is audited with its actor ---- */
-  -- production provisioning: Gari (grej28roux@gmail.com) and Mickael (mickael@thestudio.mt) both hold the finance pair (real rows, read here, never written)
-  select count(*) into n from public.app_permissions where email in ('grej28roux@gmail.com', 'mickael@thestudio.mt') and permission in ('finance:view', 'finance:manage');
-  if n = 4 and (select count(*) from public.app_users where email in ('grej28roux@gmail.com', 'mickael@thestudio.mt') and active) = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [launch users finance provisioning ' || n || ']'; end if;
+  /* Two people hold the finance pair at launch. This used to be asserted by
+     reading their real rows — their personal email addresses, in a file that
+     lives in the repository, against a database only production has. That made
+     the suite unrunnable anywhere else and put a person's address in source
+     control for no test value: who holds a permission is operational fact, not
+     a property of the schema. What the schema owes us is that the pair can be
+     held by two distinct active users and that both then have identical reach,
+     which is what this checks and what the loop below proves. Real provisioning
+     is verified by scripts/check-provisioning.sql against the live project. */
+  select count(*) into n from public.app_permissions where email in ('launch@test.local', 'finance@test.local') and permission in ('finance:view', 'finance:manage');
+  if n = 4 and (select count(*) from public.app_users where email in ('launch@test.local', 'finance@test.local') and active) = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [launch users finance provisioning ' || n || ']'; end if;
   -- Gari-like persona (launch set) and Mickael-like persona (finance pair): identical reach
   foreach q in array array['launch@test.local', 'finance@test.local'] loop
     perform set_config('request.jwt.claims', format('{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000000a","email":"%s"}', q), true);

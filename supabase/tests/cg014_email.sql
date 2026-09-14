@@ -21,6 +21,13 @@ declare
   b_book int; b_pack int; b_sess int; b_paidpacks int;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
+  /* The Aani rail is MERCHANT CONFIGURATION, not schema: it is set in the
+     back-office and its proxy is a real person's mobile number. The suite
+     therefore configures its own, with a fictitious number, instead of
+     depending on a production row — and asserts against what it set. */
+  perform beau_ph.merchant_method_configure('coach_gari', 'aani',
+    '{"enabled":true,"currency":"AED","countries":["AE"],"currencies":["AED"],
+      "instructions":{"proxy_type":"mobile","proxy_value":"+971500000000","display_value":"+971 50 000 0000"}}'::jsonb, 'suite');
   insert into public.app_users (email, display_name, party) values ('fin@test.local','Fin','gari');
   insert into public.app_permissions (email, permission) values ('fin@test.local','coach:operations'), ('fin@test.local','finance:view'), ('fin@test.local','finance:manage');
   d := current_date + 3; while extract(isodow from d) <> 1 loop d := d + 1; end loop;
@@ -260,9 +267,24 @@ begin
   if n = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [claim by contact]'; end if;
 
   /* ---- 9. scheduled drain wiring ---- */
-  if exists (select 1 from cron.job where jobname = 'cg-email-outbox' and schedule = '*/2 * * * *') then ok := ok + 1; else fail := fail + 1; log := log || ' [cron]'; end if;
-  if (select count(*) from public.outbox_keys where name = 'email' and length(key) = 64) = 1 and not public.email_outbox_authorize('not-a-key')
-     and public.email_outbox_authorize((select key from public.outbox_keys where name = 'email'))
+  /* The drain schedule can only be asserted where pg_cron exists. It does on the
+     live project; it does not in the CI harness, which leaves the extension out
+     so that no background job runs against a database a suite is using. Saying
+     so out loud beats a check that quietly passes on a database with no cron. */
+  if exists (select 1 from pg_extension where extname = 'pg_cron') then
+    if exists (select 1 from cron.job where jobname = 'cg-email-outbox' and schedule = '*/2 * * * *') then ok := ok + 1; else fail := fail + 1; log := log || ' [cron]'; end if;
+  else
+    raise notice 'CG014: pg_cron absent — the outbox schedule was not checked (this run does not vouch for it)';
+  end if;
+  /* The clear key lives only in the Vault; the table keeps a SHA-256 of it and
+     nothing else. This check used to read outbox_keys.key, a column that
+     20261018 removed when it introduced the hash — so it had stopped running at
+     all and nobody noticed, which is its own argument for running the suites in
+     CI. It now asserts the shape that actually ships: 32 bytes of digest in the
+     table, the real key accepted, a wrong one refused. */
+  if (select count(*) from public.outbox_keys where name = 'email' and length(key_sha256) = 32) = 1
+     and not public.email_outbox_authorize('not-a-key')
+     and public.email_outbox_authorize((select decrypted_secret from vault.decrypted_secrets where name = 'outbox_email_key' limit 1))
   then ok := ok + 1; else fail := fail + 1; log := log || ' [outbox key]'; end if;
   if (select prosecdef from pg_proc where proname = 'email_outbox_kick' and pronamespace = 'public'::regnamespace) then ok := ok + 1; else fail := fail + 1; log := log || ' [kick definer]'; end if;
 

@@ -40,14 +40,14 @@ const check = (name, cond, extra = '') => { if (cond) ok++; else { fail++; log.p
 
 /* ---- canned server (what the RPCs return; shapes mirror the migrations) ---- */
 const FIXTURES = {
-  my_permissions: { email: 'grej28roux@gmail.com', display_name: 'Gari', party: 'gari', permissions: ['coach:operations', 'client_profile:view', 'finance:view', 'finance:manage', 'analytics:view', 'catalog:view'] },
+  my_permissions: { email: 'coach@test.local', display_name: 'Gari', party: 'gari', permissions: ['coach:operations', 'client_profile:view', 'finance:view', 'finance:manage', 'analytics:view', 'catalog:view'] },
   finance_transactions: [
     { reference: 'OR-1B7DDF', created_at: '2026-09-09T07:58:21Z', paid_at: '2026-09-09T07:58:34Z', public_reference: 'CG-1048', type: 'package', customer_hint: 'm***@e***.com', crm_contact_id: 'c1', item: '5-session pack', method: 'stripe', method_label: 'Card (Stripe)', method_kind: 'online', amount: 1000, currency: 'AED', pricing_amount: 1000, pricing_currency: 'AED', fx: false, status: 'refunded', order_status: 'refunded', refund_amount: 1000, chargeback_amount: 0, earning_status: 'open', fee_known: false, action: 'fee_pending', ph_reference: 'CG-1048', ph_request_id: 'r1', provider_reference: 'pi_x', reconciled: true, support_message: null },
     { reference: 'OR-AAAAAA', created_at: '2026-09-08T10:00:00Z', paid_at: null, public_reference: 'CG-1049', type: 'package', customer_hint: 'a***@b***.com', crm_contact_id: 'c2', item: '10-session pack', method: 'aani', method_label: 'Aani (UAE instant payment)', method_kind: 'manual', amount: 50000, currency: 'AED', pricing_amount: 50000, pricing_currency: 'AED', fx: false, status: 'pending', order_status: 'pending_payment', refund_amount: null, chargeback_amount: null, earning_status: null, fee_known: null, action: 'confirm_receipt', ph_reference: 'CG-1049', ph_request_id: 'r2', provider_reference: null, reconciled: false, support_message: null },
   ],
   payment_methods_summary: [
     { provider: 'stripe', display_name: 'Card (Stripe)', channel_label: 'Online · Card', kind: 'online', readiness: 'available', enabled: true, countries: ['AE', 'GB', 'ZW'], currencies: ['AED', 'USD'], intents: null, health: 'configured', hint: null, history: 2, updated_at: '2026-09-09T00:00:00Z', updated_by: 'migration' },
-    { provider: 'aani', display_name: 'Aani (UAE instant payment)', channel_label: 'Manual · Instant payment (UAE)', kind: 'manual', readiness: 'available', enabled: true, countries: ['AE'], currencies: ['AED'], intents: null, health: 'configured', hint: '•••• 5065', history: 1, updated_at: '2026-09-09T00:00:00Z', updated_by: 'mickael@thestudio.mt' },
+    { provider: 'aani', display_name: 'Aani (UAE instant payment)', channel_label: 'Manual · Instant payment (UAE)', kind: 'manual', readiness: 'available', enabled: true, countries: ['AE'], currencies: ['AED'], intents: null, health: 'configured', hint: '•••• 5065', history: 1, updated_at: '2026-09-09T00:00:00Z', updated_by: 'studio@test.local' },
   ],
   payment_method_get: {
     provider: { key: 'aani', display_name: 'Aani (UAE instant payment)', kind: 'manual', channel_label: 'Manual · Instant payment (UAE)', readiness: 'available', confirmation: 'operator', countries: ['AE'], currencies: ['AED'], intents: null, secrets: [], onboarding: 'No API.', notes: null,
@@ -86,7 +86,7 @@ await page.route('**/plausible.io/**', (r) => r.abort());
 await page.route('**/functions/v1/ph-admin', (r) => { calls.push({ name: 'fetch:ph-admin', args: { auth: !!r.request().headers()['authorization'] } }); r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RUNTIME) }); });
 await page.addInitScript(() => {
   const chain = (data) => { const c = { then: (f) => Promise.resolve({ data, error: null }).then(f) }; for (const m of ['select', 'order', 'limit', 'eq', 'in', 'or', 'maybeSingle', 'range']) c[m] = () => c; return c; };
-  const session = { user: { email: 'grej28roux@gmail.com' }, access_token: 'test-jwt' };
+  const session = { user: { email: 'coach@test.local' }, access_token: 'test-jwt' };
   window.supabase = { createClient: () => ({
     auth: { getSession: async () => ({ data: { session } }), onAuthStateChange: () => {}, signInWithOtp: async () => ({}), signOut: async () => ({}) },
     rpc: (name, args) => { const p = window.__rpc(name, args || {}); p.limit = () => p; return p; },

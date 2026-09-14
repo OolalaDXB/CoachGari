@@ -13,7 +13,15 @@ declare
   did uuid; did2 uuid; did3 uuid; did4 uuid; cid uuid; v int; ord text; s text; n int;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
-  perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
+  -- The suite acts as an operator holding the collaboration permissions. It
+  -- seeds that person itself rather than borrowing a real account, so no
+  -- personal address lives in the repository and the suite runs anywhere.
+  insert into public.app_users (email, display_name, party, active)
+  values ('collab@test.local', 'Collab operator', 'gari', true);
+  insert into public.app_permissions (email, permission)
+  select 'collab@test.local', p from unnest(array['collab:view','collab:manage','client_profile:view','client_profile:manage',
+                                                  'coach:operations','finance:view','finance:manage']) p;
+  perform set_config('request.jwt.claims', '{"email":"collab@test.local","role":"authenticated"}', true);
 
   -- 1. intake creates exactly one deal, linked to a CRM person, always status 'new'
   j := public.collab_intake(jsonb_build_object('name','ACME Brand','email','brand@example.com','type','event_appearance',
@@ -101,7 +109,7 @@ begin
   begin perform public.collab_admin_get(did); fail := fail + 1; log := log || ' [no-perm-read]'; exception when sqlstate '42501' then ok := ok + 1; end;
   begin perform public.collab_propose(did, jsonb_build_object('monetary_amount',1)); fail := fail + 1; log := log || ' [no-perm-write]'; exception when sqlstate '42501' then ok := ok + 1; end;
   reset role;
-  perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
+  perform set_config('request.jwt.claims', '{"email":"collab@test.local","role":"authenticated"}', true);
 
   -- 14. the room bearer token is encrypted at rest, recoverable server-side only
   --     (no plaintext column; ciphertext populated; the room URL is built from the decrypted token)
@@ -172,7 +180,7 @@ begin
   begin perform public.collab_copy_room_link(did); fail := fail + 1; log := log || ' [view-copy-allowed]'; exception when sqlstate '42501' then ok := ok + 1; end;
   begin perform public.collab_room_url(did); fail := fail + 1; log := log || ' [view-room_url-executable]'; exception when insufficient_privilege then ok := ok + 1; end;
   reset role;
-  perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
+  perform set_config('request.jwt.claims', '{"email":"collab@test.local","role":"authenticated"}', true);
 
   -- 19. the internal SECURITY DEFINER helpers are not callable directly by anon, nor by a
   --     signed-in operator: they are reached only through other definer functions (owner).
@@ -186,7 +194,7 @@ begin
   begin perform public.collab_deal_json(did, true); fail := fail + 1; log := log || ' [authed-deal_json]'; exception when insufficient_privilege then ok := ok + 1; end;
   begin perform public.collab_deal_by_token(tok); fail := fail + 1; log := log || ' [authed-by_token]'; exception when insufficient_privilege then ok := ok + 1; end;
   reset role;
-  perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
+  perform set_config('request.jwt.claims', '{"email":"collab@test.local","role":"authenticated"}', true);
   -- and the flow that legitimately uses them still works (they run as owner)
   if (public.collab_room(tok) ->> 'public_ref') = ref and (public.collab_admin_get(did) ->> 'contact_email') = 'brand@example.com'
     then ok := ok + 1; else fail := fail + 1; log := log || ' [definer-flow-broke]'; end if;
@@ -339,7 +347,7 @@ begin
   perform set_config('request.jwt.claims', '{"email":"collabviewer@test.dev","role":"authenticated"}', true);
   begin perform public.collab_admin_delete(did3); fail := fail + 1; log := log || ' [view-deleted]'; exception when sqlstate '42501' then ok := ok + 1; end;
   reset role;
-  perform set_config('request.jwt.claims', '{"email":"grej28roux@gmail.com","role":"authenticated"}', true);
+  perform set_config('request.jwt.claims', '{"email":"collab@test.local","role":"authenticated"}', true);
 
   raise exception 'CG015_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

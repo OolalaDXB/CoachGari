@@ -368,10 +368,11 @@ exceptions) and Tour stops; the old `#schedule/bookings`, `availability` and
 `exceptions` hashes alias into Sessions / Hours; Clients (the CRM — section key `crm`) has
 Dashboard (default) + Leads + Contacts; Finance has Transactions (default) + Payment methods; BEAU PH
 has Rails + FX (the embedded payment hub's operator workspace, see
-`beau-ph/docs/`). Both launch users — Gari (`grej28roux@gmail.com`) and Mickaël
-(`mickael@thestudio.mt`) — hold `finance:view` + `finance:manage`, so both see
-Finance and BEAU PH; Gari's auth invite exists and completes on the first
-magic-link sign-in.
+`beau-ph/docs/`). Both launch users — the coach and the platform side — hold `finance:view` +
+`finance:manage`, so both see Finance and BEAU PH. Who exactly holds what is
+operational, not documentation: run `scripts/check-provisioning.sql` against
+the project to see the current list, and `scripts/provision-user.sql` to grant
+a set. Personal addresses are deliberately not written down here.
 
 | Permission | What it unlocks in `/admin` |
 |---|---|
@@ -441,7 +442,14 @@ no `content:*` permission: the website is edited in Git.
 ```
 psql "$DATABASE_URL" -f supabase/tests/cg0025_permissions.sql   # one suite
 DATABASE_URL=postgresql://… scripts/db-tests.sh                   # every database suite, exit 1 on any fail
+DATABASE_URL=postgresql://… scripts/db-ci.sh                      # build the schema from scratch first, then run them
 ```
+
+`db-ci.sh` is what CI runs: it applies `supabase/tests/_harness.sql` (the part
+of a Supabase project the migrations assume — roles, `auth`, `vault`,
+`storage`, pgcrypto, and a `net` that records instead of calling out), replays
+every migration in order, then runs the suites. Point it only at a throwaway
+database; it is destructive by design.
 
 `CG0025_TESTS ok=288 fail=0`, always rolled back. It switches role and JWT
 claims per persona and asserts the negatives: anon is refused on every private
@@ -478,8 +486,9 @@ the bucket. It also proves booking correctness does not depend on `pg_cron`.
 The suite runner also runs `cg002_booking` (28), `cg003_payments` (24) and
 `cg009_crm` (43).
 
-**These suites are run by hand, not by CI** — see "Continuous integration"
-below for why, and what CI does gate instead.
+**These suites run in CI**, against a Postgres container built from the
+migrations on every push — no production credential and no shared state. They
+can still be run by hand against the live schema; they always roll back.
 
 ## CRM, client profile & progress (CG-009)
 
@@ -1182,18 +1191,16 @@ link/asset check, and a parse of `config.js`. Runs on every push and pull
 request. It installs Playwright and Chromium itself (pinned, ~20 s), because
 the runner has neither and the repo has no `package.json` to install from.
 
-**`db-boundary-tests`** — runs `scripts/db-tests.sh` **only if** a
-`SUPABASE_DB_URL` secret is set. It is deliberately **not** set: this project
-has one database and it is production, so satisfying that job would mean
-storing a production Postgres password in GitHub Actions — readable by every
-workflow — to automate suites that are already run by hand on every change,
-against the live schema, in rolled-back transactions. The job therefore emits
-a `::warning::` saying the boundaries were not verified here, and passes. It
-does not gate the deploy. Setting the secret (session-pooler URI, IPv4 —
-GitHub runners have no IPv6) starts running them for real with no other
-change. Reasoning in `docs/DECISIONS.md`.
+**`db-boundary-tests`** — runs `scripts/db-ci.sh` against a `postgres:17`
+service container (the live project runs 17.6). It rebuilds the entire schema
+from `supabase/migrations/` and runs all sixteen database suites against it.
+No secret and no production credential: the throwaway database dies with the
+job. The rebuild is itself a test — a schema that cannot be replayed from its
+own migrations fails the build before a suite runs, which is how the lost
+`admin_audit` areas were found. It gates the deploy.
 
-**`deploy-edge-functions`** — `main` only, after `static-checks`, when
+**`deploy-edge-functions`** — `main` only, after `static-checks` and
+`db-boundary-tests`, when
 `SUPABASE_ACCESS_TOKEN` is set. On a push it deploys only the functions whose
 bundle contains a changed file. It can also be run from the Actions tab
 (*Run workflow*) with a `functions` input — `all`, or a comma-separated list
@@ -1205,7 +1212,7 @@ Repository secrets, both optional, neither committed:
 | Secret | Effect when set | When missing |
 |---|---|---|
 | `SUPABASE_ACCESS_TOKEN` | Edge Functions deploy from `main` | job notices and skips |
-| `SUPABASE_DB_URL` | database suites run in CI | job warns and passes |
+| _(none needed for the database suites — CI builds its own Postgres)_ | | |
 
 `SUPABASE_PROJECT_REF` is optional too — the workflow defaults to
 `acrjrlgeeyseyolmofuq`.

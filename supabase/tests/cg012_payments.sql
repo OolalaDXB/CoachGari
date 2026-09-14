@@ -14,6 +14,13 @@ declare
   cA uuid; p1 uuid; p2 uuid; p3 uuid; p4 uuid; p5 uuid; s1 uuid; oref text; tok text; tok5 text; j jsonb; jh jsonb; n int; ordid uuid; pref text;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';   -- suites run the host in TEST mode regardless of the production setting (rolled back)
+  /* The Aani rail is MERCHANT CONFIGURATION, not schema: it is set in the
+     back-office and its proxy is a real person's mobile number. The suite
+     therefore configures its own, with a fictitious number, instead of
+     depending on a production row — and asserts against what it set. */
+  perform beau_ph.merchant_method_configure('coach_gari', 'aani',
+    '{"enabled":true,"currency":"AED","countries":["AE"],"currencies":["AED"],
+      "instructions":{"proxy_type":"mobile","proxy_value":"+971500000000","display_value":"+971 50 000 0000"}}'::jsonb, 'suite');
   insert into public.app_users (email, display_name, party) values
     ('fin@test.local','Fin','gari'),('coachonly@test.local','Coach','gari'),('padmin@test.local','PA','studio');
   insert into public.app_permissions (email, permission) values
@@ -63,7 +70,7 @@ begin
   -- service-role path (owner): view returns recap + Aani, no leakage
   j := public.report_view(tok);
   if (j->'recap'->>'amount_due')::int = 312000 and (j->'recap'->>'first_name') = 'Sarah'
-     and (j->'aani'->>'enabled')::boolean = true and (j->'aani'->>'display_value') = '+971 52 136 5065'
+     and (j->'aani'->>'enabled')::boolean = true and (j->'aani'->>'display_value') = '+971 50 000 0000'
      and j::text not like '%SECRET-NOTE%' and j::text not like '%77.7%' then ok:=ok+1; else fail:=fail+1; log:=log||' [report_view '||j::text||']'; end if;
   -- revoke stops it
   perform set_config('request.jwt.claims','{"role":"authenticated","email":"coachonly@test.local"}',true);
@@ -96,9 +103,14 @@ begin
   execute 'reset role';
   if (select payment_status from public.session_packs where id=p2) = 'paid'
      and (select payment_source from public.session_packs where id=p2) = 'aani' then ok:=ok+1; else fail:=fail+1; log:=log||' [aani pack paid]'; end if;
-  -- no Oolala earning for the Aani order (money never passed through Oolala)
+  /* Aani is a DIRECT rail: Gari received the money, so Oolala never held it.
+     There is still an earning row — 20261027 made every paid order carry one —
+     but its direction is 'receivable': Oolala is owed its commission rather
+     than holding cash to pay out. Asserting the row is absent, as this did,
+     stopped being true then. */
   select id into ordid from public.orders where session_pack_id=p2 order by created_at desc limit 1;
-  if not exists (select 1 from public.partner_earnings where order_id=ordid) then ok:=ok+1; else fail:=fail+1; log:=log||' [aani created earning]'; end if;
+  if exists (select 1 from public.partner_earnings where order_id=ordid and collection_origin='direct' and direction='receivable' and gari_payable=0)
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [aani earning direction]'; end if;
   -- the payment row carries the source and no fabricated stripe id
   if exists (select 1 from public.payments where order_id=ordid and provider='aani' and provider_payment_intent_id is null and note='client-ref-123') then ok:=ok+1; else fail:=fail+1; log:=log||' [aani payment row]'; end if;
 
@@ -124,7 +136,7 @@ begin
      and exists (select 1 from public.payments where order_id=ordid and provider='cash' and capability='cash' and ph_request_id is not null and ph_event_id is not null)
      and (select status from beau_ph.payment_requests where id = (select ph_request_id from public.payments where order_id=ordid)) = 'paid'
      and exists (select 1 from beau_ph.reconciliations rc where rc.payment_event_id = (select ph_event_id from public.payments where order_id=ordid))
-     and not exists (select 1 from public.partner_earnings where order_id=ordid) then ok:=ok+1; else fail:=fail+1; log:=log||' [cash ledger]'; end if;
+     and exists (select 1 from public.partner_earnings where order_id=ordid and collection_origin='direct' and direction='receivable') then ok:=ok+1; else fail:=fail+1; log:=log||' [cash ledger]'; end if;
 
   /* ---- 5. renewal: new pack, old immutable ---- */
   perform set_config('request.jwt.claims','{"role":"authenticated","email":"fin@test.local"}',true);
@@ -165,7 +177,7 @@ begin
   if (select payment_status from public.session_packs where id=p3)='paid'
      and (select payment_source from public.session_packs where id=p3)='bank_transfer' then ok:=ok+1; else fail:=fail+1; log:=log||' [bank pack paid]'; end if;
   select id into ordid from public.orders where session_pack_id=p3 order by created_at desc limit 1;
-  if not exists (select 1 from public.partner_earnings where order_id=ordid) then ok:=ok+1; else fail:=fail+1; log:=log||' [bank earning]'; end if;
+  if exists (select 1 from public.partner_earnings where order_id=ordid and collection_origin='direct' and direction='receivable' and gari_payable=0) then ok:=ok+1; else fail:=fail+1; log:=log||' [bank earning]'; end if;
 
   /* ---- 5b-bis. the Stripe fee reaches the ledger, and an unknown fee is not a zero ---- */
   -- the paid pack order of section 3 carried _enrich.fee_amount = 5000

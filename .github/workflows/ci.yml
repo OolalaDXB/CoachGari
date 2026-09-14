@@ -74,35 +74,42 @@ jobs:
       - name: Verify config is valid ES module
         run: node --input-type=module -e "import('./config.js').then(m => { if (!m.CONFIG) { console.error('CONFIG export missing'); process.exit(1); } console.log('config.js OK'); })"
 
-  # Database boundary tests — booking, payments/ledger, permissions/RLS, collaborations.
-  # Every suite is a rollback transaction, nothing is persisted. A violated access
-  # boundary fails the build.
+  # Database boundary tests — booking, payments/ledger, permissions/RLS,
+  # collaborations, commission, BEAU PH. Every suite is a rollback transaction:
+  # nothing is persisted, and a violated access boundary fails the build.
   #
-  # These suites need a connection to the real schema, and the only database this
-  # project has is production. Handing GitHub Actions a production database credential
-  # is a bigger concession than the coverage is worth, so the secret is deliberately
-  # NOT set: the suites are run by hand against the live schema (rolled back) on every
-  # change, which is how they have always actually been run.
+  # These used to be run by hand, because the only database this project had was
+  # production and handing GitHub Actions a production credential was a worse
+  # trade than the coverage was worth. That trade is gone: the whole schema is
+  # now rebuilt from its own migrations into a throwaway Postgres on every push,
+  # and the suites run against that. No production credential, no shared state,
+  # and the rebuild itself is a test — a schema that cannot be replayed from its
+  # migrations fails the build before a single suite runs.
   #
-  # The job therefore announces the gap loudly and passes, rather than failing every
-  # build or — worse — passing silently as if it had vouched for anything. If a
-  # SUPABASE_DB_URL secret is ever added, it starts running them for real with no
-  # further change. It is deliberately NOT a dependency of the deploy job below.
+  # supabase/tests/_harness.sql supplies the part of a Supabase project the
+  # migrations assume (roles, auth, vault, storage, pgcrypto) and replaces pg_net
+  # with a recorder, so nothing in CI can reach the network.
   db-boundary-tests:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Postgres 17, as on the live project.
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+        ports:
+          - 5432:5432
     env:
-      DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
       - uses: actions/checkout@v4
-      - name: Not run here (no SUPABASE_DB_URL secret — suites are run by hand)
-        if: env.DATABASE_URL == ''
-        run: echo "::warning::The database boundary suites (RLS, permissions, collaborations) did NOT run in CI. This build does not vouch for them — they are run manually against the live schema in a rolled-back transaction. See scripts/db-tests.sh."
       - name: Install psql
-        if: env.DATABASE_URL != ''
         run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
-      - name: Run rollback suites
-        if: env.DATABASE_URL != ''
-        run: bash scripts/db-tests.sh
+      - name: Build the schema from its migrations, then run the suites
+        run: bash scripts/db-ci.sh
 
   # Edge Functions — deployed from main with the same multi-file bundles the
   # project has always used (scripts/deploy-functions.mjs). Runs only when the
@@ -110,7 +117,7 @@ jobs:
   # contains a changed file are redeployed. Never on pull requests or branches.
   deploy-edge-functions:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-    needs: [static-checks]   # the offline suites gate production; the DB suites are run by hand (see above)
+    needs: [static-checks, db-boundary-tests]   # both gate production now that the DB suites run here
     runs-on: ubuntu-latest
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

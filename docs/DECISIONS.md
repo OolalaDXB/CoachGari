@@ -213,10 +213,11 @@ counterparty email (`20261015_cg_collab_room_link.sql`).
   collaboration-specific rate was invented; the owner confirmed collaborations
   carry the same 10% as coaching income, so **no code change was needed** — the
   existing engine already yields 10% and writes `partner_earnings` normally.
-- **Access.** `collab:view` / `collab:manage`. Gari is granted by the migration
-  (launch coach); **Mickaël (`mickael@thestudio.mt`) was granted operationally**
-  on 2026-09-10 (provisioning is operational data, never a migration), audited
-  under `admin_audit(area='permission', action='grant')`.
+- **Access.** `collab:view` / `collab:manage`, granted operationally to both
+  launch users on 2026-09-10 and audited under
+  `admin_audit(area='permission', action='grant')`. The migration used to grant
+  the coach's by naming his address; that was removed on 2026-09-14 — see
+  "Provisioning left the migrations" below.
 - **Finance label.** Collaboration payments show in Finance as type `other`
   (the existing derivation CASE fallback) with the collaboration reference in
   the payment-request metadata / transaction detail. A distinct `Collaboration`
@@ -652,9 +653,10 @@ the merchant key fixed to `coach_gari`. Nothing was extracted.
 
 - **Access is the finance pair, never `platform:admin`.** Every workspace
   RPC checks `finance:view` (read) or `finance:manage` (write) inside a
-  SECURITY DEFINER function. Gari (`grej28roux@gmail.com`) is provisioned
-  with the launch set (`20260928`, audited under `permission/provision`);
-  Mickaël already held it. Proven for both persona shapes in `cg0025` §10.
+  SECURITY DEFINER function. Both launch users hold the finance pair,
+  provisioned operationally and audited under `permission/provision`. Proven
+  for both persona shapes in `cg0025` §10 — with personas the suite seeds
+  itself, not with anyone's real row.
 - **Transactions are one list across every rail.** `finance_transactions()`
   joins the host order to its most relevant BEAU PH request and the host
   payment: type (`service` / `package` / `support` / `other`, from the
@@ -2564,3 +2566,87 @@ The instruction fields differ between the two shapes on purpose. The commercial
 one names a business account; the personal one names a person and says in its
 own label that it is not for a commercial payment. The test suite fails if
 friends-and-family wording ever reaches the commercial fields.
+
+---
+
+## 2026-09-14 — The database suites run in CI, on a database built from the migrations
+
+The sixteen database suites had never run in CI. The reason was sound: the only
+database this project has is production, and putting a production Postgres
+password into GitHub Actions — where every workflow can read it — buys
+automation of suites that were already being run by hand. So the job announced
+the gap and passed.
+
+The trade is gone rather than accepted. CI now starts a `postgres:17` container
+(the live project runs 17.6), replays every migration into it, and runs the
+suites against that. No credential, no shared state, nothing to leak.
+
+**`supabase/tests/_harness.sql`** supplies what the migrations assume a Supabase
+project already has: the `anon` / `authenticated` / `service_role` roles, `auth`
+(`uid`, `jwt`, `role`, and an intentionally empty `users`), `storage`
+(`buckets`, `objects` with RLS), `vault`, pgcrypto in schema `extensions`, and a
+`net` that records requests instead of making them. Two rules keep it honest:
+
+- **It is never more restrictive than production.** Most of these suites prove
+  negatives — anon cannot read this, a coach cannot reach finance. On a bare
+  Postgres a new table grants anon nothing, so every such assertion would pass
+  for the wrong reason. Supabase's default privileges on `public`, and its table
+  grants on `storage.objects`, are reproduced, so the suites have to prove the
+  schema takes access away.
+- **It never reaches the network.** `net.http_post` records and returns an id;
+  no response ever arrives. The real `*_kick()` path runs — a missing key or a
+  wrong header still shows up — and delivers nothing.
+
+`pg_cron` is deliberately absent: every scheduling block is already guarded, and
+a background job must not fire against a database a suite is using. The one
+assertion that read `cron.job` now says out loud when it could not check.
+
+### What the first replay found
+
+The rebuild is itself a test, and it failed before any suite ran:
+
+1. **`admin_audit_area_check` had lost two areas.** A CHECK cannot grow in
+   place, so adding one value means retyping the whole list. `20261041` did that
+   to add `whatsapp` and worked from an older copy, silently dropping
+   `commission` (`20261030`) and `enquiry` (`20261035`). Both are written by
+   code that runs today: **deleting a lead and requesting a commission exemption
+   were failing in production** on their audit INSERT, taking the work they had
+   already done down with them. Restored in `20261048` and applied.
+2. **The repository could not rebuild its own database.** Two same-day
+   migrations sorted in the wrong order (the definer-view fix must precede the
+   finance-context rewrite), and six migrations applied to the project had never
+   been written to a file. Both fixed; the directory now replays.
+3. **`crm_save_contact` in the repository was not the one running.** It had
+   `where id = id` — a plpgsql variable shadowing the column, which Postgres
+   refuses. Production had been corrected to `v_id` and the fix was never
+   written back. The file now matches.
+4. **A check in `cg014` had stopped running.** It read `outbox_keys.key`, a
+   column `20261018` removed when it introduced the SHA-256 hash, so the suite
+   aborted there instead of passing. It now asserts the shape that ships: the
+   digest in the table, the clear key only in the Vault.
+5. **Three suites asserted the old commission behaviour.** `20261027` made every
+   paid order carry an earning row, including manual rails; `cg012` and the BEAU
+   PH contract suite still asserted that direct rails produce none. They now
+   assert what makes a direct rail direct — the `receivable` direction — which
+   is the thing worth protecting.
+
+### Provisioning left the migrations
+
+Two migrations granted the launch coach his permissions by naming his personal
+email address, and two suites asserted against those production rows. A
+migration is permanent, so the address outlived any correction; a fresh database
+— a CI replay, a second environment — created a real person's account in it; and
+the suites could only run where those rows existed.
+
+Who holds which permission is operational fact, not schema. The seeding is gone
+from `20260928` and `20261013` (the rows already on the live project are
+untouched), replaced by `scripts/provision-user.sql`, which takes the address on
+the command line, grants one of three named sets, and audits it like any other
+grant. `scripts/check-provisioning.sql` reports who currently holds what and
+warns when fewer than two people can reach Finance or nobody holds
+`platform:admin`. The suites seed their own fictitious people; the two signing
+sides in `cg016` are identified by `app_users.party`, which is what the code
+reads anyway.
+
+`deploy-edge-functions` now waits for `db-boundary-tests` as well as
+`static-checks`.

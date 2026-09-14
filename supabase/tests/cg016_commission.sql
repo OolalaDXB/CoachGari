@@ -10,12 +10,21 @@
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
-  GARI   constant text := '{"email":"grej28roux@gmail.com","role":"authenticated"}';
-  STUDIO constant text := '{"email":"mickael@thestudio.mt","role":"authenticated"}';
+  -- The two signing sides are identified by app_users.party, never by a
+  -- particular address, so the suite seeds its own people instead of borrowing
+  -- the real ones — no personal email in the repository, and the suite runs on
+  -- any database rather than only on the one where those rows exist.
+  GARI   constant text := '{"email":"gari@test.local","role":"authenticated"}';
+  STUDIO constant text := '{"email":"studio@test.local","role":"authenticated"}';
   j jsonb; e public.partner_earnings%rowtype;
   oid uuid; oref text; cid uuid; packid uuid; mref text; moid uuid; st jsonb; xid uuid;
 begin
   update beau_ph.merchants set mode = 'test' where key = 'coach_gari';
+  insert into public.app_users (email, display_name, party, active) values
+    ('gari@test.local', 'Gari side', 'gari', true), ('studio@test.local', 'Studio side', 'studio', true);
+  insert into public.app_permissions (email, permission)
+  select u, p from unnest(array['gari@test.local','studio@test.local']) u,
+                   unnest(array['finance:view','finance:manage','client_profile:view','client_profile:manage']) p;
   perform set_config('request.jwt.claims', GARI, true);
 
   -- 1. one rate everywhere; the origin carries the direction, not the rate
@@ -46,7 +55,7 @@ begin
   insert into public.crm_contacts (display_name, email)
   values ('Commission Test Client', 'commission-test@example.com') returning id into cid;
   insert into public.session_packs (crm_contact_id, title, total_sessions, price_amount, currency, created_by)
-  values (cid, 'Cash pack', 5, 50000, 'AED', 'grej28roux@gmail.com') returning id into packid;
+  values (cid, 'Cash pack', 5, 50000, 'AED', 'gari@test.local') returning id into packid;
 
   j := public.payment_record_manual(packid, 50000, 'AED', 'cash', 'receipt-CG016');
   mref := j ->> 'order';
