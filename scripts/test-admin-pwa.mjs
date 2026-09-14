@@ -93,6 +93,23 @@ await page.waitForFunction(() => document.querySelector('#login-msg').hidden);
 const v = authCalls.find((c) => c.name === 'verifyOtp');
 check('the code signs in with verifyOtp(email, token, type "email")', v && v.args.email === 'gari@example.com' && v.args.token === '123456' && v.args.type === 'email', JSON.stringify(v));
 check('the link is still requested with the /admin/ redirect', authCalls.some((c) => c.name === 'signInWithOtp' && c.args.options.emailRedirectTo.endsWith('/admin/')));
+
+/* The install invitation is for people who work here, not for anyone who reaches the URL.
+   Two independent guards, so neither alone has to hold: the banner lives inside #app, which
+   stays hidden until a session AND a non-empty NAV, and offerInstall() is called from exactly
+   one place — render(), after my_permissions has come back. */
+const inst = await page.evaluate(() => {
+  const box = document.querySelector('#install');
+  return { existe: !!box, cache: box ? box.hidden : null, dansApp: box ? !!box.closest('#app') : null,
+           appCache: document.querySelector('#app').hidden };
+});
+check('the install invitation exists in the admin shell', inst.existe);
+check('it sits inside #app, which is hidden until there is a session with access', inst.dansApp && inst.appCache);
+check('a visitor who is not signed in is never invited to install', inst.cache === true);
+const src = await readFile(join(ROOT, 'admin/admin.js'), 'utf8');
+check('offerInstall() is called from one place only, after the permission check',
+  (src.match(/^\s*offerInstall\(\);/gm) || []).length === 1);
+check('the login screen never calls it', !/#login[\s\S]{0,400}offerInstall/.test(src));
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e)));
 await page.reload(); await page.waitForTimeout(300);

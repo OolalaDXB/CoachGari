@@ -64,6 +64,18 @@
       </section>
 
       <section id="app" hidden>
+        <!-- Offered only to someone already signed in with back-office access: admin.js
+             unhides it from render(), after my_permissions has returned a usable NAV. -->
+        <aside class="ad-install" id="install" hidden>
+          <div class="ad-install-txt">
+            <b>Install the back-office</b>
+            <span id="install-how">Keep it one tap away, full screen, without the browser bar.</span>
+          </div>
+          <div class="ad-install-act">
+            <button class="btn btn-dark btn-sm" id="install-go" hidden>Install</button>
+            <button class="btn btn-line btn-sm" id="install-no">Not now</button>
+          </div>
+        </aside>
         <div id="view"></div>
       </section>
     </main>

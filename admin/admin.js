@@ -84,6 +84,40 @@ if (standalone) document.documentElement.classList.add('standalone');
 if ('serviceWorker' in navigator && location.pathname.startsWith('/admin')) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' }).catch(() => {}); });
 }
+
+/* ---------- install prompt -------------------------------------------------
+   Offered only to someone signed in who holds back-office access: the browser's
+   event is captured here (it fires once, early, and is lost if not kept) but the
+   banner is never unhidden from this file. render() calls offerInstall() after
+   my_permissions has returned a usable NAV — so a stranger who loads /admin/,
+   and a signed-in person with no permission, are never invited to install it.
+   iOS has no such event: Safari installs only from its own Share menu, so there
+   it shows the instruction instead of a button. */
+let installEvent = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvent = e; });
+window.addEventListener('appinstalled', () => { installEvent = null; try { localStorage.setItem('cg-install', 'done'); } catch {} $('#install').hidden = true; });
+
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) && !window.MSStream;
+
+function offerInstall() {
+  const box = $('#install'); if (!box) return;
+  let dismissed = false;
+  try { dismissed = !!localStorage.getItem('cg-install'); } catch {}        // private mode: just offer it
+  if (standalone || dismissed) { box.hidden = true; return; }
+  if (!installEvent && !isIOS) return;                                       // no way to install from here
+  if (isIOS && !installEvent) $('#install-how').textContent = 'In Safari: Share, then "Add to Home Screen".';
+  $('#install-go').hidden = !installEvent;
+  box.hidden = false;
+  $('#install-no').onclick = () => { box.hidden = true; try { localStorage.setItem('cg-install', 'no'); } catch {} };
+  $('#install-go').onclick = async () => {
+    if (!installEvent) return;
+    box.hidden = true;
+    installEvent.prompt();
+    const { outcome } = await installEvent.userChoice.catch(() => ({ outcome: 'dismissed' }));
+    installEvent = null;
+    if (outcome !== 'accepted') { try { localStorage.setItem('cg-install', 'no'); } catch {} }
+  };
+}
 async function boot() {
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -169,6 +203,7 @@ async function render(session) {
     $('#nav').onclick = (e) => { const a = e.target.closest('[data-section]'); if (a) { go(a.dataset.section); closeDrawer(); } };
     $('#side-foot').textContent = session.user.email;
     $('#sidebar').hidden = false; $('#topbar').hidden = false; $('#app').hidden = false;
+    offerInstall();                                   // signed in, and NAV is not empty: this person works here
     renderAccount(session);
     $('#burger').onclick = () => { $('#sidebar').classList.add('open'); $('#scrim').hidden = false; };
     $('#scrim').onclick = closeDrawer;

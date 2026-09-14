@@ -10,6 +10,15 @@
 .ad-card h1{font-size:30px;letter-spacing:-.02em;margin:0 0 12px;}
 .ad-muted{color:var(--grey-text);font-size:15px;}
 .ad-msg{margin-top:14px;font-size:14px;font-weight:600;}
+/* install invitation — only ever shown inside #app, i.e. to a signed-in person
+   with back-office access (admin.js, offerInstall). Never on the login screen. */
+.ad-install{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:space-between;
+  background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:20px;}
+.ad-install-txt{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.ad-install-txt b{font-size:14.5px;letter-spacing:-.01em;}
+.ad-install-txt span{font-size:13px;color:var(--grey-text);font-weight:500;}
+.ad-install-act{display:flex;gap:8px;flex-shrink:0;}
+@media(max-width:560px){.ad-install-act{width:100%;}.ad-install-act .btn{flex:1;}}
 .ad-msg.err{color:#b3261e;}
 .ad-msg.ok{color:#1b7a3d;}
 .ad-form{display:grid;gap:14px;margin-top:18px;}
