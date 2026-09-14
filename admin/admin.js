@@ -1136,6 +1136,7 @@ async function availability() {
         <td class="acts"><button class="btn btn-line btn-xs" data-edit="${r.id}">Edit</button><button class="btn btn-line btn-xs" data-toggle="${r.id}" data-to="${!r.active}">${r.active ? 'Disable' : 'Enable'}</button><button class="btn btn-line btn-xs" data-del="${r.id}">Delete</button></td></tr>`), 'No weekly hours yet — add your first rule.')}
         ${data.some((r) => (r.notes || '').toLowerCase().includes('placeholder')) ? '<p class="ad-note">Rows marked "placeholder" were seeded by the developers. Replace them with your real hours.</p>' : ''}</div>
       <div class="ad-panel"><h2>${editing ? 'Edit rule' : 'Add weekly hours'}</h2>
+        ${!editing ? '<p class="ad-note" style="margin:0 0 12px">Gari works around the clock: <button class="btn btn-line btn-xs" type="button" id="rule-247">Set 24/7</button> replaces every rule with 00:00–24:00, seven days, Asia/Dubai. Block time off with an exception.</p>' : ''}
         <form id="rule-form" class="ad-form">
           <div class="row"><label>Day <select name="weekday">${WEEKDAYS.slice(1).map((d, i) => `<option value="${i + 1}" ${editing?.weekday === i + 1 ? 'selected' : ''}>${d}</option>`).join('')}</select></label>
             <label>From <input type="time" name="start_time" required value="${editing?.start_time?.slice(0, 5) || '09:00'}"></label>
@@ -1147,6 +1148,13 @@ async function availability() {
           <div class="actions"><button class="btn btn-accent btn-sm" type="submit">${editing ? 'Save' : 'Add'}</button>${editing ? '<button class="btn btn-line btn-sm" type="button" data-cancel-edit>Cancel</button>' : ''}</div>
         </form></div></div>`;
   view.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => { view.dataset.editRule = b.dataset.edit; availability().catch(fail); });
+  const b247 = $('#rule-247'); if (b247) b247.onclick = async () => {
+    if (!(await confirmAct('Replace every weekly rule with 00:00–24:00, seven days (Asia/Dubai)? Exceptions and bookings are untouched.'))) return;
+    const { error: e1 } = await sb.from('availability_rules').delete().not('id', 'is', null); if (e1) return fail(e1);
+    const rows = [1, 2, 3, 4, 5, 6, 7].map((w) => ({ weekday: w, start_time: '00:00', end_time: '24:00', timezone: 'Asia/Dubai', service_ids: null, notes: 'Around the clock — set from the back-office' }));
+    const { error: e2 } = await sb.from('availability_rules').insert(rows); if (e2) return fail(e2);
+    toast('Available 24/7'); availability().catch(fail);
+  };
   view.querySelector('[data-cancel-edit]')?.addEventListener('click', () => { delete view.dataset.editRule; availability().catch(fail); });
   view.querySelectorAll('[data-toggle]').forEach((b) => b.onclick = async () => { const { error } = await sb.from('availability_rules').update({ active: b.dataset.to === 'true' }).eq('id', b.dataset.toggle); if (error) return fail(error); toast('Saved'); availability().catch(fail); });
   view.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => { if (!(await confirmAct('Delete this rule? Existing bookings are not affected.'))) return; const { error } = await sb.from('availability_rules').delete().eq('id', b.dataset.del); if (error) return fail(error); toast('Deleted'); availability().catch(fail); });

@@ -217,8 +217,10 @@ service → day → time → details → 10-minute hold → payment (CG-003).
   `tour_stop_services`, add `availability_exceptions` rows with `kind = 'open'`
   and `tour_stop_id` for the bookable windows. Until CG-002.5's back-office, do
   this in the SQL editor.
-- **Placeholder hours**: Mon–Fri 09:00–17:00 Asia/Dubai are seeded so the engine
-  has something to offer — edit them in `availability_rules`.
+- **Hours**: the migration seeds Mon–Fri 09:00–17:00 as a placeholder; the live
+  project runs **24/7** (seven rules 00:00–24:00 Asia/Dubai, set by the owner on
+  2026-09-14 — operational data, not a migration). Schedule › Availability has a
+  **Set 24/7** button that restores that state; time off is an exception.
 
 ### Booking tests
 
