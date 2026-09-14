@@ -156,9 +156,9 @@ check('+ Add opens the BEAU PH catalogue (fetched now, once)', count('beau_ph_ra
 
 // BEAU PH › Rails
 const before = count('beau_ph_rails');
-await page.click('#nav a[data-section="beauph"]');
+await page.click('#nav a[data-section="settings"]'); await page.waitForSelector('#subnav a[data-sub="rails"]'); await page.click('#subnav a[data-sub="rails"]');
 await page.waitForSelector('.ph-card[data-rail="stripe"]');
-check('Rails default tab, 11 rails rendered', (await page.evaluate(() => location.hash)) === '#beauph/rails' && (await page.$$('.ph-card')).length === 11);
+check('Rails default tab, 11 rails rendered', (await page.evaluate(() => location.hash)) === '#settings/rails' && (await page.$$('.ph-card')).length === 11);
 check('Rails uses the cached catalogue and one runtime probe (JWT sent)', count('beau_ph_rails') === before && count('fetch:ph-admin') === 1 && calls.find((c) => c.name === 'fetch:ph-admin').args.auth === true);
 check('Rail card shows LIVE, capability vs merchant coverage, checklist', await page.evaluate(() => { const c = document.querySelector('.ph-card[data-rail="stripe"]').textContent; return c.includes('LIVE') && c.includes('Active') && c.includes('Provider coverage') && c.includes('Merchant enabled') && c.includes('Credentials') && c.includes('Webhook') && c.includes('Merchant config') && c.includes('Last activity'); }));
 check('A not-onboarded rail is not pretended ready', await page.evaluate(() => { const c = document.querySelector('.ph-card[data-rail="mpesa"]').textContent; return c.includes('Not onboarded') && c.includes('Start onboarding') && !c.includes('Enable'); }));

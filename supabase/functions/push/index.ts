@@ -27,7 +27,7 @@ const TEXT: Record<string, { t: string; u: string }> = {
   payment_received:   { t: "Payment received",        u: "/admin/#finance" },
   booking_cancelled:  { t: "A booking was cancelled", u: "/admin/#schedule/bookings" },
   reschedule:         { t: "A session moved",         u: "/admin/#schedule" },
-  collab_request:     { t: "New collaboration enquiry", u: "/admin/#collaborations" },
+  collab_received:    { t: "New collaboration enquiry", u: "/admin/#collaborations" },
   collab_accepted:    { t: "A collaboration was accepted", u: "/admin/#collaborations" },
   collab_counter:     { t: "A counter-offer came in",  u: "/admin/#collaborations" },
   collab_declined:    { t: "A collaboration was declined", u: "/admin/#collaborations" },

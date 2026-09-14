@@ -209,19 +209,20 @@ function navModel() {
               { key: 'availability', label: 'Availability', show: () => true, run: availability },
               { key: 'exceptions', label: 'Exceptions', show: () => true, run: exceptions },
               { key: 'tours', label: 'Tour stops', show: () => true, run: tours } ] },
-    { key: 'services', label: 'Services', icon: '❖', show: () => has('catalog:view'), run: catalogue },
     { key: 'collab', label: 'Collaborations', icon: '⇄', show: () => has('collab:view'), run: collabList },
-    // Finance = the daily business surface (Transactions first, never the infrastructure). BEAU PH = the temporary embedded
-    // payment-infrastructure workspace (Rails, FX); both gated on the finance permissions, never on platform:admin.
+    // Finance = the daily business surface (Transactions first, never the infrastructure).
     { key: 'finance', label: 'Finance', icon: '$', show: () => has('finance:view'),
       subs: [ { key: 'transactions', label: 'Transactions', show: () => true, run: financeTransactions },
               { key: 'commissions', label: 'Commissions', show: () => true, run: financeCommissions },
               { key: 'methods', label: 'Payment methods', show: () => true, run: financePaymentMethods } ] },
-    { key: 'beauph', label: 'BEAU PH', icon: '⌁', show: () => has('finance:view'),
-      subs: [ { key: 'rails', label: 'Rails', show: () => true, run: phRails },
-              { key: 'fx', label: 'FX', show: () => true, run: phFx } ] },
     { key: 'analytics', label: 'Analytics', icon: '◔', show: () => has('analytics:view'), run: analytics },
-    { key: 'access', label: 'Access', icon: '⚿', show: () => has('platform:admin'), run: access },
+    // Settings = what is configured once and rarely touched: the catalogue, who has access, and the
+    // BEAU PH payment infrastructure (Rails, FX) — each tab keeps its own permission.
+    { key: 'settings', label: 'Settings', icon: '⚙', show: () => has('catalog:view') || has('platform:admin') || has('finance:view'),
+      subs: [ { key: 'services', label: 'Services', show: () => has('catalog:view'), run: catalogue },
+              { key: 'access', label: 'Access', show: () => has('platform:admin'), run: access },
+              { key: 'rails', label: 'Payment rails', show: () => has('finance:view'), run: phRails },
+              { key: 'fx', label: 'FX', show: () => has('finance:view'), run: phFx } ] },
   ];
 }
 let NAV = [];
@@ -278,7 +279,12 @@ function renderAccount(session) {
 
 // route to a section (and optional sub-tab); keeps the hash in sync
 function go(sectionKey, subKey) {
-  if (sectionKey === 'bookings') { sectionKey = 'schedule'; subKey = 'bookings'; }   // Bookings moved under Schedule; old links still land
+  // sections that moved keep their old hashes landing: #bookings → Schedule, #services / #access / #beauph → Settings
+  if (sectionKey === 'bookings') { sectionKey = 'schedule'; subKey = 'bookings'; }
+  if (sectionKey === 'services') { sectionKey = 'settings'; subKey = 'services'; }
+  if (sectionKey === 'access') { sectionKey = 'settings'; subKey = 'access'; }
+  if (sectionKey === 'beauph') { sectionKey = 'settings'; subKey = subKey === 'fx' ? 'fx' : 'rails'; }
+  if (sectionKey === 'collaborations') sectionKey = 'collab';   // the push deep link spells it out
   const section = NAV.find((s) => s.key === sectionKey) || NAV[0];
   cur.section = section.key;
   for (const a of $('#nav').querySelectorAll('[data-section]')) a.classList.toggle('on', a.dataset.section === section.key);
