@@ -31,6 +31,10 @@ body{
   -webkit-font-smoothing:antialiased;
 }
 .wrap{max-width:var(--maxw);margin:0 auto;padding:0 28px;}
+/* 28px a side is 17% of a 320px screen. Giving 10px of it back to the line is
+   what lets the hero lead hold two lines there at a size that still reads as
+   larger than the grey paragraph under it. */
+@media(max-width:360px){.wrap{padding:0 18px;}}
 a{color:inherit;}
 a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
   outline:2px solid var(--accent);outline-offset:3px;}
@@ -38,8 +42,10 @@ h1,h2,h3,h4{margin:0;font-weight:800;letter-spacing:-.038em;line-height:1.04;}
 /* The 2.5rem floor was too big for the narrowest phones: at 320px each half of
    the hero title wrapped again, giving four lines. The largest size that still
    fits two lines tracks the line width almost exactly (12.5vw - 8px, the offset
-   being the wrap's 56px of side padding), so the floor follows it below ~390px
-   and stays at 2.5rem above — nothing changes at 390px and wider. */
+   being the wrap's side padding), so the floor follows it below ~390px and stays
+   at 2.5rem above — nothing changes at 390px and wider. Calibrated against the
+   28px padding; under 360px the wrap gives 10px a side back, so there the title
+   has more room than this asks for. */
 h1{font-size:clamp(min(2.5rem,12.5vw - 8px),5.4vw,4rem);}
 h2{font-size:clamp(2rem,3.9vw,3.05rem);}
 h3{font-size:clamp(1.4rem,2.2vw,1.8rem);letter-spacing:-.03em;}
@@ -96,16 +102,18 @@ p{margin:0 0 1em;}
 .hero-brand span{color:var(--accent);}
 .hero h1{margin-bottom:20px;}
 /* Two lines, not three: 22ch broke the lead into three lines at every width.
-   30ch holds it to two from 390px up, and the lower clamp floor carries that
-   down to 360px. Below ~340px it takes three lines whatever we do — the line
-   simply does not fit — and shrinking the type further to force it would cost
-   more than the extra line. `balance` keeps the two lines close in length. */
-.hero-lead{font-size:clamp(1.06rem,2.6vw,1.55rem);font-weight:700;letter-spacing:-.025em;line-height:1.2;max-width:30ch;text-wrap:balance;margin:0 auto 16px;color:var(--black);}
+   30ch holds it to two, and below ~375px the floor follows the line width
+   (5.5vw - 2px) so it keeps holding down to 320px — min() pins it under the old
+   1.06rem so nothing changes from 375px up. `balance` evens the two lines. */
+.hero-lead{font-size:clamp(min(1.06rem,5.5vw - 2px),2.6vw,1.55rem);font-weight:700;letter-spacing:-.025em;line-height:1.2;max-width:30ch;text-wrap:balance;margin:0 auto 16px;color:var(--black);}
 /* The hero title breaks after "me" on narrow screens. It fits on one line from
    680px, but with only 18px to spare, so the break is kept until 760px where
    there are 81px — enough that a different font rasteriser cannot push it over. */
 @media(min-width:760px){.br-hero{display:none;}}
-.hero .sub{font-size:1.18rem;max-width:54ch;}
+/* Follows the lead down on the narrowest screens. Left fixed, the grey
+   paragraph would sit at 18.9px under a 15.6px bold lead — bigger than the line
+   it supports. min() keeps it untouched from 360px up. */
+.hero .sub{font-size:min(1.18rem,5.9vw - 2px);max-width:54ch;}
 .hero-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:38px;}
 .hero-meta{margin-top:28px;font-size:14.5px;font-weight:600;color:var(--grey-text);}
 @media(max-width:640px){.hero{padding:56px 0;}.hero-cta .btn{width:100%;}}

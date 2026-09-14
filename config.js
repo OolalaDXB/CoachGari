@@ -62,7 +62,7 @@ export const CONFIG = {
   STUDIO_URL: 'https://thestudio.mt',
 
   // Oolala (Oo) social-follow link used in every footer.
-  SOCIAL_URL: 'https://myoolala.com/u/coachgari',
+  SOCIAL_URL: 'https://myoolala.com/u/coachgari28',
 
   // Replaces the "__ %" in the proposal.
   COMMISSION_RATE: '10%',
