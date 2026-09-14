@@ -2521,3 +2521,46 @@ protection for both sides, and is the ordinary way a receiving account gets
 limited. Neither rail here offers that wording to copy, both name a business
 account, and the test suite fails if friends-and-family appears anywhere in the
 payer-facing fields.
+
+## A peer-to-peer rail, and the guard that makes it shippable (14/09/2026)
+
+The first pass refused friends-and-family outright. That was the wrong call for
+a module that is meant to be extracted and sold: BEAU PH's job is to express
+every shape of payment its future merchants use, and a personal transfer is a
+real shape — splitting a cost, reimbursing an expense, a gift, a club collecting
+from its own members. Refusing the shape because one misuse of it is harmful is
+the same mistake as refusing cash because it can be undeclared.
+
+So the rail exists in full, and the harm is addressed where it actually lives:
+using a personal transfer for a COMMERCIAL payment is what breaches the
+provider's terms and strips protection from both sides. That is a property of
+the request, not of the rail, and BEAU PH already had somewhere to put it.
+
+Three additions, in increasing order of usefulness:
+
+1. `p2p_transfer` joins the capability vocabulary.
+2. `personal` joins the intent vocabulary, for a transfer that is not a sale. It
+   is deliberately not folded into `support`: a tip to a business is still
+   commercial.
+3. **A capability can declare which intents it serves.** `provider_capabilities`
+   gains `intents text[]` (null = any) and the eligibility matrix refuses a
+   capability whose intents do not include the request's.
+
+The third is the one that will outlive this feature. It is general — any
+capability can now be scoped to an intent — and the peer-to-peer rail is simply
+the first that needed it. It also let the guard be symmetrical: the commercial
+capabilities of both rails are marked as serving every intent except `personal`,
+so a checkout cannot be offered for a personal transfer either. Relying on one
+direction only would have left the other as a latent bug.
+
+Two smaller decisions. The rail is operator-confirmed on every provider, because
+a friends-and-family send produces no order and no webhook: there is nothing
+that could confirm it, and pretending otherwise would put an unverifiable
+payment in the ledger as if a provider had vouched for it. And the merchant has
+to opt in twice, through the capability list and the intent list, so the rail
+can never appear by default on a host that sells something.
+
+The instruction fields differ between the two shapes on purpose. The commercial
+one names a business account; the personal one names a person and says in its
+own label that it is not for a commercial payment. The test suite fails if
+friends-and-family wording ever reaches the commercial fields.

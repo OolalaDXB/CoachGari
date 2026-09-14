@@ -1129,6 +1129,34 @@ Subscribe the webhook endpoint (`/functions/v1/paypal-webhook`) to
 `PAYMENT.CAPTURE.REFUNDED`, `PAYMENT.CAPTURE.REVERSED` and
 `CHECKOUT.ORDER.APPROVED`.
 
+**Peer-to-peer transfers are a capability, not a button.** BEAU PH is meant to
+be extracted and sold as a connectable module, so it has to express every shape
+of payment its future merchants use, and a personal transfer is a real one:
+splitting a cost, reimbursing an expense, a gift, a club collecting from its own
+members. Both PayPal and Wise therefore carry a `p2p_transfer` capability.
+
+What makes it safe is that the hub refuses to offer it for a commercial
+request. Three things had to exist:
+
+- a new intent, `personal`, for a transfer that is not a sale — deliberately not
+  a synonym for `support`, because a tip to a business is still commercial;
+- the capability `p2p_transfer`;
+- **capabilities can now declare which intents they serve**
+  (`provider_capabilities.intents`, null = any), and the eligibility matrix
+  refuses a capability whose intents do not include the request's. That is
+  general: any capability can be restricted this way, and the peer-to-peer rail
+  is simply the first that needs it.
+
+The guard runs both ways: on a commercial request the checkout is offered and
+the peer-to-peer rail is refused with reason `intent`; on a personal request it
+is the mirror image. A merchant opts in twice, through
+`merchant_methods.capabilities` and `merchant_methods.intents`, so the rail can
+never appear by default on a host that sells something. It is always
+operator-confirmed, because a friends-and-family send produces no order and no
+webhook that could confirm it, and the request records
+`capability = 'p2p_transfer'` with `intent = 'personal'` so the ledger says what
+kind of payment happened and on whose word.
+
 **What is deliberately not automated.** A PayPal refund is recorded as BEAU PH
 evidence and then left alone: on a refund the resource is the refund, not the
 capture, and mapping it onto the ledger needs a capture link PayPal only
@@ -1136,13 +1164,14 @@ supplies on some event shapes. Guessing would credit the wrong payment, so a
 refund goes through the same operator path as every other manual correction
 until a real refund event has been read.
 
-**Tests.** `PAYPAL_WISE_TESTS ok=60` offline — the adapter is driven against a
+**Tests.** `PAYPAL_WISE_TESTS ok=76` offline — the adapter is driven against a
 fake fetch, so the order it builds, the environment it talks to and the
 signature checks are exercised rather than pattern-matched, including that a
-certificate URL which is not PayPal's is refused. `CG021_TESTS ok=21` proves a
+certificate URL which is not PayPal's is refused. `CG021_TESTS ok=29` proves a
 verified capture marks the order paid once with the real PayPal fee, that a
 replay changes nothing, and that a wrong amount, a ghost order and an approval
-event are all refused but recorded.
+event are all refused but recorded, and that the peer-to-peer rail is offered on
+a personal request and refused on a sale.
 
 ## Continuous integration
 

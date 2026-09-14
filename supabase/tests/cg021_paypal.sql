@@ -1,5 +1,6 @@
 -- =====================================================================
--- CG-021 — PayPal reaching the ledger, and Wise staying a manual rail.
+-- CG-021 — PayPal reaching the ledger, Wise staying a manual rail, and the
+-- peer-to-peer rail staying off a commercial request.
 -- One rolled-back transaction. Proves: a verified capture marks the order paid
 -- once and records the real PayPal fee; a replay changes nothing; a wrong
 -- amount, a ghost order and an event type that must not move money are all
@@ -10,7 +11,8 @@
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
-  oid uuid; j jsonb; n int; ev jsonb;
+  oid uuid; j jsonb; n int; ev jsonb; mid uuid; cap jsonb;
+  rt jsonb := jsonb_build_object('paypal', jsonb_build_object('configured', true, 'mode', 'live'));
 begin
   /* ---- 1. the amount helper ---- */
   if beau_ph.paypal_minor('45.00','AED') = 4500 then ok := ok + 1; else fail := fail + 1; log := log || ' [aed]'; end if;
@@ -107,6 +109,56 @@ begin
          or (ns.nspname = 'public'  and p.proname = 'process_paypal_event'))
        and (has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('anon', p.oid, 'execute')))
     then ok := ok + 1; else fail := fail + 1; log := log || ' [ingest-reachable]'; end if;
+
+  /* ---- 8. the peer-to-peer rail exists, and only for a non-commercial intent ----
+     BEAU PH is meant to be extracted and resold, so it has to express a personal
+     transfer. What must never happen is that shape being offered for a sale. */
+  select id into mid from beau_ph.merchants where key = 'coach_gari';
+  insert into beau_ph.merchant_methods (merchant_id, provider_key, enabled, listed, countries, currencies, intents, capabilities, instructions)
+  values (mid, 'paypal', true, true, '{AE,FR,NG}', '{AED,EUR}', '{package,personal}',
+          '{online_checkout,manual_instructions,p2p_transfer}',
+          jsonb_build_object('paypal_business_email','pay@example.com'))
+  on conflict (merchant_id, provider_key) do update
+    set enabled = true, listed = true, countries = excluded.countries, currencies = excluded.currencies,
+        intents = excluded.intents, capabilities = excluded.capabilities;
+
+  -- a COMMERCIAL request: checkout offered, peer-to-peer refused on the intent
+  j := beau_ph.method_matrix('coach_gari','AE','AED', rt, null, 'customer', 'package');
+  select e into cap from jsonb_array_elements(j) e where e ->> 'provider' = 'paypal';
+  if (cap ->> 'eligible')::boolean and (cap ->> 'capability') = 'online_checkout'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [commercial-checkout]'; end if;
+  if (select (c ->> 'eligible')::boolean = false and (c ->> 'reason') = 'intent'
+        from jsonb_array_elements(cap -> 'capabilities') c where c ->> 'capability' = 'p2p_transfer')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [p2p-offered-on-a-sale]'; end if;
+
+  -- a PERSONAL request: the mirror image
+  j := beau_ph.method_matrix('coach_gari','AE','AED', rt, null, 'customer', 'personal');
+  select e into cap from jsonb_array_elements(j) e where e ->> 'provider' = 'paypal';
+  if (cap ->> 'eligible')::boolean and (cap ->> 'capability') = 'p2p_transfer' and (cap ->> 'confirmation') = 'operator'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [personal-p2p]'; end if;
+  if (select (c ->> 'eligible')::boolean = false and (c ->> 'reason') = 'intent'
+        from jsonb_array_elements(cap -> 'capabilities') c where c ->> 'capability' = 'online_checkout')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [checkout-offered-on-a-personal-transfer]'; end if;
+
+  -- no opt-in on the capability: never offered, whatever the intent
+  update beau_ph.merchant_methods set capabilities = '{online_checkout,manual_instructions}'
+   where merchant_id = mid and provider_key = 'paypal';
+  j := beau_ph.method_matrix('coach_gari','AE','AED', rt, null, 'customer', 'personal');
+  select e into cap from jsonb_array_elements(j) e where e ->> 'provider' = 'paypal';
+  if (select (c ->> 'reason') = 'disabled' from jsonb_array_elements(cap -> 'capabilities') c where c ->> 'capability' = 'p2p_transfer')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [p2p-without-optin]'; end if;
+
+  -- no opt-in on the personal intent: same
+  update beau_ph.merchant_methods set capabilities = '{online_checkout,manual_instructions,p2p_transfer}', intents = '{package}'
+   where merchant_id = mid and provider_key = 'paypal';
+  j := beau_ph.method_matrix('coach_gari','AE','AED', rt, null, 'customer', 'personal');
+  select e into cap from jsonb_array_elements(j) e where e ->> 'provider' = 'paypal';
+  if (cap ->> 'eligible')::boolean = false and (cap ->> 'reason') = 'intent'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [personal-intent-without-optin]'; end if;
+
+  if beau_ph.is_capability('p2p_transfer') and beau_ph.is_intent('personal')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [vocabulary]'; end if;
+  if not beau_ph.is_intent('friends_and_family') then ok := ok + 1; else fail := fail + 1; log := log || ' [made-up-intent]'; end if;
 
   raise exception 'CG021_TESTS ok=% fail=% %', ok, fail, case when log = '' then '' else '—' || log end;
 end $$;

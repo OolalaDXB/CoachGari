@@ -28,7 +28,7 @@
    statement lines instead of a screenshot. That is reconciliation, not
    acceptance, and it is not implemented.
    ============================================================= */
-import type { EnvReader, ProviderAdapter, ProviderCapabilities, RuntimeReadiness } from "../../contracts/provider.ts";
+import type { Capability, EnvReader, ProviderAdapter, ProviderCapabilities, RuntimeReadiness } from "../../contracts/provider.ts";
 
 export const wise: ProviderAdapter = {
   key: "wise",
@@ -42,12 +42,20 @@ export const wise: ProviderAdapter = {
       capabilities: [
         {
           capability: "bank_transfer", readiness: "available", confirmation: "operator",
-          platforms: null, initiatedBy: "any", handoff: false,
+          platforms: null, initiatedBy: "any", handoff: false, intents: ["service", "package", "support", "other"],
           notes: "Local account details from a Wise Business account; an authorised operator confirms receipt. No Wise API call is made.",
         },
         {
           capability: "manual_instructions", readiness: "available", confirmation: "operator",
-          platforms: null, initiatedBy: "any", handoff: false,
+          platforms: null, initiatedBy: "any", handoff: false, intents: ["service", "package", "support", "other"],
+        },
+        {
+          // Wise between individuals. Same reasoning as PayPal's: a real shape,
+          // non-commercial intents only, and operator-confirmed because Wise
+          // reports nothing back to us either way.
+          capability: "p2p_transfer", readiness: "available", confirmation: "operator",
+          platforms: null, initiatedBy: "any", handoff: false, intents: ["personal"],
+          notes: "Wise personal transfer between individuals. Non-commercial requests only; an authorised operator confirms receipt.",
         },
       ],
       // No checkout, no webhook: Wise cannot confirm a received payment to us.
@@ -73,7 +81,15 @@ export const wise: ProviderAdapter = {
     });
   },
 
-  instructionFields() {
+  instructionFields(capability?: Capability) {
+    if (capability === "p2p_transfer") {
+      return [
+        { key: "account_holder", label: "Account name", copyable: true },
+        { key: "wise_tag", label: "Wisetag or email", copyable: true },
+        { key: "wise_currency", label: "Currency", copyable: true },
+        { key: "notes", label: "Notes for the sender (not for a commercial payment)", copyable: false },
+      ];
+    }
     return [
       { key: "account_holder", label: "Account holder", copyable: true },
       { key: "wise_currency", label: "Account currency", copyable: true },

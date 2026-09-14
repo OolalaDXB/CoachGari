@@ -31,7 +31,7 @@ export type Mode = "test" | "live";
 /** Generic capability vocabulary (mirrors beau_ph.is_capability). */
 export type Capability =
   | "online_checkout" | "payment_link" | "manual_instructions" | "wallet" | "bank_transfer" | "mobile_money"
-  | "softpos" | "card_present" | "tap_to_pay" | "qr" | "crypto" | "cash";
+  | "softpos" | "card_present" | "tap_to_pay" | "qr" | "crypto" | "cash" | "p2p_transfer";
 export const IN_PERSON_CAPABILITIES: ReadonlySet<Capability> = new Set(["softpos", "card_present", "tap_to_pay", "cash"]);
 
 /** Device / platform the request is initiated from (mirrors beau_ph.is_platform). `ios_app` = a future BEAU PH Merchant iOS app. */
@@ -44,10 +44,15 @@ export type PaymentStatus = "created" | "pending" | "requires_action" | "paid" |
 /** Reads a deployment secret by name. Adapters never log, return or store the value. */
 export type EnvReader = (name: string) => string | undefined;
 
+/** What a request is for. `personal` is a transfer that is not a sale; a tip to a business is still commercial (`support`). */
+export type Intent = "service" | "package" | "support" | "other" | "personal";
+
 export interface CapabilitySpec {
   capability: Capability;
   readiness: Readiness;
   confirmation: Confirmation;
+  /** Which intents this capability may serve. Null / omitted = any. Keeps a peer-to-peer rail off a commercial request. */
+  intents?: Intent[] | null;
   /** null = any platform. */
   platforms: Platform[] | null;
   initiatedBy: Initiator | "any";

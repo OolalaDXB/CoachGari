@@ -15,6 +15,7 @@ import { providers, providerKeys } from '../beau-ph/core/registry.ts';
 const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
 const mig = read('../supabase/migrations/20261045_beau_ph_wise_paypal.sql');
 const host = read('../supabase/migrations/20261046_cg_process_paypal_event.sql');
+const p2p = read('../supabase/migrations/20261047_beau_ph_p2p_transfer.sql');
 const hook = read('../supabase/functions/paypal-webhook/index.ts');
 const paypalSrc = read('../beau-ph/providers/paypal/adapter.ts');
 const reportFn = read('../supabase/functions/report/index.ts');
@@ -63,13 +64,44 @@ check('Wise asks for the fields a local transfer actually needs',
   ['account_holder', 'iban', 'swift_bic', 'bank_name'].every((k) => wise.instructionFields().some((f) => f.key === k)));
 check('the source says plainly why there is no Wise integration', /no hosted checkout|no acceptance API/i.test(wiseSrc));
 
-/* ---- neither rail invites a friends-and-family payment ---- */
+/* ---- the commercial fields never invite a friends-and-family payment ---- */
 for (const [label, src] of [['Wise', wiseSrc], ['PayPal', paypalSrc]]) {
-  const fields = (label === 'Wise' ? wise : paypal).instructionFields().map((f) => `${f.key} ${f.label}`).join(' ');
-  check(`${label} never offers friends-and-family wording to copy`,
+  const adapter = label === 'Wise' ? wise : paypal;
+  const fields = adapter.instructionFields().map((f) => `${f.key} ${f.label}`).join(' ');
+  check(`${label}'s commercial fields never offer friends-and-family wording to copy`,
     !/friends?.and.family|send to a friend/i.test(fields));
   check(`${label} says business account in the source, where the rule belongs`, /business account/i.test(src));
 }
+
+/* ---- the peer-to-peer rail exists in full, and only for a non-commercial intent ----
+   BEAU PH is meant to be extracted and resold, so it must be able to express a
+   personal transfer. What must never happen is that shape being offered for a
+   sale: that is the thing that breaches the provider's terms. */
+for (const [label, adapter] of [['Wise', wise], ['PayPal', paypal]]) {
+  const caps = adapter.capabilities().capabilities;
+  const p2p = caps.find((c) => c.capability === 'p2p_transfer');
+  check(`${label} carries a peer-to-peer capability`, !!p2p);
+  check(`${label}'s peer-to-peer rail serves only a personal intent`,
+    JSON.stringify(p2p?.intents) === JSON.stringify(['personal']));
+  check(`${label}'s peer-to-peer rail is operator-confirmed, because nothing reports it back`,
+    p2p?.confirmation === 'operator');
+  check(`${label}'s commercial capabilities exclude the personal intent, so the guard works both ways`,
+    caps.filter((c) => c.capability !== 'p2p_transfer').every((c) => Array.isArray(c.intents) && !c.intents.includes('personal')));
+  const p2pFields = adapter.instructionFields('p2p_transfer').map((f) => `${f.key} ${f.label}`).join(' ');
+  check(`${label}'s peer-to-peer fields differ from the commercial ones`,
+    p2pFields !== adapter.instructionFields().map((f) => `${f.key} ${f.label}`).join(' '));
+  check(`${label}'s peer-to-peer fields say in words that they are not for a commercial payment`,
+    /not for a commercial payment/i.test(p2pFields));
+}
+check('the database and the adapters agree on the vocabulary',
+  /'p2p_transfer'\)/.test(p2p) && /'personal'\)/.test(p2p));
+check('a capability can declare which intents it serves, which is what makes this general',
+  /add column if not exists intents text\[\]/.test(p2p)
+  && /when c\.intents is not null and \(p_intent is null or not \(p_intent = any\(c\.intents\)\)\)  then 'intent'/.test(p2p));
+check('an unknown intent cannot reach a restricted capability either',
+  /p_intent is null or not/.test(p2p));
+check('the merchant has to opt in, it is never on by default',
+  /opt in twice/.test(p2p));
 
 /* ---- PayPal: the mode gate ---- */
 check('an unset payment mode is refused, never guessed',

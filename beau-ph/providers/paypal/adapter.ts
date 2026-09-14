@@ -30,7 +30,7 @@
    value, never a prefix.
    ============================================================= */
 import type {
-  CreateRequestInput, CreateRequestResult, EnvReader, ProviderAdapter, ProviderCapabilities,
+  Capability, CreateRequestInput, CreateRequestResult, EnvReader, ProviderAdapter, ProviderCapabilities,
   RuntimeReadiness, StatusResult, VerifiedEvent,
 } from "../../contracts/provider.ts";
 
@@ -107,18 +107,29 @@ export const paypal: ProviderAdapter = {
       capabilities: [
         {
           capability: "online_checkout", readiness: "available", confirmation: "provider_event",
-          platforms: null, initiatedBy: "customer", handoff: false,
+          platforms: null, initiatedBy: "customer", handoff: false, intents: ["service", "package", "support", "other"],
           notes: "Orders v2, intent CAPTURE. Confirmed only by a signature-verified webhook. Commercial order — never friends and family.",
         },
         {
           capability: "wallet", readiness: "available", confirmation: "provider_event",
-          platforms: null, initiatedBy: "customer", handoff: false,
+          platforms: null, initiatedBy: "customer", handoff: false, intents: ["service", "package", "support", "other"],
           notes: "The payer may settle from their PayPal balance or a card on their PayPal account; it is the same order either way.",
         },
         {
           capability: "manual_instructions", readiness: "available", confirmation: "operator",
-          platforms: null, initiatedBy: "any", handoff: false,
+          platforms: null, initiatedBy: "any", handoff: false, intents: ["service", "package", "support", "other"],
           notes: "Fallback when the API is not configured: pay the business account with the reference; an operator confirms receipt.",
+        },
+        {
+          // A personal transfer is a real payment shape the hub must be able to
+          // express — splitting a cost, reimbursing an expense, a gift. It is
+          // restricted to a non-commercial intent because using it for a sale
+          // breaches PayPal's terms and removes protection for both sides, and
+          // it is operator-confirmed because no Orders v2 order and no webhook
+          // exist for it: there is nothing that could confirm it for us.
+          capability: "p2p_transfer", readiness: "available", confirmation: "operator",
+          platforms: null, initiatedBy: "any", handoff: false, intents: ["personal"],
+          notes: "PayPal personal transfer (friends and family). Non-commercial requests only; the merchant opts in twice. An authorised operator confirms receipt.",
         },
       ],
       supports: { checkout: true, instructions: true, webhook: true, statusPoll: true, cancel: false, refundEvents: true },
@@ -263,7 +274,18 @@ export const paypal: ProviderAdapter = {
     return { ok: true, providerEventId: id, eventType: type, payload: { ...event, beau_ph_livemode: rt.mode === "live" } };
   },
 
-  instructionFields() {
+  /* The two shapes need different fields, and deliberately different words: the
+     commercial one names a BUSINESS account, the personal one names a person and
+     says in its own label that it is not for paying an invoice. Nothing here
+     offers "friends and family" as wording for a commercial payment. */
+  instructionFields(capability?: Capability) {
+    if (capability === "p2p_transfer") {
+      return [
+        { key: "paypal_personal_account", label: "PayPal account (personal transfer)", copyable: true },
+        { key: "account_holder", label: "Account name", copyable: true },
+        { key: "notes", label: "Notes for the sender (not for a commercial payment)", copyable: false },
+      ];
+    }
     return [
       { key: "paypal_business_email", label: "PayPal business account", copyable: true },
       { key: "account_holder", label: "Account name", copyable: true },
