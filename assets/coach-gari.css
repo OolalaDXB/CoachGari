@@ -35,7 +35,12 @@ a{color:inherit;}
 a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
   outline:2px solid var(--accent);outline-offset:3px;}
 h1,h2,h3,h4{margin:0;font-weight:800;letter-spacing:-.038em;line-height:1.04;}
-h1{font-size:clamp(2.5rem,5.4vw,4rem);}
+/* The 2.5rem floor was too big for the narrowest phones: at 320px each half of
+   the hero title wrapped again, giving four lines. The largest size that still
+   fits two lines tracks the line width almost exactly (12.5vw - 8px, the offset
+   being the wrap's 56px of side padding), so the floor follows it below ~390px
+   and stays at 2.5rem above — nothing changes at 390px and wider. */
+h1{font-size:clamp(min(2.5rem,12.5vw - 8px),5.4vw,4rem);}
 h2{font-size:clamp(2rem,3.9vw,3.05rem);}
 h3{font-size:clamp(1.4rem,2.2vw,1.8rem);letter-spacing:-.03em;}
 h4{font-size:1.08rem;letter-spacing:-.02em;line-height:1.3;}
