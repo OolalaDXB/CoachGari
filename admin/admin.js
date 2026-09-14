@@ -1506,9 +1506,34 @@ async function analytics() {
   const web = a.web || {}, social = a.social || {}, f = a.funnel || {}, cfg = a.config || {};
   const canManage = !!a.can_manage;
   const series = web.series || [];
-  const labels = series.map((d) => { const x = new Date(d.day + 'T12:00:00Z'); return `${x.getUTCDate()} ${MONTHS[x.getUTCMonth()].slice(0, 3)}`; });
-  const visitors = { name: 'Visitors', color: CHART_COLORS[0], values: series.map((d) => d.visitors) };
-  const views = { name: 'Pageviews', color: CHART_COLORS[1], values: series.map((d) => d.pageviews) };
+  /* A daily line is unreadable over a year and a monthly one is useless over a
+     week, so the grouping is the reader's choice, not ours. Grouping happens
+     here, on rows we already have — no second request, and the totals stay the
+     same whichever grain is picked. */
+  const grain = view.dataset.anGrain || 'day';
+  const startOf = (iso) => {
+    const d = new Date(iso + 'T12:00:00Z');
+    if (grain === 'week') { const wd = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - wd); }        // ISO weeks start on Monday
+    else if (grain === 'month') d.setUTCDate(1);
+    return d.toISOString().slice(0, 10);
+  };
+  const buckets = new Map();
+  for (const d of series) {
+    const k = startOf(d.day);
+    const b = buckets.get(k) || { day: k, visitors: 0, pageviews: 0, visits: 0 };
+    b.visitors += Number(d.visitors || 0); b.pageviews += Number(d.pageviews || 0); b.visits += Number(d.visits || 0);
+    buckets.set(k, b);
+  }
+  const grouped = [...buckets.values()].sort((x, y) => x.day.localeCompare(y.day));
+  const bucketLabel = (iso) => {
+    const x = new Date(iso + 'T12:00:00Z');
+    if (grain === 'month') return `${MONTHS[x.getUTCMonth()].slice(0, 3)} ${String(x.getUTCFullYear()).slice(2)}`;
+    return `${grain === 'week' ? 'w/c ' : ''}${x.getUTCDate()} ${MONTHS[x.getUTCMonth()].slice(0, 3)}`;
+  };
+  const labels = grouped.map((d) => bucketLabel(d.day));
+  const visitors = { name: 'Visitors', color: CHART_COLORS[0], values: grouped.map((d) => d.visitors) };
+  const views = { name: 'Pageviews', color: CHART_COLORS[1], values: grouped.map((d) => d.pageviews) };
+  const asTable = view.dataset.anView === 'table';
 
   // followers across platforms, most recent snapshot first
   const cards = Object.entries(social).map(([k, v]) => {
@@ -1552,7 +1577,7 @@ async function analytics() {
     <div class="ad-kpis">
       <div class="ad-kpi"><b>${compact(web.visitors)}</b><span>Website visitors</span><span class="an-sub">${web.has_previous ? (delta(web.visitors, web.visitors_prev) || `vs ${compact(web.visitors_prev)} before`) : 'no period to compare yet'}</span></div>
       <div class="ad-kpi"><b>${compact(web.pageviews)}</b><span>Pageviews</span></div>
-      <div class="ad-kpi"><b>${web.bounce_rate != null ? web.bounce_rate + '%' : '—'}</b><span>Bounce rate</span></div>
+      <div class="ad-kpi" title="The share of visits that left after a single page. It only starts meaning something around a few hundred visits: below that one person closing a tab moves it by ten points."><b>${web.bounce_rate != null && Number(web.visitors || 0) >= 100 ? web.bounce_rate + '%' : '—'}</b><span>Bounce rate</span><span class="an-sub">${Number(web.visitors || 0) >= 100 ? 'left after one page' : 'needs ~100 visits to mean anything'}</span></div>
       <div class="ad-kpi"><b>${compact(Object.values(social).reduce((t, v) => t + Number(v.latest?.followers || 0), 0))}</b><span>Followers, all platforms</span></div>
       <div class="ad-kpi"><b>${f.enquiries ?? 0}</b><span>Enquiries in the period</span></div>
     </div>
@@ -1562,15 +1587,29 @@ async function analytics() {
     <div class="ad-grid2 ov-charts">
       <div class="ad-panel ov-chartpanel"><div class="ov-chart-head"><div><div class="ov-lbl">Website · ${days} days</div>
         <div class="ov-hero">${compact(web.visitors)} visitors</div></div>
-        <span class="ad-muted" style="font-size:12px">${cfg.web_synced_at ? 'synced ' + fmt(cfg.web_synced_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'short' }) : 'not synced yet'}</span></div>
-        ${series.length ? lineChart({ labels, series: [visitors, views], id: 'an-web' })
-          : '<p class="ad-empty">No website numbers yet — the website sync is not connected. See the README, then use Sync now.</p>'}</div>
+        <div class="ad-filters" style="margin:0;gap:6px">
+          <select id="an-days2">${[7, 30, 90, 365].map((d) => `<option value="${d}" ${d === days ? 'selected' : ''}>Last ${d} days</option>`).join('')}</select>
+          <select id="an-grain">${[['day', 'By day'], ['week', 'By week'], ['month', 'By month']].map(([k, l]) => `<option value="${k}" ${grain === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <button class="btn btn-line btn-xs" id="an-view">${asTable ? 'Chart' : 'Table'}</button>
+        </div></div>
+        ${!grouped.length ? `<p class="ad-empty">${cfg.web_start_date && cfg.web_start_date > new Date().toISOString().slice(0, 10)
+            ? 'Counting starts on ' + prettyDay(cfg.web_start_date) + '. Nothing is counted before then.'
+            : 'No website numbers yet — use Sync now.'}</p>`
+          : asTable ? table([grain === 'month' ? 'Month' : grain === 'week' ? 'Week of' : 'Day', 'Visitors', 'Pageviews', 'Visits'],
+              grouped.slice().reverse().map((d) => `<tr><td>${esc(bucketLabel(d.day))}</td><td class="num">${compact(d.visitors)}</td><td class="num">${compact(d.pageviews)}</td><td class="num">${compact(d.visits)}</td></tr>`))
+          : lineChart({ labels, series: [visitors, views], id: 'an-web' })}
+        <p class="ad-note" style="margin-top:8px">${cfg.web_synced_at ? 'Synced ' + fmt(cfg.web_synced_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'short' }) : 'Not synced yet'}${(cfg.web_exclude_paths || []).length ? ` · ${(cfg.web_exclude_paths || []).join(', ')} not counted` : ''}</p></div>
 
-      <div class="ad-panel ov-chartpanel"><div class="ov-chart-head"><div><div class="ov-lbl">Followers · ${days} days</div>
-        <div class="ov-hero">${fSeries.length ? compact(fSeries.reduce((t, s) => t + (s.values[s.values.length - 1] || 0), 0)) : '—'}</div></div></div>
-        ${fSeries.length ? lineChart({ labels: fLabels.map((d) => { const x = new Date(d + 'T12:00:00Z'); return `${x.getUTCDate()} ${MONTHS[x.getUTCMonth()].slice(0, 3)}`; }), series: fSeries, id: 'an-fol' })
-          : '<p class="ad-empty">Two snapshots of a platform draw the curve. Add numbers, or import an export.</p>'}</div>
+      <div class="ad-panel"><h2 style="margin-top:0">Which countries</h2>
+        ${ctryRows.length ? table(['Country', 'Visitors', 'Share'], ctryRows)
+          : '<p class="ad-empty">Synced with the website numbers.</p>'}
+        <p class="ad-note">Country only — never a city, never an address. This is the list to read before deciding what to price in which currency and which payment rails are worth opening.</p></div>
     </div>
+
+    <div class="ad-panel ov-chartpanel"><div class="ov-chart-head"><div><div class="ov-lbl">Followers · ${days} days</div>
+      <div class="ov-hero">${fSeries.length ? compact(fSeries.reduce((t, s) => t + (s.values[s.values.length - 1] || 0), 0)) : '—'}</div></div></div>
+      ${fSeries.length ? lineChart({ labels: fLabels.map((d) => { const x = new Date(d + 'T12:00:00Z'); return `${x.getUTCDate()} ${MONTHS[x.getUTCMonth()].slice(0, 3)}`; }), series: fSeries, id: 'an-fol' })
+        : '<p class="ad-empty">Two snapshots of a platform draw the curve. Add numbers, or import an export.</p>'}</div>
 
     <div class="ad-grid2">
       <div class="ad-panel"><h2>From a visit to a client · ${days} days</h2>
@@ -1588,10 +1627,6 @@ async function analytics() {
         ${goalRows.length ? `<h2 style="margin-top:18px">Goals</h2>${table(['Goal', 'Visitors', 'Events'], goalRows)}` : ''}</div>
     </div>
 
-    <div class="ad-panel"><h2>Which countries</h2>
-      ${ctryRows.length ? table(['Country', 'Visitors', 'Share'], ctryRows)
-        : '<p class="ad-empty">Synced with the website numbers.</p>'}
-      <p class="ad-note">Country only — never a city, never an address. This is the list to read before deciding what to price in which currency and which payment rails are worth opening.</p></div>
 
     <div class="ad-panel"><div class="ov-chart-head"><h2 style="margin:0">Snapshots</h2>
       ${canManage ? '<button class="btn btn-line btn-xs" id="an-import">Import a CSV export</button>' : ''}</div>
@@ -1610,17 +1645,15 @@ async function analytics() {
           <label>TikTok handle <input name="tiktok_handle" value="${esc(cfg.tiktok_handle || '')}" placeholder="@coachgari28"></label></div>
         <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button></div>
       </form>
-      <h2 style="margin-top:20px">What counts as audience</h2>
-      <form id="an-win" class="ad-form">
-        <div class="row"><label>Counting starts on <input type="date" name="web_start_date" value="${esc(cfg.web_start_date || '')}" required></label>
-          <label>Pages that are work, not audience <input name="web_exclude_paths" value="${esc((cfg.web_exclude_paths || []).join(', '))}" placeholder="/admin"></label></div>
-        <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button></div>
-      </form>
-      <p class="ad-note">Everything before the start date is the build — our own visits and the checks before launch — so it is not counted, and moving the date forward deletes those days for good. The excluded pages are left out of the question asked to Plausible, so the back-office never shows up as traffic; separate several with commas.</p>
+
       <p class="ad-note">YouTube syncs on its own once a day (public counters). Instagram and TikTok have no open API for a single creator: export the numbers from the app and import the file, or type them in. ${cfg.youtube_synced_at ? 'YouTube synced ' + fmt(cfg.youtube_synced_at, 'Asia/Dubai', { dateStyle: 'medium' }) + '.' : ''}</p></div>` : ''}`;
 
-  $('#an-days').onchange = (e) => { view.dataset.anDays = e.target.value; analytics().catch(fail); };
-  if (series.length) wireChart('an-web', labels, [visitors, views], (v) => compact(v));
+  const setDays = (e) => { view.dataset.anDays = e.target.value; analytics().catch(fail); };
+  $('#an-days').onchange = setDays;
+  const d2 = $('#an-days2'); if (d2) d2.onchange = setDays;
+  const gr = $('#an-grain'); if (gr) gr.onchange = (e) => { view.dataset.anGrain = e.target.value; analytics().catch(fail); };
+  const vw = $('#an-view'); if (vw) vw.onclick = () => { view.dataset.anView = asTable ? 'chart' : 'table'; analytics().catch(fail); };
+  if (grouped.length && !asTable) wireChart('an-web', labels, [visitors, views], (v) => compact(v));
   if (fSeries.length) wireChart('an-fol', fLabels.map((d) => prettyDay(d)), fSeries, (v) => compact(v));
   view.querySelectorAll('[data-fun]').forEach((el) => { const fn = funnelRows[+el.dataset.fun][2]; if (fn) el.onclick = fn; });
 
@@ -1641,18 +1674,13 @@ async function analytics() {
     const { error: e1 } = await sb.rpc('analytics_config_set', { p: Object.fromEntries(d.entries()) }); if (e1) return fail(e1);
     toast('Saved'); analytics().catch(fail);
   };
-  const wf = $('#an-win'); if (wf) wf.onsubmit = async (e) => {
-    e.preventDefault(); const d = new FormData(wf);
-    const paths = String(d.get('web_exclude_paths') || '').split(',').map((x) => x.trim()).filter(Boolean);
-    /* Moving the start date deletes the days behind it, so it is asked for
-       once, plainly, rather than discovered afterwards in a chart. */
-    if (!confirm(paths.length
-      ? `Count from ${d.get('web_start_date')} and leave out ${paths.join(', ')}?\n\nDays before that date are deleted for good.`
-      : `Count from ${d.get('web_start_date')}?\n\nDays before that date are deleted for good, and nothing will be left out of the counting.`)) return;
-    const { error: e1 } = await sb.rpc('analytics_web_config_set', { p: { web_start_date: d.get('web_start_date'), web_exclude_paths: paths } });
-    if (e1) return fail(e1);
-    toast('Saved — sync to recount'); analytics().catch(fail);
-  };
+  /* The counting window — when the history starts, which pages are work rather
+     than audience — is a setup decision taken once, not a dial the coach turns
+     from week to week; moving it silently rewrites every figure on the screen.
+     It stays configuration in the database (analytics_web_config_set, audited)
+     and is set by whoever runs the project, through scripts, not from here.
+     What the screen does owe the reader is the rule it is showing under, and
+     the note under the chart says it. */
 }
 
 // The audience forms ride the existing bottom sheet (session / block popups), not a second modal.
