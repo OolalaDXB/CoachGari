@@ -2783,3 +2783,57 @@ produced it — and the back-office asks before doing it.
 The period-over-period comparison is now only claimed once a previous period
 actually exists. A chart showing +100 % because the month before was empty is
 worse than one showing nothing.
+
+---
+
+## 2026-09-14 — YouTube and Instagram sync themselves; TikTok stays manual
+
+Checked against the platforms' own documentation rather than from memory, after
+getting the Plausible key answer wrong the same day by not doing so.
+
+**YouTube — nothing to build.** `channels?part=statistics` returns subscribers,
+views and video count with an API key and no OAuth, and that path was already
+written. Two caveats worth knowing: above a thousand, Google rounds the
+subscriber count to three significant figures (the exact number exists only in
+Studio), and `videoCount` counts public uploads only. It needs the channel id or
+@handle in Settings and `YOUTUBE_API_KEY` as a deployment secret.
+
+**Instagram — built.** Two facts make it reasonable for a single creator:
+"Instagram API with Instagram Login" no longer requires a linked Facebook Page,
+and Standard Access covers accounts holding a role on the app, so no App Review
+and no Business Verification. The account must be professional (Business or
+Creator); a personal account cannot be read at all since Basic Display was
+retired.
+
+**The token lives in the Vault, not in the deployment.** A long-lived token
+lasts 60 days and is refreshed by exchanging it for a new one, and the new value
+has to be stored — which a Deno environment variable cannot be at runtime. So it
+sits in the Vault like every other secret here and the sync rotates it in place.
+
+**The 60-day rule is a trap and is treated as one.** Meta refreshes a token only
+while it is still alive and at least 24 hours old; one left to expire cannot be
+revived and the whole connection must be re-authorised by hand. The expiry is
+therefore stored, the sync refreshes at the halfway mark — leaving a full month
+of missed runs before anything is lost — the refresh runs *before* the reading
+(keeping the connection matters more than today's follower count), and the
+back-office counts the days down instead of waiting to announce a death.
+
+The token is never readable from a browser: `instagram_token_get` and
+`instagram_token_rotate` are service_role only, `instagram_connect` needs
+`analytics:manage` and returns the connection's shape but never the value, the
+column grant stops before it, and the form clears itself whatever happened. Only
+followers, following and post count are read — no follower list, no media, no
+messages.
+
+**TikTok — deliberately not built.** `/v2/user/info/` does return
+`follower_count`, `likes_count` and `video_count`, but the scopes require app
+review, and the review criteria require an application **published in both the
+Apple App Store and Google Play**, plus a demo video of the full flow. This
+project has no mobile app and will not publish one to read a follower count.
+TikTok also states no review deadline and no guarantee of approval. Its CSV
+export already imports in one click, which is the right cost for this.
+
+Two things could not be confirmed in the official docs and are recorded as
+unknown rather than guessed: the exact name of TikTok's statistics scope, and
+whether its 365-day refresh token re-arms on each rotation or expires from the
+first authorisation.

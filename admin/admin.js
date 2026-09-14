@@ -1544,6 +1544,7 @@ async function analytics() {
   const visitors = { name: 'Visitors', color: CHART_COLORS[0], values: grouped.map((d) => d.visitors) };
   const views = { name: 'Pageviews', color: CHART_COLORS[1], values: grouped.map((d) => d.pageviews) };
   const asTable = view.dataset.anView === 'table';
+  const igDays = cfg.instagram_expires_at ? Math.max(0, Math.ceil((new Date(cfg.instagram_expires_at) - new Date()) / 86400000)) : null;
 
   // followers across platforms, most recent snapshot first
   const cards = Object.entries(social).map(([k, v]) => {
@@ -1656,7 +1657,20 @@ async function analytics() {
         <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button></div>
       </form>
 
-      <p class="ad-note">YouTube syncs on its own once a day (public counters). Instagram and TikTok have no open API for a single creator: export the numbers from the app and import the file, or type them in. ${cfg.youtube_synced_at ? 'YouTube synced ' + fmt(cfg.youtube_synced_at, 'Asia/Dubai', { dateStyle: 'medium' }) + '.' : ''}</p></div>` : ''}`;
+      <p class="ad-note">YouTube syncs on its own once a day from the public counters — an identifier or a @handle is all it needs. Above a thousand, Google rounds the subscriber count to three significant figures; the exact number exists only in YouTube Studio. TikTok stays manual: its API requires an app published in both stores, which this project does not have and should not build for a follower count — export the numbers from the app and import the file. ${cfg.youtube_synced_at ? 'YouTube synced ' + fmt(cfg.youtube_synced_at, 'Asia/Dubai', { dateStyle: 'medium' }) + '.' : ''}</p>
+
+      <h2 style="margin-top:20px">Instagram</h2>
+      ${cfg.instagram_user_id ? `<p class="ad-note" style="margin-bottom:10px">Connected${cfg.instagram_username ? ' as <b>' + esc(cfg.instagram_username) + '</b>' : ''}${igDays != null ? ` · the connection renews itself, ${igDays} day${igDays === 1 ? '' : 's'} of margin left` : ''}${cfg.instagram_synced_at ? ' · synced ' + fmt(cfg.instagram_synced_at, 'Asia/Dubai', { dateStyle: 'medium' }) : ''}.
+          ${igDays != null && igDays < 14 ? '<b style="color:#b3261e">Renew it by hand soon: past the expiry date Meta cannot revive it and the account must be connected again.</b>' : ''}</p>
+        ${cfg.instagram_error ? `<p class="ad-note" style="color:#b3261e">Last Instagram sync: ${esc(cfg.instagram_error)}</p>` : ''}
+        <button class="btn btn-line btn-sm" id="ig-off">Disconnect Instagram</button>`
+      : `<form id="ig-on" class="ad-form">
+          <div class="row"><label>Instagram user id <input name="user_id" inputmode="numeric" placeholder="17841400000000000" required></label>
+            <label>Username <input name="username" placeholder="@coach_gari28"></label></div>
+          <label>Long-lived access token <input name="token" type="password" autocomplete="off" required placeholder="IGQ…"></label>
+          <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Connect</button></div>
+        </form>
+        <p class="ad-note">Instagram only reads a <b>professional</b> account (Business or Creator), and only with a token its owner issued — there is no key-only path as there is for YouTube. A Facebook Page is no longer needed. The token is stored encrypted, never shown again, and renews itself every month; only followers and post count are read, never a follower list or a message.</p>`}</div>` : ''}`;
 
   const setDays = (e) => { view.dataset.anDays = e.target.value; analytics().catch(fail); };
   $('#an-days').onchange = setDays;
@@ -1679,6 +1693,23 @@ async function analytics() {
     const { error: e1 } = await sb.rpc('audience_snapshot_delete', { p_id: b.dataset.anDel }); if (e1) return fail(e1);
     toast('Deleted'); analytics().catch(fail);
   });
+  const igOn = $('#ig-on'); if (igOn) igOn.onsubmit = async (e) => {
+    e.preventDefault(); const d = new FormData(igOn);
+    const { error: e1 } = await sb.rpc('instagram_connect', {
+      p_token: String(d.get('token') || '').trim(), p_user_id: String(d.get('user_id') || '').trim(),
+      p_username: String(d.get('username') || '').trim() || null });
+    /* The field is cleared whatever happened. A long-lived token sitting in a
+       form on a shared screen is the one thing this page must not leave behind. */
+    igOn.reset();
+    if (e1) return fail(e1);
+    toast('Instagram connected — sync to pull the numbers'); analytics().catch(fail);
+  };
+  const igOff = $('#ig-off'); if (igOff) igOff.onclick = async () => {
+    if (!confirm('Disconnect Instagram?\n\nThe stored token is deleted. Reconnecting means issuing a new one from Meta.')) return;
+    const { error: e1 } = await sb.rpc('instagram_disconnect'); if (e1) return fail(e1);
+    toast('Disconnected'); analytics().catch(fail);
+  };
+
   const cf = $('#an-cfg'); if (cf) cf.onsubmit = async (e) => {
     e.preventDefault(); const d = new FormData(cf);
     const { error: e1 } = await sb.rpc('analytics_config_set', { p: Object.fromEntries(d.entries()) }); if (e1) return fail(e1);

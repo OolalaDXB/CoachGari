@@ -216,5 +216,68 @@ begin
   exception when insufficient_privilege then ok := ok + 1; end;
   execute 'reset role';
 
+  /* ---- 10. the Instagram connection: a credential in the database ----
+     Instagram has no key-only path, so a token its owner issued is stored here
+     and rotated by the sync. Everything below is about one question: can a
+     browser ever see it? */
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"anmanage@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.instagram_connect('IG' || repeat('x', 60), '17841400000000000', '@coach_gari28');
+  if (j ->> 'ok')::boolean and (j ->> 'user_id') = '17841400000000000' then ok := ok + 1; else fail := fail + 1; log := log || ' [ig-connect]'; end if;
+  --    what comes back describes the connection and never carries the token
+  if j::text not like '%' || repeat('x', 20) || '%' then ok := ok + 1; else fail := fail + 1; log := log || ' [ig-connect-echoes-token]'; end if;
+  --    the status the screen reads is the same: shape, never secret
+  j := public.instagram_status();
+  if (j ->> 'connected')::boolean and (j ->> 'username') = '@coach_gari28' and (j ->> 'days_left')::int between 58 and 60
+     and j::text not like '%' || repeat('x', 20) || '%'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [ig-status ' || j::text || ']'; end if;
+  --    a short string or a pasted URL is refused at the door, not hours later
+  begin perform public.instagram_connect('short', '17841400000000000'); fail := fail + 1; log := log || ' [ig-short-token]';
+  exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.instagram_connect('https://graph.instagram.com/x?access_token=' || repeat('y', 40), '17841400000000000'); fail := fail + 1; log := log || ' [ig-url-token]';
+  exception when sqlstate '22023' then ok := ok + 1; end;
+  begin perform public.instagram_connect(repeat('z', 60), 'not-a-number'); fail := fail + 1; log := log || ' [ig-bad-user-id]';
+  exception when sqlstate '22023' then ok := ok + 1; end;
+  --    THE ONE THAT MATTERS: a signed-in operator cannot read the token back
+  begin perform public.instagram_token_get(); fail := fail + 1; log := log || ' [ig-token-readable-by-operator]';
+  exception when insufficient_privilege then ok := ok + 1; end;
+  begin perform public.instagram_token_rotate(repeat('w', 60)); fail := fail + 1; log := log || ' [ig-rotate-open-to-operator]';
+  exception when insufficient_privilege then ok := ok + 1; end;
+  execute 'reset role';
+
+  --    the sync (service_role path) gets the token, and knows when to refresh
+  j := public.instagram_token_get();
+  if (j ->> 'connected')::boolean and (j ->> 'token') like 'IGxxx%' and not (j ->> 'should_refresh')::boolean and not (j ->> 'expired')::boolean
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [ig-token-get]'; end if;
+  --    rotation replaces the token in place and pushes the expiry out, audited without the value
+  perform public.instagram_token_rotate(repeat('n', 60), 5184000);
+  j := public.instagram_token_get();
+  if (j ->> 'token') = repeat('n', 60) then ok := ok + 1; else fail := fail + 1; log := log || ' [ig-rotate]'; end if;
+  if exists (select 1 from public.admin_audit where area = 'analytics' and action = 'token_rotated')
+     and not exists (select 1 from public.admin_audit where area = 'analytics' and summary::text like '%' || repeat('n', 20) || '%')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [ig-rotate-audit]'; end if;
+  --    a token near the edge asks to be refreshed; an expired one says so instead of being refreshed
+  update public.analytics_config set instagram_expires_at = now() + interval '10 days' where id = 1;
+  if (public.instagram_token_get() ->> 'should_refresh')::boolean then ok := ok + 1; else fail := fail + 1; log := log || ' [ig-should-refresh]'; end if;
+  update public.analytics_config set instagram_expires_at = now() - interval '1 day' where id = 1;
+  if (public.instagram_token_get() ->> 'expired')::boolean then ok := ok + 1; else fail := fail + 1; log := log || ' [ig-expired]'; end if;
+
+  --    disconnecting takes the token with it: nothing is left to leak
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"anmanage@test.local"}', true);
+  execute 'set local role authenticated';
+  perform public.instagram_disconnect();
+  execute 'reset role';
+  if not (public.instagram_token_get() ->> 'connected')::boolean
+     and not exists (select 1 from vault.secrets where name = 'instagram_token')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [ig-disconnect]'; end if;
+
+  --    and anon reaches none of it
+  perform set_config('request.jwt.claims', '{"role":"anon"}', true);
+  execute 'set local role anon';
+  foreach q in array array['select public.instagram_status()', 'select public.instagram_token_get()', 'select public.instagram_connect(repeat(''q'', 60), ''17841400000000000'')'] loop
+    begin execute q; fail := fail + 1; log := log || ' [ig anon: ' || q || ']'; exception when others then ok := ok + 1; end;
+  end loop;
+  execute 'reset role';
+
   raise exception 'CG018_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

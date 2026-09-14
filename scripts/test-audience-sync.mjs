@@ -14,6 +14,7 @@ const fn = read('../supabase/functions/analytics-sync/index.ts');
 const mig = read('../supabase/migrations/20261040_cg_audience_analytics.sql');
 const admin = read('../admin/admin.js');
 const mig51 = read('../supabase/migrations/20261051_cg_audience_start_admin_countries.sql');
+const mig53 = read('../supabase/migrations/20261053_cg_instagram_connection.sql');
 
 let ok = 0, fail = 0;
 const check = (name, cond, extra = '') => { if (cond) ok++; else fail++; console.log(`${cond ? 'PASS' : 'FAIL'}  ${name}${cond ? '' : ' ' + extra}`); };
@@ -83,8 +84,13 @@ check('the YouTube snapshot goes through the service-role RPC too',
    went live, which re-reads strictly more. */
 check('it re-reads the whole window, so a late-counted day is corrected',
   /const date_range = dateRange\(startDate\)/.test(fn) && !/date_range: "\d+d"/.test(fn));
+/* Scoped to the YouTube function itself. Instagram legitimately carries a
+   token and refreshes it; what must stay true is that YOUTUBE never needs
+   either, because a key-only source has nothing to expire and nothing to
+   re-authorise. */
+const ytBody = fn.slice(fn.indexOf('export async function syncYouTube'), fn.indexOf('export async function syncInstagram'));
 check('only the public YouTube counters are read (no OAuth, no private report)',
-  /part=statistics/.test(fn) && !/oauth|refresh_token|analytics\.readonly/i.test(fn));
+  /part=statistics/.test(ytBody) && !/oauth|refresh_token|access_token|analytics\.readonly/i.test(ytBody));
 
 /* ---- the database side ---- */
 check('the sync key is stored hashed in outbox_keys, clear only in Vault',
@@ -103,8 +109,12 @@ check('an import is capped and audited by count, never by content',
 check('the admin reads one RPC for the whole screen', /rpc\('audience_overview'/.test(admin));
 check('the CSV is parsed in the browser and only the rows are sent',
   /from '\/admin\/csv\.js'/.test(admin) && /rpc\('audience_snapshots_import'/.test(admin) && !/FormData\(\).*file/.test(admin));
-check('the screen names no secret and no environment variable — a coach reads it, not an engineer',
-  !/api_key|secret|env |vault/i.test(admin.slice(admin.indexOf('async function analytics()'), admin.indexOf('/* =============================== ACCESS'))));
+/* The screen may name the token it is ASKING the owner for — that is the
+   connection, and hiding what it wants would only make it harder to do right.
+   What it must still never name is a deployment variable or a stored secret:
+   PLAUSIBLE_API_KEY and friends are an engineer's business, not a coach's. */
+check('the screen names no environment variable and no stored secret',
+  !/api_key|_API_KEY|secret|env \(|vault/i.test(admin.slice(admin.indexOf('async function analytics()'), admin.indexOf('/* =============================== ACCESS'))));
 check('writing surfaces are gated on can_manage from the server, not on the client',
   /const canManage = !!a\.can_manage/.test(admin) && /\$\{canManage \?/.test(admin));
 
@@ -173,6 +183,50 @@ check('the operator can move the start date, and only with analytics:manage',
 check('an exclusion that is not a path is refused at the door too',
   /an excluded path must start with/.test(mig51));
 check('the comparison period is only claimed once one exists', /'has_previous'/.test(mig51));
+
+
+/* ---- Instagram: a credential that lives in the database ---- */
+check('the token comes from the database, never from the deployment environment',
+  /rpc\("instagram_token_get"\)/.test(fn) && !/env\("INSTAGRAM/.test(fn));
+check('an account that was never connected is absent, not an error',
+  /if \(ig\.connected && ig\.token && ig\.user_id\)/.test(fn));
+check('the refresh runs BEFORE the read: keeping the connection beats today\u2019s number',
+  fn.indexOf('refreshInstagramToken(sb, ig.token)') < fn.indexOf('syncInstagram(sb, ig.token'));
+check('a failed refresh does not lose the run — the current token still works',
+  /instagram_refresh_failed/.test(fn) && /not fatal: the current token still works/.test(fn));
+check('an expired token is reported, never refreshed: Meta cannot revive one',
+  /if \(ig\.expired\)/.test(fn) && /cannot refresh an expired token/.test(fn));
+check('the halfway rule lives in the database, not in the function',
+  /should_refresh/.test(mig53) && /interval '30 days'/.test(mig53) && !/30 \* 24 \* 3600/.test(fn));
+check('Instagram errors are reported by status, never by echoing Meta\u2019s body',
+  /instagram \$\{r\.status\}/.test(fn) && !/instagramError|await r\.text\(\)[^;]*instagram/i.test(fn));
+check('no token, id or username ever reaches a log',
+  [...fn.matchAll(/log\("instagram[^"]*",\s*\{([^}]*)\}\)/g)].map((m) => m[1]).every((l) => !/token|user_id|username/.test(l)));
+check('only aggregate counters are read — a count of posts, never the posts themselves',
+  /fields=followers_count,follows_count,media_count,username/.test(fn)
+  && !/\/media\b|\/tags\b|\/insights\b/.test(fn));
+check('a professional account is required, and the failure says so',
+  /is the account professional/.test(fn));
+
+/* ---- and the token is not reachable from a browser ---- */
+check('reading or rotating the token is service_role only',
+  /revoke execute on function public\.instagram_token_get\(\) from public, anon, authenticated/.test(mig53)
+  && /revoke execute on function public\.instagram_token_rotate\(text, int\) from public, anon, authenticated/.test(mig53));
+check('connecting needs analytics:manage', /instagram_connect[\s\S]{0,400}has_permission\('analytics:manage'\)/.test(mig53));
+check('the grant on analytics_config is column-scoped and never widened to the token',
+  /grant select \(id, plausible_site_id/.test(mig53) && !/instagram_token/.test(mig53.slice(mig53.indexOf('grant select (id, plausible_site_id'))));
+check('the back-office clears the token field whatever happened',
+  /igOn\.reset\(\);/.test(admin) && admin.indexOf('igOn.reset();') < admin.indexOf("toast('Instagram connected"));
+check('the token input is a password field, never autocompleted',
+  /name="token" type="password" autocomplete="off"/.test(admin));
+
+/* ---- YouTube: what it can and cannot tell us ---- */
+check('YouTube takes its key from the deployment, and nothing else',
+  /env\("YOUTUBE_API_KEY"\)/.test(fn) && /key=\$\{encodeURIComponent\(key\)\}/.test(ytBody));
+check('and the screen says the subscriber count is rounded above a thousand',
+  /rounds the subscriber count to three significant figures/.test(admin));
+check('TikTok is honestly documented as manual, with the reason',
+  /app published in both stores/.test(admin));
 
 console.log(`\nAUDIENCE_SYNC_TESTS ok=${ok} fail=${fail}`);
 process.exit(fail ? 1 : 0);

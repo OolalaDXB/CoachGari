@@ -20,6 +20,7 @@ const log = (event: string, data: Record<string, unknown> = {}) => console.log(J
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 const PLAUSIBLE_API = "https://plausible.io/api/v2/query";
 const YOUTUBE_API = "https://www.googleapis.com/youtube/v3/channels";
+const IG_API = "https://graph.instagram.com/v21.0";
 
 type Sb = ReturnType<typeof createClient>;
 
@@ -109,6 +110,47 @@ export async function syncYouTube(sb: Sb, key: string, channel: string) {
   return snap;
 }
 
+/* Instagram — the account's own public counters.
+
+   Only a professional account can be read at all, and only with a token its
+   owner issued. What we take is the same aggregate shape every other platform
+   in this table has: followers, following, posts. Nothing about anybody else —
+   no follower list, no names, no messages, and the media edge is not touched.
+
+   Errors are reported by status. Meta's bodies quote the request, and the
+   request carries the token. */
+export async function syncInstagram(sb: Sb, token: string, userId: string) {
+  const u = `${IG_API}/${encodeURIComponent(userId)}?fields=followers_count,follows_count,media_count,username&access_token=${encodeURIComponent(token)}`;
+  const r = await fetch(u);
+  if (!r.ok) throw new Error(`instagram ${r.status}`);
+  const j = await r.json() as { followers_count?: number; follows_count?: number; media_count?: number; username?: string };
+  if (typeof j.followers_count !== "number") throw new Error("instagram returned no follower count (is the account professional?)");
+  const snap = { followers: j.followers_count, posts: j.media_count ?? null };
+  const { error } = await sb.rpc("social_snapshot_api", { p_platform: "instagram", p: snap });
+  if (error) throw new Error(`db ${error.code}`);
+  return { followers: snap.followers, posts: snap.posts, username: j.username ?? null };
+}
+
+/* THE 60-DAY RULE. Meta refreshes a long-lived token only while it is still
+   alive and at least 24 hours old; one left to expire cannot be revived and the
+   whole connection has to be re-authorised by hand. The database asks for a
+   refresh at the halfway mark, which leaves a full month of missed runs before
+   anything is actually lost.
+
+   A refresh that fails is not fatal to the run: the current token is still
+   valid — that is the precondition for refreshing at all — so the numbers are
+   still collected and the failure is recorded for the next attempt. */
+export async function refreshInstagramToken(sb: Sb, token: string) {
+  const u = `${IG_API}/refresh_access_token?grant_type=ig_refresh_token&access_token=${encodeURIComponent(token)}`;
+  const r = await fetch(u);
+  if (!r.ok) throw new Error(`instagram refresh ${r.status}`);
+  const j = await r.json() as { access_token?: string; expires_in?: number };
+  if (!j.access_token) throw new Error("instagram refresh returned no token");
+  const { error } = await sb.rpc("instagram_token_rotate", { p_token: j.access_token, p_expires_in: j.expires_in ?? 5184000 });
+  if (error) throw new Error(`db ${error.code}`);
+  return { expires_in: j.expires_in ?? 5184000 };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return json(405, { ok: false, error: "method_not_allowed" });
   const sb = createClient(env("SUPABASE_URL")!, env("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
@@ -148,7 +190,35 @@ Deno.serve(async (req: Request) => {
     try { out.youtube = await syncYouTube(sb, youtubeKey, cfg.youtube_channel_id!); }
     catch (e) { const m = String(e).replace(/^Error:\s*/, "").slice(0, 200); errors.push(`YouTube — ${m}`); log("youtube_failed", { error: m }); }
   }
+
+  /* Instagram carries its own credential in the database rather than in the
+     deployment, so its readiness is asked of the database, not of the
+     environment. An account that was never connected is simply absent — no
+     error, nothing to report. */
+  const { data: igRow } = await sb.rpc("instagram_token_get");
+  const ig = (igRow ?? {}) as { connected?: boolean; token?: string; user_id?: string; should_refresh?: boolean; expired?: boolean };
+  if (ig.connected && ig.token && ig.user_id) {
+    if (ig.expired) {
+      const m = "the stored token has expired; Meta cannot refresh an expired token, so the account must be connected again";
+      errors.push(`Instagram — ${m}`); await sb.rpc("instagram_sync_done", { p_error: m }); log("instagram_expired");
+    } else {
+      /* Refresh FIRST. If the token is close to the edge, keeping the
+         connection alive matters more than today's follower count, and the
+         reading below then uses whichever token is current. */
+      if (ig.should_refresh) {
+        try { out.instagram_refreshed = await refreshInstagramToken(sb, ig.token); log("instagram_refreshed"); }
+        catch (e) { log("instagram_refresh_failed", { error: String(e).slice(0, 120) }); }   // not fatal: the current token still works
+      }
+      try {
+        out.instagram = await syncInstagram(sb, ig.token, ig.user_id);
+        await sb.rpc("instagram_sync_done", { p_error: null });
+      } catch (e) {
+        const m = String(e).replace(/^Error:\s*/, "").slice(0, 200);
+        errors.push(`Instagram — ${m}`); await sb.rpc("instagram_sync_done", { p_error: m }); log("instagram_failed", { error: m });
+      }
+    }
+  }
   if (errors.length) { await sb.rpc("analytics_sync_error", { p_error: errors.join(" · ") }); out.errors = errors; }
-  log("synced", { plausible: !!out.plausible, youtube: !!out.youtube, errors: errors.length });
+  log("synced", { plausible: !!out.plausible, youtube: !!out.youtube, instagram: !!out.instagram, errors: errors.length });
   return json(200, out);
 });
