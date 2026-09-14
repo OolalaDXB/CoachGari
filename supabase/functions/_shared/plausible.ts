@@ -40,11 +40,15 @@ export function excludeFilter(paths: readonly string[]): unknown[] {
    that it is the build — our own visits, the checks before launch, the test
    payment — and nothing downstream can tell one from the other afterwards.
 
-   A start date in the future would ask Plausible for a range that runs
-   backwards, so it is clamped to today: an empty answer is a fair answer to
-   "what happened since tomorrow", an error is not. */
-export function dateRange(startDate: string, today: Date = new Date()): [string, string] {
+   A start date that has not arrived yet returns NULL rather than a range
+   clamped to today. Clamping looks harmless and is not: the daily series is
+   guarded row by row and would reject today as too early, while the totals —
+   sources, goals, countries — would happily report it, and the screen would
+   show five visitors from nowhere beside a chart that says there is nothing.
+   One window or no window; never a different one per panel. */
+export function dateRange(startDate: string, today: Date = new Date()): [string, string] | null {
   const end = today.toISOString().slice(0, 10);
-  const start = /^\d{4}-\d{2}-\d{2}$/.test(startDate ?? "") ? startDate : end;
-  return [start > end ? end : start, end];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate ?? "")) return [end, end];
+  if (startDate > end) return null;
+  return [startDate, end];
 }

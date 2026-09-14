@@ -115,10 +115,18 @@ check('writing surfaces are gated on can_manage from the server, not on the clie
   check('the range starts on the configured day and ends today', from === '2026-09-15' && to === '2026-09-20');
   const [f2] = dateRange('2026-09-15', new Date('2026-12-31T23:59:00Z'));
   check('the start does not drift as time passes', f2 === '2026-09-15');
-  const [f3, t3] = dateRange('2027-01-01', new Date('2026-09-20T09:00:00Z'));
-  check('a start date in the future is clamped to today, not sent backwards', f3 === t3 && f3 === '2026-09-20');
+  /* A window that has not opened is NOT clamped to today. Clamping looks
+     harmless and is not: the daily series is guarded row by row and would
+     reject today as too early, while the totals — sources, goals, countries —
+     would report it, and the screen would show visitors from nowhere beside a
+     chart saying there is nothing. */
+  check('a start date in the future means no window at all, not a clamped one', dateRange('2027-01-01', new Date('2026-09-20T09:00:00Z')) === null);
+  check('and the sync then writes nothing, countries included',
+    /if \(!date_range\) return \{ days: 0, sources: 0, goals: 0, countries: 0/.test(fn));
   const [f4, t4] = dateRange('not-a-date', new Date('2026-09-20T09:00:00Z'));
   check('a start date that is not a date does not produce a broken query', f4 === t4 && t4 === '2026-09-20');
+  const [f5, t5] = dateRange('2026-09-20', new Date('2026-09-20T09:00:00Z'));
+  check('the first day itself counts — the window opens, it does not skip a day', f5 === '2026-09-20' && t5 === '2026-09-20');
 }
 
 /* ---- the back-office is not traffic ---- */

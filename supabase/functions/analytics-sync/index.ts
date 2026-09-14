@@ -56,6 +56,10 @@ async function plausibleQuery(key: string, body: Record<string, unknown>) {
 
 export async function syncPlausible(sb: Sb, key: string, siteId: string, startDate: string, excludePaths: string[]) {
   const date_range = dateRange(startDate);
+  /* The counting window has not opened yet. Nothing is written — not even the
+     country totals, which would otherwise be the only panel on the screen
+     reporting a day the series refuses to hold. */
+  if (!date_range) return { days: 0, sources: 0, goals: 0, countries: 0, not_started_until: startDate };
   const filters = excludeFilter(excludePaths);
   const base = { site_id: siteId, date_range, ...(filters.length ? { filters } : {}) };
 
