@@ -81,6 +81,15 @@ check('a long agreement runs to more than one page rather than off the bottom',
   Number((text.match(/\/Count (\d+)/) || [])[1]) >= 2);
 check('every content stream declares its true length',
   [...text.matchAll(/<< \/Length (\d+) >>\nstream\n([\s\S]*?)\nendstream/g)].every((m) => Number(m[1]) === m[2].length));
+check('a heading is never left alone at the foot of a page', (() => {
+  const streams = [...text.matchAll(/stream\n([\s\S]*?)\nendstream/g)].map((m) => m[1]);
+  return streams.every((st) => {
+    const lines = st.split('\n').filter((l) => l.includes(' Tj ET'));
+    const body = lines.slice(0, -1);          // the last line is the footer
+    const last = body[body.length - 1] || '';
+    return !/\/F2 12 Tf/.test(last);
+  });
+})(), 'a section title sits at a page break with nothing under it');
 check('the file is a sensible size for a contract', bytes.length > 2000 && bytes.length < 200000, String(bytes.length));
 
 /* ---- it is the same file every time ---- */

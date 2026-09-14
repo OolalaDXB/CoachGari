@@ -2401,3 +2401,74 @@ Finally, `analytics:manage` is a new permission rather than a reuse of
 `analytics:view`: reading the audience is something most of a team can do,
 while overwriting history with a CSV is not. Everyone who had `view` was given
 `manage` in the migration, so nothing changed on day one.
+
+## The reminder is one thing, the consent is another (14/09/2026)
+
+Session reminders were the last real functional gap. Two decisions shaped them.
+
+**The dedupe key is the session, not the run.** The obvious design is a cron job
+that looks for sessions starting in 24 hours and mails them. That design skips a
+client whenever a run is missed, and double-mails whenever the window overlaps.
+Instead the query is "scheduled, starting between now and now plus the lead", and
+the outbox key is the session id. A session enters the window once, is queued
+once, and stays queued once no matter how often the function runs or who calls it
+by hand. A missed hour catches up on the next one with no backfill to remember.
+
+**A phone number on file is not consent to message it.** WhatsApp is a Meta
+channel with its own rules, and a client who gave a number so the coach could
+call them has not agreed to automated messages. So `whatsapp_opt_in` is a real
+column, off by default, recorded with when and by whom, and the reminder query
+checks it. Email is different in kind: the client gave an address in the act of
+booking the session being reminded about. Both are still switchable off.
+
+Two smaller ones. Business-initiated WhatsApp may only be a pre-approved
+template, so the outbox row carries a template name and positional parameters,
+never prose written in the function — the schema makes the wrong thing
+unexpressible. And when no number is connected, a due row is marked skipped with
+a reason rather than held: a reminder is time-bound, and delivering "see you
+tomorrow" next month about a session that already happened is worse than not
+delivering it. The email went out on its own row regardless.
+
+Marking a session done needed a list that did not exist. `sessions_upcoming`
+answers "what is next"; the daily gesture needs "what already happened and is
+still open". That is a different query, so it is a different function rather than
+a flag on the old one.
+
+## An agreement someone can file (14/09/2026)
+
+An agreed collaboration lived only as rows. That runs a deal and does not sell
+one: a brand's finance team files a document. Four decisions.
+
+**Write the PDF by hand.** Every Deno PDF library is a dependency that can change
+under us, and a changed library changes the bytes we hashed — which is the whole
+claim. PDF 1.4 with the base-14 Helvetica faces is a few hundred lines and needs
+no font embedding. The suite renders a real file and parses it back, checking
+that every xref offset lands on the object it claims, because a wrong offset
+makes a file readers silently refuse.
+
+**Make it deterministic.** Nothing in the writer reads the clock or a random
+source: the creation date is the acceptance timestamp, and the file id is derived
+from the content. Two renders of the same agreement are byte-identical, so a
+stored hash keeps meaning something.
+
+**Store the bytes, do not regenerate them.** Regenerating on demand would
+re-render with whatever the code says that day, and the integrity claim would
+quietly become "these bytes match today's code". A one-page agreement is some
+twenty kilobytes; a bytea column is smaller than a bucket with policies, signed
+URLs and a delete path this project has already been bitten by, and it inherits
+the deal's own RLS. The column grant deliberately stops before the bytes, so a
+plain select can never pull a contract.
+
+**Hook the generation to the fact, not the caller.** A deal can be agreed in the
+room or in the back-office, through two different code paths. A trigger on the
+accepted version changing catches both, and idempotency on (deal, version) means
+a retry, a redeploy or a double-fired trigger cannot produce a second contract
+that differs from the first.
+
+On the law: this is an electronic signature under UAE Federal Decree-Law No. 46
+of 2021, and the document says so — and says, equally plainly, that it is not a
+Qualified Electronic Signature, because no certificate from a TDRA-accredited
+trust service provider is attached. Overclaiming the weight of a signature is the
+one thing that would make this document worse than no document at all, so the
+test suite asserts the disclaimer is present and that no phrase implying an
+accredited certificate ever appears.

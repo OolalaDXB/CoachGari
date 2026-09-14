@@ -302,6 +302,9 @@ node scripts/test-anchors.mjs                                          # offline
 node scripts/test-audience-csv.mjs                                     # offline: the platform CSV reader (real-shaped Instagram / TikTok / YouTube exports, what it refuses), 20 checks
 node scripts/test-audience-sync.mjs                                    # offline: analytics-sync boundary (key gate first, no secret logged, one source per failure, RPC-only writes), 25 checks
 psql "$DATABASE_URL" -f supabase/tests/cg018_audience.sql              # audience: upsert idempotency, import cap + audit, permission blindness, revoked sync RPCs, 36 checks
+psql "$DATABASE_URL" -f supabase/tests/cg019_sessions.sql              # reminders once per session, consent before WhatsApp, the one-line note, the to-close window, 40 checks
+node scripts/test-whatsapp.mjs                                         # offline: WhatsApp rail — key gate, template-only, no number in a log, 30 checks
+node --experimental-strip-types scripts/test-agreement.mjs             # offline: renders a real PDF and parses it back — xref offsets, determinism, both hashes, what the document may claim, 48 checks
 ```
 
 ### Transactional email (Resend)
@@ -354,8 +357,9 @@ even create an auth user. What a person sees is decided by the database, not
 the page; the page never writes permissions directly. Navigation:
 **Overview · Clients · Schedule · Collaborations · Finance · Analytics ·
 Settings**. Settings holds what is configured once — Services (catalogue),
-Access, and the BEAU PH payment infrastructure as Payment rails + FX — each
-tab on its own permission; the old `#services`, `#access` and `#beauph`
+**Business** (the legal name, licence, jurisdiction and address printed on a
+collaboration agreement), Access, and the BEAU PH payment infrastructure as
+Payment rails + FX — each tab on its own permission; the old `#services`, `#access` and `#beauph`
 hashes still land there. Schedule has four tabs — **Calendar**, **Sessions**
 (one list of the time: sessions booked on the site and sessions entered by
 the coach, with origin and payment; unconfirmed site bookings sit on top
@@ -754,6 +758,8 @@ node scripts/test-booking-picker.mjs      # BOOKING_PICKER_TESTS ok=49    ┘
 node --experimental-strip-types scripts/test-stripe-embedded.mjs   # STRIPE_EMBEDDED_TESTS ok=42
 node scripts/test-audience-csv.mjs        # AUDIENCE_CSV_TESTS ok=20
 node scripts/test-audience-sync.mjs       # AUDIENCE_SYNC_TESTS ok=25
+node scripts/test-whatsapp.mjs            # WHATSAPP_TESTS ok=30
+node --experimental-strip-types scripts/test-agreement.mjs   # AGREEMENT_TESTS ok=48
 ```
 
 The three marked suites drive a real browser. They find Playwright in the
@@ -945,6 +951,123 @@ import.
 `AUDIENCE_SYNC_TESTS ok=25` (the key gate, secret hygiene, one source per
 failure, RPC-only writes), `CG018_TESTS ok=36` (the database boundary:
 idempotency, refusals, permission blindness, revoked sync RPCs).
+
+## Session reminders (CG-019)
+
+The day before a session, the client hears once. Email always, WhatsApp too
+when that person has said yes.
+
+**One reminder per session, ever.** The dedupe key is the session, so a re-run,
+a manual call or an overlapping window never sends a second one. The window is
+"between now and now plus the lead" rather than "exactly 24 hours out", so a
+missed hourly run catches up on the next one instead of skipping a client.
+pg_cron `cg-session-reminders` runs at seven minutes past every hour;
+`select public.session_reminders()` runs it by hand and returns how many were
+queued. A cancelled session is never reminded.
+
+**Consent is explicit and recorded.** `crm_contacts.whatsapp_opt_in` is off by
+default and never inferred: a phone number on file is not permission to message
+it. Turning it on records when and by whom. `reminders_opt_out` turns every
+channel off. Both switches live on the client profile, under
+`client_profile:manage`, and each change is audited.
+
+**The WhatsApp rail** is a sibling of the email outbox, not a special case:
+`whatsapp_events` with its own queue function, its own drain key hashed in
+`outbox_keys` and clear only in Vault, the same dedupe discipline, drained by
+`supabase/functions/whatsapp-outbox` every two minutes. Two owner-set secrets,
+never committed:
+
+```
+supabase secrets set WHATSAPP_TOKEN=...              # Meta system user token for the WhatsApp Cloud API
+supabase secrets set WHATSAPP_PHONE_NUMBER_ID=...    # the phone number id from the Meta console
+```
+
+Business-initiated WhatsApp may only be a **template approved by Meta**, so a
+row carries a template name and its positional parameters, never free prose.
+The template the code queues is `session_reminder_24h` with three parameters:
+first name, what, when. It must exist and be approved in the Meta console under
+that exact name, or every send fails.
+
+Until a number is connected the rail is inert, and a due row is marked
+**skipped** with the reason rather than held: a reminder is time-bound, and
+delivering "see you tomorrow" next month about a session in the past is worse
+than not delivering it. The email went out on its own row regardless.
+
+## Closing a session, and the line that goes with it (CG-019)
+
+`sessions_upcoming` answers what is next. The daily gesture needs the opposite
+question, so `sessions_to_close(hours, limit)` returns the sessions that have
+already happened and are still `scheduled` because nobody said whether the
+client turned up. They appear on the Overview as their own cards, above the
+next sessions, with two buttons and one input:
+
+- **Done** and **No-show** call the existing `session_set_status`, no popup. A
+  no-show from the card is not charged; charging one still goes through the
+  session sheet, which asks.
+- **What did you work on** calls `session_note_quick(id, text)`, which writes
+  the session's own note and a line in the client's history, linked to that
+  session through the new `crm_notes.session_id`. It is saved before a status
+  change moves the card off the list.
+
+Two permissions on purpose: `coach:operations` moves a diary,
+`client_profile:manage` writes in someone's history. A scheduler does not
+become a note-taker by accident. A note is capped at 500 characters — one line,
+not an essay.
+
+## The signed agreement (CG-020)
+
+When a collaboration is agreed, the frozen proposal becomes a PDF and is kept
+with the evidence of how it was signed. Both sides can download it: the
+back-office from the deal, the counterparty from the room link they already
+hold.
+
+**The signature.** Electronic signature under **UAE Federal Decree-Law No. 46
+of 2021** on Electronic Transactions and Trust Services. It is deliberately
+**not** a Qualified Electronic Signature — that needs a certificate from a
+trust service provider accredited by the TDRA, which this system does not issue
+and does not pretend to. What the document records is what the law weighs when
+judging whether an electronic signature is reliable: the signatory linked to
+the signature through a room link issued to one deal, sole control of a private
+revocable link, the act evidenced by timestamp, salted one-way IP hash, device
+and the exact text that was on screen, and later change made detectable by two
+hashes. The PDF says all of this in plain words, including what it is not.
+
+| Hash | Covers | Detects |
+|---|---|---|
+| Record | the terms, the consideration, the moment of acceptance | changed data |
+| File | the stored bytes | a changed document |
+
+The record hash is printed in the document; both are stored. The letterhead is
+deliberately outside the record hash: a corrected address is not a new
+agreement.
+
+**The writer** is `supabase/functions/_shared/pdf.ts`, written by hand. PDF
+1.4, the two standard Helvetica faces, WinAnsi text, a counted xref. No runtime
+dependency, because a library that changes under us changes the bytes we
+hashed. Nothing reads the clock or a random source, so the same input always
+produces the same file. Accents are folded rather than written as a different
+letter.
+
+**Where the file lives.** In `collaboration_agreements.pdf`, as bytea. The
+integrity claim is "these bytes have not changed", which only holds if the
+bytes are the ones that were hashed; regenerating on demand would re-render
+with whatever the code says that day. The bytes are never exposed by a plain
+select — the table grant stops at the metadata — and never become a URL: both
+screens turn base64 into a file in the browser. Every download is audited.
+
+**Issued from the fact, not the caller.** A deal can be agreed in the room or
+in the back-office. A trigger on `accepted_proposal_id` changing fires
+`agreement_kick`, which posts to `supabase/functions/agreement` with the same
+hashed-key discipline as the other outboxes. Storing is idempotent on (deal,
+version), so a retry, a redeploy or a double-fired trigger can never produce a
+second, differing contract. If the renderer is down the acceptance still
+stands; **Produce it now** on the deal issues the document later.
+
+**Settings › Business** holds what a contract needs: legal name, trading name,
+licence number, jurisdiction, registered address, contract email, website. An
+empty field is left off the document rather than filled with a guess, and the
+letterhead is snapshotted at signature, so correcting a typo today never
+rewrites a contract signed last month. Under `platform:admin`, audited.
 
 ## Continuous integration
 

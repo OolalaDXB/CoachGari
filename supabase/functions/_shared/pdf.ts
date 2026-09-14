@@ -116,7 +116,9 @@ function layout(blocks: Block[], footer: string): Op[][] {
     const bold = b.t === 'title' || b.t === 'h';
     const lead = b.t === 'title' ? 26 : b.t === 'small' ? 11.5 : 14.5;
     const lines = wrap(b.text, size, bold, BODY_W);
-    if (b.t === 'h') { room(lead + 8); y -= 8; }
+    // A heading alone at the foot of a page reads as a section that is missing.
+    // Take it to the next page unless two lines of its body can follow it.
+    if (b.t === 'h') { room(lead + 8 + 30); y -= 8; }
     for (const l of lines) { room(lead); text(l, M_X, size, bold, b.t === 'small'); y -= lead; }
     if (b.t === 'title') y -= 6;
   }
