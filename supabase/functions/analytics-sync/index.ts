@@ -22,8 +22,27 @@ const YOUTUBE_API = "https://www.googleapis.com/youtube/v3/channels";
 
 type Sb = ReturnType<typeof createClient>;
 
+/* A secret pasted into `supabase secrets set` often arrives wrapped: a trailing
+   newline from a copy, or the quotes the shell was supposed to eat. Both are
+   invisible in every dashboard and both produce an authentication failure that
+   looks exactly like a wrong key, which is an hour of looking in the wrong
+   place. Trim, then drop ONE matching pair of surrounding quotes — never more,
+   because a quote can legitimately be part of a secret. */
+export function cleanSecret(raw: string | undefined): string {
+  let v = (raw ?? "").trim();
+  if (v.length >= 2 && ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))) v = v.slice(1, -1).trim();
+  return v;
+}
+
+/* Plausible answers 401 for a token it does not accept at all. The message has
+   to say which of the two it is, because the operator's next click depends on
+   it: a refused key is a key problem, a refused site is a site problem, and
+   "plausible 401" alone sends people to re-read their site id for nothing. */
 async function plausibleQuery(key: string, body: Record<string, unknown>) {
   const r = await fetch(PLAUSIBLE_API, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (r.status === 401) throw new Error("Plausible refused the key (401). It must be a Stats API key from Plausible → Settings → API keys; a Sites/Plugins key is a different token and is rejected here.");
+  if (r.status === 403) throw new Error("Plausible refused access (403): the key is valid but has no access to this site, or the plan does not include the Stats API.");
+  if (r.status === 404) throw new Error("Plausible does not know this site (404): plausible_site_id must be the domain exactly as registered.");
   if (!r.ok) throw new Error(`plausible ${r.status}`);   // status only, never the body (it can echo the site id / query)
   return await r.json() as { results: { metrics: number[]; dimensions: string[] }[] };
 }
@@ -74,22 +93,27 @@ Deno.serve(async (req: Request) => {
 
   const { data: cfgRows } = await sb.from("analytics_config").select("plausible_site_id,youtube_channel_id").eq("id", 1).maybeSingle();
   const cfg = (cfgRows ?? {}) as { plausible_site_id?: string; youtube_channel_id?: string | null };
-  const plausibleKey = (env("PLAUSIBLE_API_KEY") ?? "").trim();
-  const youtubeKey = (env("YOUTUBE_API_KEY") ?? "").trim();
+  const plausibleRaw = env("PLAUSIBLE_API_KEY"), youtubeRaw = env("YOUTUBE_API_KEY");
+  const plausibleKey = cleanSecret(plausibleRaw), youtubeKey = cleanSecret(youtubeRaw);
   const configured = { plausible: !!plausibleKey, youtube: !!youtubeKey && !!cfg.youtube_channel_id };
+  /* Presence only, as always — plus whether the stored value had to be unwrapped.
+     That is a fact about the storage, not about the secret: it reveals nothing
+     that could be used, and it is the difference between "your key is wrong"
+     and "your key was stored with quotes around it". */
+  const wrapped = { plausible: !!plausibleRaw && plausibleRaw !== plausibleKey, youtube: !!youtubeRaw && youtubeRaw !== youtubeKey };
 
-  if (body.action === "status") { log("status", configured); return json(200, { ok: true, configured }); }
+  if (body.action === "status") { log("status", { ...configured, wrapped }); return json(200, { ok: true, configured, wrapped }); }
   if (body.action !== "sync" && body.action !== undefined) return json(400, { ok: false, error: "validation", fields: ["action"] });
 
   const out: Record<string, unknown> = { ok: true, configured };
   const errors: string[] = [];
   if (configured.plausible) {
     try { out.plausible = await syncPlausible(sb, plausibleKey, cfg.plausible_site_id || "coachgari28.com"); }
-    catch (e) { const m = String(e).slice(0, 80); errors.push(`plausible: ${m}`); log("plausible_failed", { error: m }); }
+    catch (e) { const m = String(e).replace(/^Error:\s*/, "").slice(0, 200); errors.push(`Plausible — ${m}`); log("plausible_failed", { error: m }); }
   }
   if (configured.youtube) {
     try { out.youtube = await syncYouTube(sb, youtubeKey, cfg.youtube_channel_id!); }
-    catch (e) { const m = String(e).slice(0, 80); errors.push(`youtube: ${m}`); log("youtube_failed", { error: m }); }
+    catch (e) { const m = String(e).replace(/^Error:\s*/, "").slice(0, 200); errors.push(`YouTube — ${m}`); log("youtube_failed", { error: m }); }
   }
   if (errors.length) { await sb.rpc("analytics_sync_error", { p_error: errors.join(" · ") }); out.errors = errors; }
   log("synced", { plausible: !!out.plausible, youtube: !!out.youtube, errors: errors.length });

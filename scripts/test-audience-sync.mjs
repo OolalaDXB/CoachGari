@@ -31,6 +31,25 @@ check('a provider error is reported by status, never by echoing its body',
   /plausible \$\{r\.status\}/.test(fn) && /youtube \$\{r\.status\}/.test(fn) && !/await r\.text\(\).*Error/s.test(fn));
 check('the source files carry no key, site id aside', !/(sk|rk|pk)_(live|test)_|AIza[0-9A-Za-z_-]{20}/.test(fn));
 
+/* ---- a secret that was stored wrapped ----
+   A key pasted into `supabase secrets set` often arrives with a trailing
+   newline or with the quotes the shell was meant to eat. Both are invisible in
+   every dashboard and both fail authentication exactly like a wrong key. */
+check('a stored secret is trimmed and unwrapped before it is used',
+  /export function cleanSecret/.test(fn) && /cleanSecret\(plausibleRaw\)/.test(fn) && /cleanSecret\(youtubeRaw\)/.test(fn));
+check('only ONE matching pair of quotes is dropped, never more',
+  /v\.slice\(1, -1\)/.test(fn) && !/replace\(\/\["']\/g/.test(fn));
+check('status says whether the value had to be unwrapped, never what it is',
+  /wrapped = \{/.test(fn) && /plausibleRaw !== plausibleKey/.test(fn) && !/wrapped.*plausibleKey\.slice|length: plausibleKey/.test(fn));
+
+/* ---- the message the operator actually reads ---- */
+check('a refused key and a refused site are not the same sentence',
+  /r\.status === 401/.test(fn) && /r\.status === 404/.test(fn) && /Stats API key/.test(fn));
+check('the failure reaches the back-office in words, not as a bare status',
+  /errors\.push\(`Plausible — /.test(fn) && /analytics_sync_error/.test(fn));
+check('and the back-office shows it', /last_sync_error/.test(admin));
+check('a longer message still fits what the database stores', /left\(p_error, 300\)/.test(mig));
+
 /* ---- behaviour ---- */
 check('each source is optional and skipped when unconfigured', /if \(configured\.plausible\)/.test(fn) && /if \(configured\.youtube\)/.test(fn));
 check('one source failing never stops the other (each is caught on its own)',
