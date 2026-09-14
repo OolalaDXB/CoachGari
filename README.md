@@ -221,6 +221,10 @@ service → day → time → details → 10-minute hold → payment (CG-003).
   project runs **24/7** (seven rules 00:00–24:00 Asia/Dubai, set by the owner on
   2026-09-14 — operational data, not a migration). Schedule › Availability has a
   **Set 24/7** button that restores that state; time off is an exception.
+  **Days off, Outlook-style**: the same tab shows the next eight weeks as a
+  grid — one click blocks a whole day (a `closed` exception 00:00–24:00
+  Asia/Dubai, reason "Day off"), one click frees it again. A day blocked by a
+  hand-written exception is shown but only edited from Exceptions.
 
 ### Booking tests
 

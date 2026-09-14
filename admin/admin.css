@@ -434,3 +434,14 @@ tr.ph-dim td{color:#aeb2ba;}
 html.standalone .ad-top{padding-top:calc(10px + env(safe-area-inset-top));}
 html.standalone .ad-main{padding-bottom:calc(24px + env(safe-area-inset-bottom));}
 html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
+
+/* Days off grid (Availability): one click blocks a whole day, Outlook-style */
+.doff-head{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin:8px 0 4px;} .doff-head span{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--grey-text);text-align:center;}
+.doff-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+.doff{position:relative;display:flex;align-items:center;justify-content:center;height:40px;border:1px solid var(--line);border-radius:10px;background:#fff;font:inherit;font-size:13.5px;cursor:pointer;color:var(--black);}
+.doff b{font-weight:700;} .doff i{position:absolute;left:8px;top:3px;font-style:normal;font-size:9px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);}
+.doff:hover:not([disabled]){border-color:var(--accent);}
+.doff.today{box-shadow:inset 0 0 0 2px var(--accent);}
+.doff.off{background:#fde7e5;border-color:#f5c6c2;color:#b3261e;} .doff.off:hover{background:#fbd5d1;}
+.doff.past{opacity:.35;cursor:default;}
+@media(max-width:560px){.doff{height:34px;font-size:12.5px;} .doff i{display:none;}}

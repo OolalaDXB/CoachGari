@@ -1122,11 +1122,38 @@ async function bookings() {
 }
 
 /* =============================== AVAILABILITY RULES =============================== */
+// Days off, Outlook-style: a grid of the next weeks; one click blocks a whole day (a closed
+// exception 00:00–24:00 in Asia/Dubai), one click on a blocked day frees it again. Only the
+// days this grid created ("Day off") are toggled back; a hand-written exception stays.
+const DAYOFF_TZ = 'Asia/Dubai', DAYOFF_WEEKS = 8, DAYOFF_REASON = 'Day off';
+function dayOffGrid(exceptions) {
+  const today = tzParts(new Date(), DAYOFF_TZ); const t0 = new Date(`${today.year}-${today.month}-${today.day}T12:00:00Z`);
+  const monday = new Date(t0.getTime() - ((t0.getUTCDay() + 6) % 7) * 864e5);
+  const dayKey = (d) => d.toISOString().slice(0, 10);
+  const nextKey = (key) => dayKey(new Date(Date.parse(key + 'T12:00:00Z') + 864e5));
+  const coversDay = (e, key) => e.kind === 'closed' && e.active && e.start_at <= zonedToUtc(key + 'T00:00', DAYOFF_TZ) && e.end_at >= zonedToUtc(nextKey(key) + 'T00:00', DAYOFF_TZ);
+  const cells = [];
+  for (let i = 0; i < DAYOFF_WEEKS * 7; i++) {
+    const d = new Date(monday.getTime() + i * 864e5); const key = dayKey(d);
+    const ex = exceptions.find((e) => coversDay(e, key));
+    const past = key < `${today.year}-${today.month}-${today.day}`;
+    const mine = ex && (ex.reason || '').startsWith(DAYOFF_REASON);
+    cells.push(`<button type="button" class="doff${ex ? ' off' : ''}${past ? ' past' : ''}${key === `${today.year}-${today.month}-${today.day}` ? ' today' : ''}" data-day="${key}" ${ex ? `data-ex="${ex.id}" data-mine="${mine ? 1 : 0}"` : ''} ${past ? 'disabled' : ''} title="${ex ? esc(ex.reason || 'blocked') : 'Block this day'}">
+      ${d.getUTCDate() === 1 || i === 0 ? `<i>${MONTHS[d.getUTCMonth()].slice(0, 3)}</i>` : ''}<b>${d.getUTCDate()}</b></button>`);
+  }
+  return `<div class="doff-head">${DOW_SHORT.map((x) => `<span>${x}</span>`).join('')}</div><div class="doff-grid">${cells.join('')}</div>`;
+}
 async function availability() {
-  const { data, error } = await sb.from('availability_rules').select('id,weekday,start_time,end_time,timezone,service_ids,valid_from,valid_to,active,notes,created_at').order('weekday').order('start_time'); if (error) throw error;
+  const from = new Date(Date.now() - 8 * 864e5).toISOString();
+  const [{ data, error }, exR] = await Promise.all([
+    sb.from('availability_rules').select('id,weekday,start_time,end_time,timezone,service_ids,valid_from,valid_to,active,notes,created_at').order('weekday').order('start_time'),
+    sb.from('availability_exceptions').select('id,kind,start_at,end_at,timezone,reason,active').eq('kind', 'closed').gte('end_at', from).order('start_at'),
+  ]); if (error) throw error;
   const editing = view.dataset.editRule ? data.find((r) => r.id === view.dataset.editRule) : null;
   view.innerHTML = `
     <div class="ad-head"><div><h1>Availability</h1><p class="ad-muted">Weekly hours the booking engine offers. Slots follow each service's duration. Closed exceptions punch holes in these.</p></div></div>
+    <div class="ad-panel"><div class="ov-chart-head"><div><h2 style="margin:0">Days off</h2><p class="ad-muted" style="font-size:13px;margin:2px 0 0">Click a day to block it entirely (${DAYOFF_TZ}); click again to free it. Part of a day → an exception below.</p></div></div>
+      ${dayOffGrid(exR.data || [])}</div>
     <div class="ad-grid2">
       <div class="ad-panel">${table(['Day', 'Hours', 'Zone', 'Services', 'Valid', 'Active', ''], data.map((r) => `<tr>
         <td><b>${WEEKDAYS[r.weekday]}</b></td><td>${esc(r.start_time.slice(0, 5))}–${esc(r.end_time.slice(0, 5))}</td><td>${esc(r.timezone)}</td>
@@ -1148,6 +1175,18 @@ async function availability() {
           <div class="actions"><button class="btn btn-accent btn-sm" type="submit">${editing ? 'Save' : 'Add'}</button>${editing ? '<button class="btn btn-line btn-sm" type="button" data-cancel-edit>Cancel</button>' : ''}</div>
         </form></div></div>`;
   view.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => { view.dataset.editRule = b.dataset.edit; availability().catch(fail); });
+  view.querySelectorAll('.doff:not([disabled])').forEach((b) => b.onclick = async () => {
+    const day = b.dataset.day;
+    if (b.dataset.ex) {
+      if (b.dataset.mine !== '1') return toast('This day is blocked by a hand-written exception — edit it in Exceptions', true);
+      const { error: e1 } = await sb.from('availability_exceptions').delete().eq('id', b.dataset.ex); if (e1) return fail(e1);
+      toast(`${prettyDay(day)} is open again`);
+    } else {
+      const { error: e1 } = await sb.from('availability_exceptions').insert({ kind: 'closed', timezone: DAYOFF_TZ, start_at: zonedToUtc(day + 'T00:00', DAYOFF_TZ), end_at: zonedToUtc(new Date(Date.parse(day + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10) + 'T00:00', DAYOFF_TZ), reason: DAYOFF_REASON, service_ids: null, active: true }); if (e1) return fail(e1);
+      toast(`${prettyDay(day)} blocked`);
+    }
+    availability().catch(fail);
+  });
   const b247 = $('#rule-247'); if (b247) b247.onclick = async () => {
     if (!(await confirmAct('Replace every weekly rule with 00:00–24:00, seven days (Asia/Dubai)? Exceptions and bookings are untouched.'))) return;
     const { error: e1 } = await sb.from('availability_rules').delete().not('id', 'is', null); if (e1) return fail(e1);
