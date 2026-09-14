@@ -90,7 +90,16 @@ p{margin:0 0 1em;}
 .hero-brand{font-size:clamp(1.05rem,2.3vw,1.4rem);font-weight:800;letter-spacing:-.025em;line-height:1.15;margin-bottom:22px;color:var(--black);}
 .hero-brand span{color:var(--accent);}
 .hero h1{margin-bottom:20px;}
-.hero-lead{font-size:clamp(1.18rem,2.6vw,1.55rem);font-weight:700;letter-spacing:-.025em;line-height:1.2;max-width:22ch;margin:0 auto 16px;color:var(--black);}
+/* Two lines, not three: 22ch broke the lead into three lines at every width.
+   30ch holds it to two from 390px up, and the lower clamp floor carries that
+   down to 360px. Below ~340px it takes three lines whatever we do — the line
+   simply does not fit — and shrinking the type further to force it would cost
+   more than the extra line. `balance` keeps the two lines close in length. */
+.hero-lead{font-size:clamp(1.06rem,2.6vw,1.55rem);font-weight:700;letter-spacing:-.025em;line-height:1.2;max-width:30ch;text-wrap:balance;margin:0 auto 16px;color:var(--black);}
+/* The hero title breaks after "me" on narrow screens. It fits on one line from
+   680px, but with only 18px to spare, so the break is kept until 760px where
+   there are 81px — enough that a different font rasteriser cannot push it over. */
+@media(min-width:760px){.br-hero{display:none;}}
 .hero .sub{font-size:1.18rem;max-width:54ch;}
 .hero-cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:38px;}
 .hero-meta{margin-top:28px;font-size:14.5px;font-weight:600;color:var(--grey-text);}
