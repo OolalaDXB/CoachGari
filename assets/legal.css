@@ -11,6 +11,3 @@
 .doc li{margin:0 0 6px;}
 .doc a{color:var(--black);}
 .doc-entity{background:var(--grey-bg);border-radius:14px;padding:16px 20px;line-height:1.7;}
-.doc-foot{background:var(--grey-bg);padding:28px 0 36px;text-align:center;font-size:13.5px;color:var(--grey-text);}
-.doc-foot p{margin:0 0 6px;}
-.doc-foot a{color:var(--black);text-decoration:none;font-weight:600;}

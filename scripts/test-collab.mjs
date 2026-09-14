@@ -60,6 +60,19 @@ check('the redirects are temporary: /collab is noindex, and a cached 308 would b
   subRules.every((r) => r.permanent === false));
 check('no rule redirects the apex itself to the subdomain',
   !vercel.redirects.some((r) => String(r.destination).includes('//' + SUB)));
+
+/* The page carries the same footer as the other standalone pages, from the same
+   stylesheet. It used to live in legal.css, which collab does not load — a site
+   footer is not a legal-page element, and a second copy would have drifted. */
+const legalFoot = read('../legal.html').match(/<footer class="doc-foot">[\s\S]*?<\/footer>/)?.[0];
+const collabFoot = page.match(/<footer class="doc-foot">[\s\S]*?<\/footer>/)?.[0];
+check('collab carries the document footer', !!collabFoot);
+check('it is identical to the one on legal and privacy', collabFoot === legalFoot);
+check('the footer is styled from the shared sheet, not legal.css',
+  /\.doc-foot\{/.test(read('../assets/coach-gari.css')) && !/doc-foot/.test(read('../assets/legal.css')));
+check('collab does not have to pull legal.css in for it', !/legal\.css/.test(page));
+check('the page opens with the accent badge the rest of the site uses',
+  /<span class="badge">Collaborations<\/span>/.test(page));
 check('public copy always writes "Coach Gari", never a bare first name as the brand', !/\bGari\b(?!\s*[<·])/.test(page.replace(/Coach Gari/g, '')));
 
 /* ---- edge function security ---- */
