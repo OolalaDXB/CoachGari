@@ -24,6 +24,11 @@ tab inside Schedule, a list view next to the agenda?
   grid, legend for ≥ 2 series, hover tooltip, text in text tokens; the
   palette (`#1540E8`, `#eb6834`, `#1baf7a`) passes the validator (worst
   CVD ΔE 32.6, normal 44.1).
+- **Revenue is net of refunds** (`20261037`, owner: "il doit montrer zéro,
+  l'achat a été refunded"). Succeeded refunds are netted per order in the
+  month it was paid; a failed refund nets nothing. The first cut excluded
+  fully refunded orders by status label, which gave zero by accident and
+  missed partial refunds.
 - **Revenue is per currency, not converted.** `admin_overview_charts` sums
   paid orders by `paid_at` month per currency; the chart shows up to three
   currencies side by side and the headline is the main one. No FX conversion
@@ -64,7 +69,7 @@ CRM. `20261035_cg_lead_delete_and_crm_dashboard.sql`:
   which now shows one line and an *Open CRM* button. One home for one job.
 - **Restore** for archived / spam leads (status back to `new`), the mirror
   Contacts already had.
-- Suite `cg009_crm.sql` 43 → **51** (→ **54** with the Overview charts checks).
+- Suite `cg009_crm.sql` 43 → **51** (→ **55** with the Overview charts checks).
 
 ---
 

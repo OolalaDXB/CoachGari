@@ -492,7 +492,7 @@ to it through a back-filled `crm_contact_id`.
   RPCs (`crm_save_contact`, `crm_add_note`, `crm_edit_note`, `metrics_add`,
   `metrics_edit`); the tables have no direct write grant, anon has nothing,
   and changes are recorded in `public.admin_audit`.
-- **Tests** (`supabase/tests/cg009_crm.sql`, `CG009_TESTS ok=54 fail=0`):
+- **Tests** (`supabase/tests/cg009_crm.sql`, `CG009_TESTS ok=55 fail=0`):
   matching (email / phone / ambiguous / same-name), enquiry immutability,
   direct-booking linkage, note authz + audit, metric history + height
   snapshot + BMI correctness + BMI-not-writable + partial + range rejection,
@@ -509,7 +509,8 @@ to it through a back-filled `crm_contact_id`.
   Bookings / Calendar), the CRM line, two 12-month charts and the headline
   numbers. `admin_overview_charts(p_months)` returns, gated like
   `admin_overview`: **revenue** per month per currency (paid orders by
-  `paid_at`, gross as collected — Finance is the ledger) and the **pipeline**
+  `paid_at`, **net of succeeded refunds** — a refunded purchase reads zero,
+  a partial refund reads what was kept; `20261037`) and the **pipeline**
   (enquiries received, clients won by `first_seen_at`, sessions held). The
   charts are plain SVG columns (no library — the admin CSP is `script-src
   'self'`): ≤ 24px columns, 4px caps, hairline grid, a legend for ≥ 2 series,

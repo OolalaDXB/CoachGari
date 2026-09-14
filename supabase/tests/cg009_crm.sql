@@ -219,6 +219,18 @@ begin
   if (j ? 'revenue') and not (j ? 'pipeline') and jsonb_array_length(j -> 'revenue') = 3 and jsonb_typeof(j -> 'revenue' -> 0 -> 'by_currency') = 'object'
     then ok := ok + 1; else fail := fail + 1; log := log || ' [charts finance ' || left(j::text, 200) || ']'; end if;
   execute 'reset role';
+  -- revenue is net of succeeded refunds (20261037): a full refund reads 0, a partial one reads what was kept, a failed refund nets nothing
+  insert into public.orders (reference, booking_id, session_pack_id, order_reason, customer_name, customer_contact, currency, gross_amount, status, service_title, paid_at)
+  values ('OR-TSTFULL', null, null, 'support', 'T', 't@example.com', 'ZWL', 1000, 'refunded', 'test', now()) returning id into cid2;
+  insert into public.refunds (order_id, amount, currency, status) values (cid2, 1000, 'ZWL', 'succeeded');
+  insert into public.orders (reference, booking_id, session_pack_id, order_reason, customer_name, customer_contact, currency, gross_amount, status, service_title, paid_at)
+  values ('OR-TSTPART', null, null, 'support', 'T', 't@example.com', 'ZWL', 1000, 'partially_refunded', 'test', now()) returning id into cid2;
+  insert into public.refunds (order_id, amount, currency, status) values (cid2, 300, 'ZWL', 'succeeded'), (cid2, 999, 'ZWL', 'failed');
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000005","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.admin_overview_charts(1);
+  if (j -> 'revenue' -> 0 -> 'by_currency' ->> 'ZWL')::int = 700 then ok := ok + 1; else fail := fail + 1; log := log || ' [revenue not net of refunds ' || left(j::text, 200) || ']'; end if;
+  execute 'reset role';
   perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000006","email":"ana@test.local"}', true);
   execute 'set local role authenticated';
   begin perform public.admin_overview_charts(12); fail := fail + 1; log := log || ' [charts open to analytics]'; exception when sqlstate '42501' then ok := ok + 1; end;
