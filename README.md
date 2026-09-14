@@ -99,6 +99,9 @@ and `plausible.io` only, never inline. Set `PLAUSIBLE_SCRIPT: ''` to switch
 analytics off. No other tracker is, or should be, added. Conversion
 attribution stays the first-touch UTM data captured with each enquiry.
 
+What Plausible measures is read back into the back-office every night and shown
+next to the social platforms — see "Audience (CG-018)" below.
+
 This file is served to every visitor. It must never contain a key, a token or
 a service role. All secrets live in the Supabase Edge Function environment.
 
@@ -289,13 +292,16 @@ REPORT_TOKEN=<64-hex> node scripts/e2e-runtime.mjs [--pay] [--wait]    # laptop:
 psql "$DATABASE_URL" -f supabase/tests/cg003_payments.sql              # ledger / idempotency, rolls back
 node scripts/test-checkout.mjs --wait                                  # real Stripe round trip
 node scripts/test-admin-workspace.mjs                                  # offline (Playwright, mocked Supabase): Finance / BEAU PH workspace lazy loading, 34 checks
-node scripts/test-admin-pwa.mjs                                        # offline (Playwright): back-office PWA — manifest, icons, /admin/-scoped worker, shell cache, no data cached, offline shell, code sign-in, 18 checks
-node scripts/test-booking-picker.mjs                                   # offline (Playwright, mocked booking API): picker hierarchy, availability timing, error/retry, 390 px, 40 checks
+node scripts/test-admin-pwa.mjs                                        # offline (Playwright): back-office PWA — manifest, icons, /admin/-scoped worker, shell cache, no data cached, offline shell, code sign-in, 36 checks
+node scripts/test-booking-picker.mjs                                   # offline (Playwright, mocked booking API): picker hierarchy, availability timing, error/retry, 390 px, 49 checks
 psql "$DATABASE_URL" -f supabase/tests/beau_ph_contract.sql            # BEAU PH contract incl. rail configuration + FX, rolls back
 psql "$DATABASE_URL" -f supabase/tests/cg013_support.sql               # Support Coach Gari: server-side amount / rail authority, webhook-only paid, no side effects
 psql "$DATABASE_URL" -f supabase/tests/cg014_email.sql                 # email outbox: one row per event, replay-safe, send failure never touches booking / payment, 47 checks
 node scripts/test-email.mjs                                            # offline: Resend module (config presence, templates, Idempotency-Key, retry, no key in logs), 34 checks
 node scripts/test-anchors.mjs                                          # offline (Playwright): header / footer anchors, aliases, header-aware landing, reduced motion, 33 checks
+node scripts/test-audience-csv.mjs                                     # offline: the platform CSV reader (real-shaped Instagram / TikTok / YouTube exports, what it refuses), 20 checks
+node scripts/test-audience-sync.mjs                                    # offline: analytics-sync boundary (key gate first, no secret logged, one source per failure, RPC-only writes), 25 checks
+psql "$DATABASE_URL" -f supabase/tests/cg018_audience.sql              # audience: upsert idempotency, import cap + audit, permission blindness, revoked sync RPCs, 36 checks
 ```
 
 ### Transactional email (Resend)
@@ -374,7 +380,8 @@ magic-link sign-in.
 | `catalog:manage` | Services — create / edit through the audited `catalog_save_service` RPC (title, descriptions, price, currency, duration, delivery, capacity, booking mode, active, listed, order, features) |
 | `finance:view` | Finance — **Transactions** (one list across every rail: type, method, amount in the collected currency, normalised status, lazy detail drawer), Orders / ledger (`finance_orders()`), settlements, webhook log; **Payment methods** (the configured rails, read); **BEAU PH** — Rails (provider capability vs merchant configuration, deployment readiness as secret *presence*) and FX (rates, freshness, quotes). No name, no contact, no enquiry — only a masked `customer_hint` (`p***@example.com`, `•••••••00`) to match a Stripe receipt |
 | `finance:manage` | Finance — create settlements, mark paid (bank reference), mark reconciled; configure / add / remove payment methods (inline editor, one confirmation, field-level audit); BEAU PH — configure rails, settlement destinations, FX settings, start a rate refresh |
-| `analytics:view` | Analytics — aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month); output asserted free of names, emails, phones, references |
+| `analytics:view` | Analytics — aggregates only (leads per week / interest / country / source, bookings by status / service, revenue by month) and **Audience** (website + social totals, growth, funnel); output asserted free of names, emails, phones, references |
+| `analytics:manage` | Audience — import a platform CSV, type or delete a snapshot, set the handles / site id, press *Sync now*. Imports are audited by row count, never by content |
 | `platform:admin` | Access — list application users, activate / deactivate, grant / revoke permissions. **Nothing else**: no lead, booking, order or ledger row becomes visible through it (tested) |
 
 **One cockpit, independent permissions (CG-008).** Finance is a tab in
@@ -742,9 +749,11 @@ node scripts/test-url-scrub.mjs           # URL_SCRUB_TESTS ok=21
 node scripts/test-contact-ip.mjs          # CONTACT_IP_TESTS ok=31
 node scripts/test-email.mjs               # EMAIL_TESTS ok=41
 node scripts/test-admin-workspace.mjs     # ADMIN_WORKSPACE_TESTS ok=34   ┐
-node scripts/test-admin-pwa.mjs           # ADMIN_PWA_TESTS ok=18         ├ need Playwright
-node scripts/test-booking-picker.mjs      # BOOKING_PICKER_TESTS ok=41    ┘
+node scripts/test-admin-pwa.mjs           # ADMIN_PWA_TESTS ok=36         ├ need Playwright
+node scripts/test-booking-picker.mjs      # BOOKING_PICKER_TESTS ok=49    ┘
 node --experimental-strip-types scripts/test-stripe-embedded.mjs   # STRIPE_EMBEDDED_TESTS ok=42
+node scripts/test-audience-csv.mjs        # AUDIENCE_CSV_TESTS ok=20
+node scripts/test-audience-sync.mjs       # AUDIENCE_SYNC_TESTS ok=25
 ```
 
 The three marked suites drive a real browser. They find Playwright in the
@@ -865,6 +874,77 @@ site — and that the token rule stays ahead of the catch-all.
 **Owner side, not in this repo:** a `CNAME` for `collab` at the registrar, and
 the domain attached to the `coachgari_v0` project in Vercel. Until both are done
 the rules are inert; nothing else breaks in the meantime.
+
+## Audience (CG-018)
+
+One screen — **Analytics → Audience** — answering the only question the numbers
+are for: *is the audience growing, and does it turn into work?* The website and
+the social platforms sit side by side, and the funnel underneath ties them to
+enquiries, bookings and paid sessions.
+
+**Where each number comes from**
+
+| Source | How | Cadence |
+|---|---|---|
+| Website (Plausible) | Stats API v2, server-side | nightly, re-reads 60 days |
+| YouTube | Data API v3 `channels?part=statistics` — public counters, no OAuth | nightly |
+| Instagram | CSV export or typed by hand | when the coach does it |
+| TikTok | CSV export or typed by hand | when the coach does it |
+
+Instagram and TikTok have no API a solo creator can use without a business
+review, so the screen does not pretend otherwise: it imports their export, or
+takes four numbers typed in. That is honest and takes a minute a week.
+
+**Storage.** `web_daily` (one row per day, visitors / pageviews / visits /
+bounce rate / visit duration) and `social_snapshots` (one row per platform per
+date — followers, views, likes, comments, shares, profile views, posts, plus
+`source` = `api` · `csv` · `manual`). A snapshot is a **total on a date**, never
+a delta: re-importing the same day overwrites it, so a double import cannot
+inflate anything. `analytics_config` (single row) holds the handles, the
+Plausible site id, the cached website breakdowns and the last sync error.
+
+**Permissions.** `analytics:view` reads the screen; the new `analytics:manage`
+is required to import, type, delete a snapshot, change a handle or press *Sync
+now*. Everyone who already had `analytics:view` was given `manage` in the
+migration. Audit area `analytics`; an import is audited **by row count**, never
+by content.
+
+**The sync.** `supabase/functions/analytics-sync` is key-gated the same way the
+email outbox is: the clear key lives only in Vault (`outbox_analytics_key`),
+`outbox_keys` stores its SHA-256, and `analytics_sync_authorize` compares in
+constant time. pg_cron `cg-analytics-sync` fires at 05:30 UTC daily;
+`analytics_sync_now()` (needs `analytics:manage`) is the *Sync now* button. Each
+source is optional and caught on its own — YouTube failing never costs the
+website its numbers — and a failure is written to `analytics_config.last_sync_error`
+for the screen to show. The function writes **only** through the service-role
+RPCs `web_daily_upsert` and `social_snapshot_api`; a provider error is reported
+by status code, never by echoing a response body.
+
+Two secrets, owner-set, never committed:
+
+```
+supabase secrets set PLAUSIBLE_API_KEY=...     # Plausible → Settings → API keys (Stats API)
+supabase secrets set YOUTUBE_API_KEY=...       # Google Cloud → YouTube Data API v3 key
+```
+
+Without them nothing breaks: the screen says the website sync is not connected
+and the manual and CSV paths carry on.
+
+**CSV import.** `admin/csv.js` reads the file **in the browser** — only the
+parsed numbers are sent, never the file. It accepts what Instagram, TikTok and
+YouTube Studio actually export: commas, semicolons or tabs, quoted cells, a BOM,
+thousands separators, and day-first dates (`14/09/2026` is 14 September). A
+header it does not recognise is ignored rather than guessed, and "new followers"
+is recognised and deliberately **not** stored, because a delta is not a total. A
+row with no usable number is counted as skipped and reported. Recognised
+headers: date/day/period, followers/subscribers, views/video views/impressions/
+reach, likes, comments, shares, profile views, posts/videos. Cap 400 rows per
+import.
+
+**Tests.** `AUDIENCE_CSV_TESTS ok=20` (the parser, offline),
+`AUDIENCE_SYNC_TESTS ok=25` (the key gate, secret hygiene, one source per
+failure, RPC-only writes), `CG018_TESTS ok=36` (the database boundary:
+idempotency, refusals, permission blindness, revoked sync RPCs).
 
 ## Continuous integration
 

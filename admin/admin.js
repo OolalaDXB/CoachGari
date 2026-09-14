@@ -30,6 +30,7 @@
 import { CONFIG } from '/config.js';
 import { initFinance, financeTransactions, financeCommissions, financePaymentMethods, phRails, phFx } from '/admin/finance.js';
 import { initCollab, collabList } from '/admin/collab.js';
+import { csvToSnapshots } from '/admin/csv.js';
 
 const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUBLISHABLE_KEY, { auth: { flowType: 'pkce', persistSession: true } });
 
@@ -213,7 +214,7 @@ function navModel() {
       subs: [ { key: 'transactions', label: 'Transactions', show: () => true, run: financeTransactions },
               { key: 'commissions', label: 'Commissions', show: () => true, run: financeCommissions },
               { key: 'methods', label: 'Payment methods', show: () => true, run: financePaymentMethods } ] },
-    { key: 'analytics', label: 'Analytics', icon: '◔', show: () => has('analytics:view'), run: analytics },
+    { key: 'analytics', label: 'Audience', icon: '◔', show: () => has('analytics:view'), run: analytics },
     // Settings = what is configured once and rarely touched: the catalogue, who has access, and the
     // BEAU PH payment infrastructure (Rails, FX) — each tab keeps its own permission.
     { key: 'settings', label: 'Settings', icon: '⚙', show: () => has('catalog:view') || has('platform:admin') || has('finance:view'),
@@ -526,6 +527,35 @@ function wireChart(id, labels, series, fmtValue) {
     el.onmousemove = (e) => { const r = root.getBoundingClientRect(); tip.style.left = Math.min(e.clientX - r.left + 12, r.width - tip.offsetWidth - 4) + 'px'; tip.style.top = (e.clientY - r.top - 10) + 'px'; };
     el.onmouseleave = () => { tip.hidden = true; };
   });
+}
+// A line chart for a daily series (30–60 points: a column per day would be a fence).
+// 2px line, the hue at 10% as an area wash, an end dot with a 2px surface ring, hairline
+// grid, one crosshair tooltip. Same plain SVG, same tokens, no library.
+function lineChart({ labels, series, fmtValue = (v) => String(v), id }) {
+  const W = 560, H = 200, padL = 46, padR = 12, padT = 12, padB = 24;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const max = Math.max(1, ...series.flatMap((s) => s.values));
+  const raw = max / 4, mag = 10 ** Math.floor(Math.log10(raw || 1));
+  const step = [1, 2, 5, 10].map((k) => k * mag).find((k) => k >= raw) || 1;
+  const top = Math.ceil(max / step) * step; const ticks = []; for (let t = 0; t <= top; t += step) ticks.push(t);
+  const n = Math.max(1, labels.length - 1);
+  const x = (i) => padL + (n === 0 ? iw / 2 : (i / n) * iw);
+  const y = (v) => padT + ih - (v / top) * ih;
+  const grid = ticks.map((t) => `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"></line><text x="${padL - 6}" y="${y(t) + 4}" text-anchor="end" class="ov-ax">${esc(fmtValue(t, true))}</text>`).join('');
+  const paths = series.map((s) => {
+    const pts = s.values.map((v, i) => `${x(i)},${y(v || 0)}`).join(' ');
+    const area = `M${padL},${padT + ih} L${s.values.map((v, i) => `${x(i)},${y(v || 0)}`).join(' L')} L${x(s.values.length - 1)},${padT + ih} Z`;
+    const last = s.values.length - 1;
+    return `<path d="${area}" fill="${s.color}" fill-opacity=".10"></path>
+      <polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+      <circle cx="${x(last)}" cy="${y(s.values[last] || 0)}" r="4.5" fill="${s.color}" stroke="#fff" stroke-width="2"></circle>`;
+  }).join('');
+  // one invisible column per point carries the hover
+  const hit = labels.map((_, i) => `<rect x="${x(i) - iw / (n * 2 || 2)}" y="${padT}" width="${iw / (n || 1)}" height="${ih}" fill="transparent" data-i="${i}"></rect>`).join('');
+  const every = Math.max(1, Math.ceil(labels.length / 7));
+  const xl = labels.map((l, i) => (i % every === 0 || i === labels.length - 1) ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" class="ov-ax">${esc(l)}</text>` : '').join('');
+  const legend = series.length > 1 ? `<div class="ov-legend">${series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')}</div>` : '';
+  return `${legend}<div class="ov-chart" id="${id}"><svg viewBox="0 0 ${W} ${H}" role="img">${grid}${paths}${hit}${xl}</svg><div class="ov-tip" hidden></div></div>`;
 }
 const CHART_COLORS = ['#1540E8', '#eb6834', '#1baf7a'];   // validated pair/triple (dataviz six checks, light surface)
 
@@ -1377,33 +1407,210 @@ async function catalogue() {
 /* Finance and the BEAU PH workspace live in /admin/finance.js (Transactions, Payment methods, Rails, FX). */
 
 /* =============================== ANALYTICS =============================== */
+/* =============================== ANALYTICS — audience =============================== */
+// One screen for the audience: the website (Plausible, synced daily) and the social
+// platforms (YouTube synced; Instagram / TikTok by CSV export or by hand), then the
+// funnel from a visit to a client. Numbers only — no name, no message, ever.
+const PLATFORMS = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X', other: 'Other' };
+const compact = (n) => { const v = Number(n || 0); return v >= 1e6 ? (v / 1e6).toFixed(v % 1e6 ? 1 : 0) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(v % 1e3 ? 1 : 0) + 'k' : String(v); };
+const delta = (now, before) => {
+  if (before == null || !before) return '';
+  const d = Number(now || 0) - Number(before); if (!d) return '<span class="an-d">=</span>';
+  const pct = Math.round((d / before) * 100);
+  return `<span class="an-d ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${compact(Math.abs(d))}${Number.isFinite(pct) ? ` · ${Math.abs(pct)}%` : ''}</span>`;
+};
+
 async function analytics() {
-  const { data: a, error } = await sb.rpc('analytics_summary'); if (error) throw error;
-  const kv = (obj) => Object.entries(obj || {}).sort((x, y) => y[1] - x[1]).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`);
-  view.innerHTML = `
-    <div class="ad-head"><div><h1>Analytics</h1><p class="ad-muted">Aggregates only — no names, no messages. Generated ${fmt(a.generated_at, 'Asia/Dubai')}.</p></div></div>
-    <div class="ad-kpis">
-      <div class="ad-kpi"><b>${a.leads.total}</b><span>Leads, all time</span></div>
-      <div class="ad-kpi"><b>${a.leads.last_30d}</b><span>Leads, last 30 days</span></div>
-      <div class="ad-kpi"><b>${a.bookings.confirmed_last_30d}</b><span>Confirmed bookings, last 30 days</span></div>
-      <div class="ad-kpi"><b>${money(a.revenue.totals.gross)}</b><span>Gross collected (test mode)</span></div>
-      <div class="ad-kpi"><b>${money(a.revenue.totals.payable)}</b><span>Payable to Gari, all time</span></div>
-    </div>
-    <div class="ad-grid2">
-      <div class="ad-panel"><h2>Leads per week (12 weeks)</h2>${table(['Week of', 'Leads'], a.leads.by_week.map((w) => `<tr><td>${w.week}</td><td class="num">${w.count}</td></tr>`), 'No leads in the last 12 weeks.')}</div>
-      <div class="ad-panel"><h2>Leads by interest</h2>${table(['Interest', 'Leads'], kv(a.leads.by_interest))}</div>
-      <div class="ad-panel"><h2>Leads by country</h2>${table(['Country', 'Leads'], a.leads.by_country.map((c) => `<tr><td>${esc(c.country)}</td><td class="num">${c.count}</td></tr>`))}</div>
-      <div class="ad-panel"><h2>Leads by source</h2>${table(['Source', 'Leads'], kv(a.leads.by_source))}</div>
-      <div class="ad-panel"><h2>Bookings by status</h2>${table(['Status', 'Bookings'], kv(a.bookings.by_status))}</div>
-      <div class="ad-panel"><h2>Sessions by service</h2>${table(['Service', 'Sessions'], a.bookings.by_service.map((s) => `<tr><td>${esc(s.service)}</td><td class="num">${s.count}</td></tr>`))}</div>
-      <div class="ad-panel"><h2>Revenue by month</h2>${table(['Month', 'Orders', 'Gross', 'Net', 'Commission', 'Payable'], a.revenue.by_month.map((m) => `<tr><td>${m.month}</td><td class="num">${m.orders}</td><td class="num">${money(m.gross)}</td><td class="num">${money(m.net)}</td><td class="num">${money(m.commission)}</td><td class="num">${money(m.payable)}</td></tr>`), 'No paid orders yet.')}</div>
+  const days = +(view.dataset.anDays || 30);
+  const { data: a, error } = await sb.rpc('audience_overview', { p_days: days }); if (error) throw error;
+  const web = a.web || {}, social = a.social || {}, f = a.funnel || {}, cfg = a.config || {};
+  const canManage = !!a.can_manage;
+  const series = web.series || [];
+  const labels = series.map((d) => { const x = new Date(d.day + 'T12:00:00Z'); return `${x.getUTCDate()} ${MONTHS[x.getUTCMonth()].slice(0, 3)}`; });
+  const visitors = { name: 'Visitors', color: CHART_COLORS[0], values: series.map((d) => d.visitors) };
+  const views = { name: 'Pageviews', color: CHART_COLORS[1], values: series.map((d) => d.pageviews) };
+
+  // followers across platforms, most recent snapshot first
+  const cards = Object.entries(social).map(([k, v]) => {
+    const l = v.latest || {};
+    return `<div class="an-card">
+      <div class="an-plat">${esc(PLATFORMS[k] || k)}${l.source ? `<span class="an-src">${esc(l.source)}</span>` : ''}</div>
+      <b>${l.followers != null ? compact(l.followers) : '—'}</b><span>followers ${delta(l.followers, v.followers_before)}</span>
+      <div class="an-sub">${l.views != null ? compact(l.views) + ' views' : ''}${l.posts != null ? ` · ${compact(l.posts)} posts` : ''}</div>
+      <div class="an-sub">${l.date ? 'as of ' + prettyDay(l.date) : 'no snapshot yet'}</div>
     </div>`;
+  }).join('');
+
+  const followerSeries = Object.entries(social).filter(([, v]) => (v.series || []).some((p) => p.followers != null))
+    .slice(0, 3).map(([k, v], i) => ({ name: PLATFORMS[k] || k, color: CHART_COLORS[i], key: k, points: v.series.filter((p) => p.followers != null) }));
+  const fLabels = [...new Set(followerSeries.flatMap((s) => s.points.map((p) => p.date)))].sort();
+  const fSeries = followerSeries.map((s) => ({ name: s.name, color: s.color, values: fLabels.map((d) => { const p = s.points.filter((q) => q.date <= d).pop(); return p ? p.followers : 0; }) }));
+
+  const funnelRows = [['Website visitors', f.visitors, () => {}], ['Enquiries', f.enquiries, () => go('crm', 'leads')],
+    ['Collaboration requests', f.collab_requests, () => go('collab')], ['Bookings', f.bookings, () => go('schedule', 'sessions')],
+    ['New clients', f.clients, () => { view.dataset.cStatus = 'active'; go('crm', 'contacts'); }]];
+  const fMax = Math.max(1, ...funnelRows.map(([, v]) => Number(v || 0)));
+
+  const srcRows = (web.sources || []).map((r) => `<tr><td>${esc(r.source || 'Direct')}</td><td class="num">${compact(r.visitors)}</td></tr>`);
+  const goalRows = (web.goals || []).map((r) => `<tr><td>${esc(r.goal)}</td><td class="num">${compact(r.visitors)}</td><td class="num">${compact(r.events)}</td></tr>`);
+
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Audience</h1><p class="ad-muted">The website and the social platforms, side by side. Aggregates only — no names, no messages.</p></div>
+      <div class="ad-filters">
+        <select id="an-days">${[7, 30, 90, 365].map((d) => `<option value="${d}" ${d === days ? 'selected' : ''}>Last ${d} days</option>`).join('')}</select>
+        ${canManage ? '<button class="btn btn-line btn-sm" id="an-sync">Sync now</button><button class="btn btn-accent btn-sm" id="an-add">Add numbers</button>' : ''}
+      </div></div>
+
+    ${cfg.last_sync_error ? `<p class="ad-note" style="color:#b3261e;margin:0 0 12px">Last sync: ${esc(cfg.last_sync_error)}</p>` : ''}
+
+    <div class="ad-kpis">
+      <div class="ad-kpi"><b>${compact(web.visitors)}</b><span>Website visitors</span><span class="an-sub">${delta(web.visitors, web.visitors_prev) || `vs ${compact(web.visitors_prev)} before`}</span></div>
+      <div class="ad-kpi"><b>${compact(web.pageviews)}</b><span>Pageviews</span></div>
+      <div class="ad-kpi"><b>${web.bounce_rate != null ? web.bounce_rate + '%' : '—'}</b><span>Bounce rate</span></div>
+      <div class="ad-kpi"><b>${compact(Object.values(social).reduce((t, v) => t + Number(v.latest?.followers || 0), 0))}</b><span>Followers, all platforms</span></div>
+      <div class="ad-kpi"><b>${f.enquiries ?? 0}</b><span>Enquiries in the period</span></div>
+    </div>
+
+    ${cards ? `<div class="an-cards">${cards}</div>` : ''}
+
+    <div class="ad-grid2 ov-charts">
+      <div class="ad-panel ov-chartpanel"><div class="ov-chart-head"><div><div class="ov-lbl">Website · ${days} days</div>
+        <div class="ov-hero">${compact(web.visitors)} visitors</div></div>
+        <span class="ad-muted" style="font-size:12px">${cfg.web_synced_at ? 'synced ' + fmt(cfg.web_synced_at, 'Asia/Dubai', { dateStyle: 'medium', timeStyle: 'short' }) : 'not synced yet'}</span></div>
+        ${series.length ? lineChart({ labels, series: [visitors, views], id: 'an-web' })
+          : '<p class="ad-empty">No website numbers yet — the website sync is not connected. See the README, then use Sync now.</p>'}</div>
+
+      <div class="ad-panel ov-chartpanel"><div class="ov-chart-head"><div><div class="ov-lbl">Followers · ${days} days</div>
+        <div class="ov-hero">${fSeries.length ? compact(fSeries.reduce((t, s) => t + (s.values[s.values.length - 1] || 0), 0)) : '—'}</div></div></div>
+        ${fSeries.length ? lineChart({ labels: fLabels.map((d) => { const x = new Date(d + 'T12:00:00Z'); return `${x.getUTCDate()} ${MONTHS[x.getUTCMonth()].slice(0, 3)}`; }), series: fSeries, id: 'an-fol' })
+          : '<p class="ad-empty">Two snapshots of a platform draw the curve. Add numbers, or import an export.</p>'}</div>
+    </div>
+
+    <div class="ad-grid2">
+      <div class="ad-panel"><h2>From a visit to a client · ${days} days</h2>
+        ${funnelRows.map(([label, v, fn], i) => {
+          const prev = i ? Number(funnelRows[i - 1][1] || 0) : 0;
+          const rate = i && prev ? `${((Number(v || 0) / prev) * 100).toFixed(Number(v) / prev < 0.1 ? 1 : 0)}%` : '';
+          return `<div class="an-fun${fn ? ' clik' : ''}" data-fun="${i}">
+          <div class="an-fun-bar" style="width:${Math.max(3, Math.round((Number(v || 0) / fMax) * 100))}%"></div>
+          <span>${esc(label)}</span>${rate ? `<i class="an-rate">${rate} of the step above</i>` : ''}<b>${compact(v)}</b></div>`;
+        }).join('')}
+        <p class="ad-note">Bars are to scale, so the drop from a visit to an enquiry is the one you see. Each step is counted in the period, never followed person by person — a visitor and an enquiry are never linked.</p></div>
+
+      <div class="ad-panel"><h2>Where the visits come from</h2>
+        ${srcRows.length ? table(['Source', 'Visitors'], srcRows) : '<p class="ad-empty">Synced with the website numbers.</p>'}
+        ${goalRows.length ? `<h2 style="margin-top:18px">Goals</h2>${table(['Goal', 'Visitors', 'Events'], goalRows)}` : ''}</div>
+    </div>
+
+    <div class="ad-panel"><div class="ov-chart-head"><h2 style="margin:0">Snapshots</h2>
+      ${canManage ? '<button class="btn btn-line btn-xs" id="an-import">Import a CSV export</button>' : ''}</div>
+      ${table(['Date', 'Platform', 'Followers', 'Views', 'Likes', 'Source', ''], (a.recent || []).map((r) => `<tr>
+        <td>${prettyDay(r.date)}</td><td><b>${esc(PLATFORMS[r.platform] || r.platform)}</b></td>
+        <td class="num">${r.followers != null ? compact(r.followers) : '—'}</td><td class="num">${r.views != null ? compact(r.views) : '—'}</td>
+        <td class="num">${r.likes != null ? compact(r.likes) : '—'}</td><td>${st(r.source)}</td>
+        <td class="acts">${canManage ? `<button class="btn btn-line btn-xs" data-an-del="${r.id}">Delete</button>` : ''}</td></tr>`),
+        'No snapshot yet — add the numbers of a platform, or import an export.')}</div>
+
+    ${canManage ? `<div class="ad-panel"><h2>Handles and channel</h2>
+      <form id="an-cfg" class="ad-form">
+        <div class="row"><label>Plausible site <input name="plausible_site_id" value="${esc(cfg.plausible_site_id || '')}"></label>
+          <label>YouTube channel (ID or @handle) <input name="youtube_channel_id" value="${esc(cfg.youtube_channel_id || '')}" placeholder="@coachgari28"></label></div>
+        <div class="row"><label>Instagram handle <input name="instagram_handle" value="${esc(cfg.instagram_handle || '')}" placeholder="@coachgari28"></label>
+          <label>TikTok handle <input name="tiktok_handle" value="${esc(cfg.tiktok_handle || '')}" placeholder="@coachgari28"></label></div>
+        <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button></div>
+      </form>
+      <p class="ad-note">YouTube syncs on its own once a day (public counters). Instagram and TikTok have no open API for a single creator: export the numbers from the app and import the file, or type them in. ${cfg.youtube_synced_at ? 'YouTube synced ' + fmt(cfg.youtube_synced_at, 'Asia/Dubai', { dateStyle: 'medium' }) + '.' : ''}</p></div>` : ''}`;
+
+  $('#an-days').onchange = (e) => { view.dataset.anDays = e.target.value; analytics().catch(fail); };
+  if (series.length) wireChart('an-web', labels, [visitors, views], (v) => compact(v));
+  if (fSeries.length) wireChart('an-fol', fLabels.map((d) => prettyDay(d)), fSeries, (v) => compact(v));
+  view.querySelectorAll('[data-fun]').forEach((el) => { const fn = funnelRows[+el.dataset.fun][2]; if (fn) el.onclick = fn; });
+
+  const on = (id, fn) => { const el = $('#' + id); if (el) el.onclick = fn; };
+  on('an-sync', async () => {
+    const { data: r, error: e1 } = await sb.rpc('analytics_sync_now'); if (e1) return fail(e1);
+    toast(r && r.ok ? 'Sync asked — reload in a moment' : 'Sync is not configured yet', !(r && r.ok));
+  });
+  on('an-add', () => openSnapshotEditor());
+  on('an-import', () => openSnapshotImport());
+  view.querySelectorAll('[data-an-del]').forEach((b) => b.onclick = async () => {
+    if (!(await confirmAct('Delete this snapshot?'))) return;
+    const { error: e1 } = await sb.rpc('audience_snapshot_delete', { p_id: b.dataset.anDel }); if (e1) return fail(e1);
+    toast('Deleted'); analytics().catch(fail);
+  });
+  const cf = $('#an-cfg'); if (cf) cf.onsubmit = async (e) => {
+    e.preventDefault(); const d = new FormData(cf);
+    const { error: e1 } = await sb.rpc('analytics_config_set', { p: Object.fromEntries(d.entries()) }); if (e1) return fail(e1);
+    toast('Saved'); analytics().catch(fail);
+  };
+}
+
+// The audience forms ride the existing bottom sheet (session / block popups), not a second modal.
+function openSnapSheet(title, body) {
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>${esc(title)}</b><button class="btn btn-line btn-xs" data-x>Close</button></div><div class="cg-sheet-b">${body}</div>`;
+  sheet.querySelector('[data-x]').onclick = closeSheet;
+  sheet.querySelectorAll('[data-x2]').forEach((b) => b.onclick = closeSheet);
+}
+
+// Type one platform's numbers for one day. Blank fields are left alone on an existing row.
+function openSnapshotEditor() {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai' }).format(new Date());
+  openSnapSheet('Add numbers', `<form id="an-snap" class="ad-form">
+      <div class="row"><label>Platform <select name="platform">${Object.entries(PLATFORMS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+        <label>Date <input type="date" name="date" value="${today}" max="${today}" required></label></div>
+      <div class="row"><label>Followers <input type="number" name="followers" min="0" inputmode="numeric"></label>
+        <label>Views <input type="number" name="views" min="0" inputmode="numeric"></label></div>
+      <div class="row"><label>Likes <input type="number" name="likes" min="0"></label>
+        <label>Comments <input type="number" name="comments" min="0"></label>
+        <label>Posts <input type="number" name="posts" min="0"></label></div>
+      <label>Note <input name="note" placeholder="Optional"></label>
+      <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button><button class="btn btn-line btn-sm" type="button" data-x2>Cancel</button></div>
+    </form>
+    <p class="ad-note">A blank field leaves the stored value alone. Saving the same platform and date twice updates the row.</p>`);
+  $('#an-snap').onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const p = {}; for (const [k, v] of f.entries()) if (String(v).trim() !== '') p[k] = v;
+    const { error } = await sb.rpc('audience_snapshot_upsert', { p }); if (error) return fail(error);
+    closeSheet(); toast('Saved'); analytics().catch(fail);
+  };
+}
+
+/* A platform export, parsed in the browser by admin/csv.js: nothing leaves the page
+   but the numbers, and the header row is mapped by name so an Instagram, TikTok or
+   YouTube Studio export imports without the coach renaming a column. */
+function openSnapshotImport() {
+  openSnapSheet('Import a CSV export', `
+    <p class="ad-muted" style="font-size:14px;margin:0 0 12px">Export from Instagram, TikTok or YouTube Studio and drop the file here. Columns are recognised by their name (date, followers, views, likes, comments, shares, posts); anything else is ignored. Nothing but the numbers leaves this page.</p>
+    <form id="an-imp" class="ad-form">
+      <label>Platform <select name="platform">${Object.entries(PLATFORMS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></label>
+      <label>File <input type="file" name="file" accept=".csv,.tsv,text/csv,text/plain" required></label>
+      <div id="an-imp-prev" class="ad-note"></div>
+      <div class="actions"><button class="btn btn-accent btn-sm" type="submit" disabled id="an-imp-go">Import</button><button class="btn btn-line btn-sm" type="button" data-x2>Cancel</button></div>
+    </form>`);
+  let parsed = [];
+  const form = $('#an-imp'), prev = $('#an-imp-prev'), go = $('#an-imp-go');
+  form.file.onchange = async () => {
+    const file = form.file.files[0]; if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { prev.textContent = 'That file is larger than 2 MB — export a shorter period.'; go.disabled = true; return; }
+    const res = csvToSnapshots(await file.text());
+    parsed = res.rows.slice(0, 400);
+    prev.innerHTML = res.error ? esc(res.error)
+      : `${parsed.length} row${parsed.length === 1 ? '' : 's'} ready${res.skipped ? `, ${res.skipped} ignored` : ''}${parsed.length ? ` · ${esc(parsed[0].date)} → ${esc(parsed[parsed.length - 1].date)}` : ''}.`;
+    go.disabled = !parsed.length;
+  };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const { data, error } = await sb.rpc('audience_snapshots_import', { p_platform: new FormData(form).get('platform'), p_rows: parsed });
+    if (error) return fail(error);
+    closeSheet(); toast(`${data.imported} row${data.imported === 1 ? '' : 's'} imported`); analytics().catch(fail);
+  };
 }
 
 /* =============================== ACCESS (platform:admin) =============================== */
 /* Access administration only. Granting a permission here never bypasses RLS:
    business data still requires the explicit business permissions. */
-const PERMS = ['coach:operations', 'client_profile:view', 'client_profile:manage', 'health_metrics:view', 'health_metrics:manage', 'coaching_sensitive:view', 'coaching_sensitive:manage', 'finance:view', 'finance:manage', 'analytics:view', 'catalog:view', 'catalog:manage', 'platform:admin'];
+const PERMS = ['coach:operations', 'client_profile:view', 'client_profile:manage', 'health_metrics:view', 'health_metrics:manage', 'coaching_sensitive:view', 'coaching_sensitive:manage', 'finance:view', 'finance:manage', 'analytics:view', 'analytics:manage', 'catalog:view', 'catalog:manage', 'platform:admin'];
 async function access() {
   const { data: users, error } = await sb.rpc('admin_list_access'); if (error) throw error;
   view.innerHTML = `

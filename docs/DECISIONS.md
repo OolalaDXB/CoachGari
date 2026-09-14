@@ -2359,3 +2359,45 @@ in a table. The database refused it: the clear `key` column it wanted no longer
 exists, because 20261018 moved that secret to Vault and left only a hash behind.
 The hardening caught a regression written by someone who had read the original
 migration and not its successor.
+
+## Audience numbers: a total on a date, and only where an API exists (14/09/2026)
+
+Analytics was the last screen still showing placeholders. Making it real meant
+deciding what a "number" is and which platforms can be trusted to produce one.
+
+**A snapshot is a total on a date, never a delta.** `social_snapshots` stores
+follower/view/like counts *as of* a day, keyed by platform and date. Re-importing
+the same file overwrites the same row, so a double import cannot inflate
+anything, and a growth figure is always a subtraction the screen does rather than
+a number someone typed. The CSV reader follows the same rule: it recognises "new
+followers" and deliberately refuses to store it, because a delta written into a
+total column is a lie that survives forever.
+
+**Only two sources sync themselves.** Plausible has a Stats API and YouTube
+exposes public channel counters with a plain API key. Instagram and TikTok do
+not: their APIs require a business review that a solo coach will not pass, and
+the scraping alternatives break and violate terms. So the screen does not
+pretend — it imports the export those platforms already produce, or takes four
+numbers typed in, and marks each row `api` · `csv` · `manual` so nobody has to
+guess later how a figure got there. A minute a week beats a fragile integration.
+
+**The sync re-reads 60 days rather than yesterday.** Plausible counts late
+sessions after midnight; asking only for yesterday would freeze a wrong number.
+Re-reading a window and upserting is cheap and self-healing — a sync that failed
+for a week corrects itself on the next run with no backfill to remember.
+
+**Each source fails alone.** YouTube being down must not cost the website its
+numbers, so the two are caught independently and the failure is written to
+`analytics_config.last_sync_error` for the screen to show. The alternative — one
+try/catch around both — turns any outage into a total outage.
+
+The function reuses the outbox key pattern exactly: clear key in Vault, SHA-256
+in `outbox_keys`, constant-time compare, cron posts with `x-outbox-key`. Nothing
+new to reason about, and the offline suite asserts the gate runs before any
+secret is read and that no key ever reaches a log. Writing goes through
+service-role RPCs only, so the function holds no table grants of its own.
+
+Finally, `analytics:manage` is a new permission rather than a reuse of
+`analytics:view`: reading the audience is something most of a team can do,
+while overwriting history with a CSV is not. Everyone who had `view` was given
+`manage` in the migration, so nothing changed on day one.

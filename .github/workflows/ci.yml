@@ -60,6 +60,10 @@ jobs:
         run: node scripts/test-booking-picker.mjs
       - name: Stripe adapter — embedded Checkout contract (offline)
         run: node --experimental-strip-types scripts/test-stripe-embedded.mjs
+      - name: Audience — platform CSV import (offline)
+        run: node scripts/test-audience-csv.mjs
+      - name: Audience sync — key gate, secret hygiene, one source per failure (offline)
+        run: node scripts/test-audience-sync.mjs
 
       - name: Verify config is valid ES module
         run: node --input-type=module -e "import('./config.js').then(m => { if (!m.CONFIG) { console.error('CONFIG export missing'); process.exit(1); } console.log('config.js OK'); })"
