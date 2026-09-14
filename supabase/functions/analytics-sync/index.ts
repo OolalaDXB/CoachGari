@@ -34,16 +34,34 @@ export function cleanSecret(raw: string | undefined): string {
   return v;
 }
 
-/* Plausible answers 401 for a token it does not accept at all. The message has
-   to say which of the two it is, because the operator's next click depends on
-   it: a refused key is a key problem, a refused site is a site problem, and
-   "plausible 401" alone sends people to re-read their site id for nothing. */
+/* PLAUSIBLE'S OWN WORDS, NOT OUR GUESS AT THEM.
+   This used to report the status alone, then a sentence we had written for each
+   status. Both were wrong in the same way: Plausible's 401 does not separate
+   "this key is invalid" from "this key has no access to that site", so any
+   message we compose sends half the readers to check the wrong thing. Plausible
+   says which it is in the response body, and that body carries no credential —
+   it echoes at most the site id, which is a public domain name, and the query,
+   which we wrote. So it is read and passed through, truncated.
+
+   The Authorization header is never echoed by an HTTP response, so nothing that
+   could be replayed can reach a log or the back-office this way. */
+async function plausibleError(r: Response): Promise<string> {
+  let detail = "";
+  try {
+    const t = (await r.text()).slice(0, 2000);
+    try { detail = String((JSON.parse(t) as { error?: unknown }).error ?? "").trim(); } catch { detail = t.trim(); }
+  } catch { /* a body we cannot read is not worth failing differently over */ }
+  detail = detail.replace(/\s+/g, " ").slice(0, 180);
+  const hint = r.status === 401
+    ? " Check both: the key must be a Stats API key, and it must have access to this exact site id."
+    : r.status === 404 ? " plausible_site_id must be the domain exactly as registered in Plausible."
+    : "";
+  return `Plausible refused the request (${r.status}).${detail ? ` It said: "${detail}".` : ""}${hint}`;
+}
+
 async function plausibleQuery(key: string, body: Record<string, unknown>) {
   const r = await fetch(PLAUSIBLE_API, { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (r.status === 401) throw new Error("Plausible refused the key (401). It must be a Stats API key from Plausible → Settings → API keys; a Sites/Plugins key is a different token and is rejected here.");
-  if (r.status === 403) throw new Error("Plausible refused access (403): the key is valid but has no access to this site, or the plan does not include the Stats API.");
-  if (r.status === 404) throw new Error("Plausible does not know this site (404): plausible_site_id must be the domain exactly as registered.");
-  if (!r.ok) throw new Error(`plausible ${r.status}`);   // status only, never the body (it can echo the site id / query)
+  if (!r.ok) throw new Error(await plausibleError(r));
   return await r.json() as { results: { metrics: number[]; dimensions: string[] }[] };
 }
 

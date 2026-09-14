@@ -27,8 +27,16 @@ check('the status action reports presence, never a value',
   /configured = \{ plausible: !!plausibleKey, youtube: !!youtubeKey/.test(fn) && !/return json\(200, \{ ok: true, configured, key/.test(fn));
 check('the API keys come from the environment, never from the database or the body',
   /env\("PLAUSIBLE_API_KEY"\)/.test(fn) && /env\("YOUTUBE_API_KEY"\)/.test(fn) && !/body\.(plausible|youtube|key)/.test(fn));
-check('a provider error is reported by status, never by echoing its body',
-  /plausible \$\{r\.status\}/.test(fn) && /youtube \$\{r\.status\}/.test(fn) && !/await r\.text\(\).*Error/s.test(fn));
+/* The two providers are treated differently ON PURPOSE. Plausible's key travels
+   in the Authorization header, which no response can echo, so its error body is
+   safe to pass through and is the only thing that says whether a 401 is about
+   the key or about access to the site. YouTube's key travels in the URL query
+   string, and an error body that quotes the request URL would carry the key
+   with it — so YouTube stays status-only. */
+check('YouTube is reported by status alone: its key is in the URL',
+  /youtube \$\{r\.status\}/.test(fn) && !/youtubeError|await r\.text\(\)[^;]*youtube/i.test(fn));
+check('Plausible passes its reason through: its key is in a header, never echoed',
+  /async function plausibleError/.test(fn) && /Authorization: `Bearer/.test(fn));
 check('the source files carry no key, site id aside', !/(sk|rk|pk)_(live|test)_|AIza[0-9A-Za-z_-]{20}/.test(fn));
 
 /* ---- a secret that was stored wrapped ----
@@ -42,9 +50,16 @@ check('only ONE matching pair of quotes is dropped, never more',
 check('status says whether the value had to be unwrapped, never what it is',
   /wrapped = \{/.test(fn) && /plausibleRaw !== plausibleKey/.test(fn) && !/wrapped.*plausibleKey\.slice|length: plausibleKey/.test(fn));
 
-/* ---- the message the operator actually reads ---- */
-check('a refused key and a refused site are not the same sentence',
-  /r\.status === 401/.test(fn) && /r\.status === 404/.test(fn) && /Stats API key/.test(fn));
+/* ---- the message the operator actually reads ----
+   Plausible's 401 does not separate "invalid key" from "key has no access to
+   that site", so a sentence we compose sends half the readers to the wrong
+   place. Its own words are passed through instead. */
+check('the provider\u2019s own reason is passed through, not guessed at',
+  /async function plausibleError/.test(fn) && /It said: /.test(fn));
+check('and that is safe: a response body cannot echo the Authorization header',
+  /\(await r\.text\(\)\)\.slice\(0, 2000\)/.test(fn) && !/headers\.get\("[Aa]uthorization"\)/.test(fn));
+check('the passed-through text is bounded, so one provider cannot flood the record',
+  /slice\(0, 180\)/.test(fn) && /left\(p_error, 300\)/.test(mig));
 check('the failure reaches the back-office in words, not as a bare status',
   /errors\.push\(`Plausible — /.test(fn) && /analytics_sync_error/.test(fn));
 check('and the back-office shows it', /last_sync_error/.test(admin));
