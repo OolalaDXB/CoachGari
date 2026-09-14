@@ -2170,3 +2170,30 @@ Donations, crowdfunding, charity collection and community-project payments are
 out of scope and blocked until legal/regulatory validation. No tables, no
 speculative fields. No legal conclusion is drawn here about other kinds of
 optional contributions.
+
+## CI does not hold a production database credential (14/09/2026)
+
+The Security lot made `db-boundary-tests` fail the build when `SUPABASE_DB_URL`
+was absent, on the principle that a green build must not claim RLS and
+permission coverage it never executed. The principle stands; the implementation
+asked for something the project should not give.
+
+This project has one database, and it is production. Satisfying that gate meant
+storing a production Postgres password in GitHub Actions — a standing credential,
+readable by every workflow and every future contributor with write access, in
+exchange for automating suites that are already run on every change by hand,
+against the live schema, in rolled-back transactions. The trade was not worth it.
+
+So: the secret stays unset by design, `db-boundary-tests` announces the gap with
+a `::warning::` and passes, and it is **no longer a dependency of
+`deploy-edge-functions`** — which had the side effect of blocking every automatic
+Edge Function deploy while the secret was missing. Setting `SUPABASE_DB_URL`
+later starts running the suites for real with no further change.
+
+What is actually gated on production, then, is the offline suite set: link and
+HTML checks, the collaboration security checks, URL/token scrubbing, IP identity,
+email rendering and drain, the back-office RPC-surface and secret-hygiene checks,
+the PWA shell, the booking picker, and the Stripe signature and embedded-checkout
+contracts. The database boundaries are covered by the suites in
+`supabase/tests/`, run manually — `scripts/db-tests.sh` with a `DATABASE_URL`, or
+one at a time through the Supabase MCP.
