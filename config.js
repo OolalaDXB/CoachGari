@@ -18,7 +18,7 @@ export const CONFIG = {
 
   // wa.me format, digits only. Buttons build
   // https://wa.me/<WHATSAPP>?text=<pre-filled message>.
-  WHATSAPP: '971521365065',
+  WHATSAPP: '',                          // '' = the WhatsApp buttons stay but go inert (see site.js). Put the new number back to wake them
 
   // Public Edge Function that receives the enquiry form POST.
   FORM_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/contact',

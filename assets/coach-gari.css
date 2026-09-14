@@ -83,6 +83,11 @@ p{margin:0 0 1em;}
 .btn-soft:hover{background:#E9E9ED;}
 .btn-sm{padding:12px 22px;font-size:14.5px;}
 .btn-full{width:100%;}
+/* A button whose feature is switched off: still in the layout and still legible,
+   plainly not clickable. No pointer-events:none — that would swallow the title
+   attribute explaining why, and the missing href already makes it follow nothing. */
+.is-off{opacity:.45;cursor:default;}
+.is-off:hover{background:inherit;border-color:inherit;}
 
 .nav{position:sticky;top:0;z-index:50;background:#fff;border-bottom:1px solid var(--line);
   transition:background .35s ease,border-color .35s ease,box-shadow .35s ease;}

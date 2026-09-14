@@ -74,7 +74,7 @@ decision trail.
 ```js
 export const CONFIG = {
   SHOW_PUBLIC_ENQUIRY_PRICES: false,     // enquiry-only product prices hidden ("On request"), CTAs go to the form / WhatsApp; true = prices + data-checkout buttons. Not a commerce switch: booking + Checkout run regardless
-  WHATSAPP: '971521365065',              // digits only → wa.me links with a pre-filled message
+  WHATSAPP: '',                          // digits only → wa.me links with a pre-filled message. '' = the buttons stay but go inert (off while the number changes)
   FORM_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/contact',
   BOOKING_ENDPOINT: '…/functions/v1/booking',   // CG-002 public booking API
   CHECKOUT_ENDPOINT: '…/functions/v1/checkout', // CG-003 Stripe Checkout (mode = PAYMENTS_MODE secret); '' = payment step off

@@ -212,6 +212,41 @@ const noOverflow = (page) => page.evaluate(() => document.documentElement.scroll
   await browser.close();
 }
 
+/* ---- WhatsApp is switched off at the config, and the buttons must show it ----
+   The number is being changed. A button that still looks live but quietly falls
+   back to a scroll anchor is worse than one plainly off, so site.js strips the
+   href and marks it disabled. These checks fail either way round: if the buttons
+   go live again with no number, or if a number is restored and they stay dead. */
+{
+  const wb = await chromium.launch();
+  const page = await wb.newPage();
+  await page.goto(`${base}/`);
+  await page.waitForTimeout(300);
+  const cfg = await page.evaluate(() => window.CONFIG?.WHATSAPP ?? null);
+  const wa = await page.evaluate(() => [...document.querySelectorAll('[data-wa]')].map((el) => ({
+    href: el.getAttribute('href'), off: el.classList.contains('is-off'),
+    disabled: el.getAttribute('aria-disabled'), title: el.getAttribute('title') || '',
+    shown: !!el.offsetParent, opacity: getComputedStyle(el).opacity,
+  })));
+  check('there is at least one WhatsApp button on the page', wa.length > 0, String(wa.length));
+  if (!cfg) {
+    check('with no number, every WhatsApp button is still shown', wa.every((w) => w.shown));
+    check('with no number, none of them has an href to follow', wa.every((w) => w.href === null), JSON.stringify(wa.map((w) => w.href)));
+    check('with no number, each is marked disabled for assistive technology', wa.every((w) => w.disabled === 'true'));
+    check('with no number, each is visibly dimmed', wa.every((w) => w.off && Number(w.opacity) < 1));
+    check('with no number, each says why it is off', wa.every((w) => /WhatsApp is off/.test(w.title)));
+    check('no wa.me link is left anywhere on the page',
+      !/wa\.me/.test(await page.content()));
+  } else {
+    check('with a number, every button links to wa.me', wa.every((w) => (w.href || '').startsWith('https://wa.me/')), JSON.stringify(wa.map((w) => w.href)));
+    check('with a number, none is left marked disabled', wa.every((w) => w.disabled !== 'true' && !w.off));
+  }
+  check('the form and the email alternative never depended on WhatsApp',
+    !!(await page.$('form[data-enquiry]')) && !!(await page.$('a[href^="mailto:"]')));
+  await page.close();
+  await wb.close();
+}
+
 server.close();
 console.log(`\nBOOKING_PICKER_TESTS ok=${ok} fail=${fail}`);
 if (fail) { console.log(log.join('\n')); process.exit(1); }

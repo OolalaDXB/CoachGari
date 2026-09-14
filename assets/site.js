@@ -202,16 +202,32 @@ import { CONFIG } from '/config.js';
 
 /* ---- 3. WhatsApp links ------------------------------------ */
 /* Any element carrying data-wa becomes a wa.me link, with the
-   attribute's text as the pre-filled message context. When
-   CONFIG.WHATSAPP is empty the element keeps its existing href
-   (a scroll anchor), so the page still works before the number
-   is provided.                                                 */
+   attribute's text as the pre-filled message context.
+
+   When CONFIG.WHATSAPP is empty the button STAYS but goes inert:
+   the href is removed, so there is nothing to follow, and it is
+   marked aria-disabled and dimmed. It used to fall back to its
+   scroll anchor, which left a live-looking WhatsApp button that
+   went somewhere else — worse than one plainly switched off.
+   Put a number back in config.js and every one of them wakes up;
+   no markup changes either way.                                 */
 (function whatsapp(){
   var els = document.querySelectorAll('[data-wa]');
-  if (!els.length || !CONFIG.WHATSAPP) return;
+  if (!els.length) return;
 
-  var num = String(CONFIG.WHATSAPP).replace(/[^0-9]/g, '');
-  if (!num) return;
+  var num = CONFIG.WHATSAPP ? String(CONFIG.WHATSAPP).replace(/[^0-9]/g, '') : '';
+
+  if (!num) {
+    els.forEach(function(el){
+      el.removeAttribute('href');          // an <a> without href is not focusable and follows nothing
+      el.removeAttribute('target');
+      el.removeAttribute('rel');
+      el.setAttribute('aria-disabled', 'true');
+      el.setAttribute('title', 'WhatsApp is off while the number changes — use the form or email instead');
+      el.classList.add('is-off');
+    });
+    return;
+  }
 
   els.forEach(function(el){
     var context = el.getAttribute('data-wa') || '';
