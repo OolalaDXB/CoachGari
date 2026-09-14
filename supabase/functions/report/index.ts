@@ -2,7 +2,7 @@
    CG-012 — report  (on BEAU PH since the productisation step)
    Serves the secure client session-recap / payment page (/r/<token>).
      POST {action:"view",     token, currency?}
-          → {ok, recap, pay_ref, currency, methods[], card_enabled, aani, bank,
+          → {ok, recap, pay_ref, currency, methods[], card_enabled, paypal_enabled, aani, bank,
              payment:{pricing_amount, pricing_currency, currency, amount, fx, options[]}}
             currency = an optional payment currency; the options list is what
                       BEAU FX can quote right now (fresh rate, eligible rail).
@@ -70,7 +70,10 @@ Deno.serve(async (req: Request) => {
     if (error) return rpcError(error, origin, allowed);
     const methods: Array<{ provider: string }> = data.methods ?? [];
     const out = { ok: true, recap: data.recap, pay_ref: data.pay_ref, currency: data.currency, methods,
-                  card_enabled: methods.some((m) => m.provider === "stripe"), aani: data.aani, bank: data.bank, payment: data.payment ?? null };
+                  card_enabled: methods.some((m) => m.provider === "stripe"),
+                  // the eligible-method list stays the authority; these are only the shortcuts the page renders
+                  paypal_enabled: methods.some((m) => m.provider === "paypal") && !!runtime.paypal?.configured,
+                  aani: data.aani, bank: data.bank, payment: data.payment ?? null };
     try { assertPublic({ methods: out.methods, aani: out.aani, bank: out.bank, payment: out.payment }); }
     catch (e) { log("public_guard_tripped", { reason: (e as Error).message }); return json(500, { ok: false, error: "server_error" }, origin, allowed); }
     log("viewed", { status: "ok", methods: methods.map((m) => m.provider) });
@@ -116,6 +119,42 @@ Deno.serve(async (req: Request) => {
     if (aErr) return rpcError(aErr, origin, allowed, 409);
     log("session_created", { status: "ok", request_id: request.id, public_reference: request.public_reference, session: created.providerReference, mode: rt.mode, ui: "embedded" });
     return reply(created, false);
+  }
+
+  /* PayPal: a hosted redirect, not an in-page surface. The page sends the payer
+     to the approval link; nothing here marks anything paid — only the verified
+     webhook does. Same discipline as the card path: the amount comes from the
+     order snapshot, never from the browser. */
+  if (body.action === "pay_paypal") {
+    const rt = runtime.paypal!;
+    if (!rt.configured) {
+      log("paypal_not_configured", { mode: rt.mode ?? null, reason: rt.reason ?? null });
+      return json(503, { ok: false, error: "payments_not_configured", mode: rt.mode ?? null, reason: rt.reason ?? null }, origin, allowed);
+    }
+    const { data: packId, error: rErr } = await packIdForToken(supabase, token);
+    if (rErr) return rpcError(rErr, origin, allowed);
+    const { data: rp, error: oErr } = await requestForPack(supabase, packId, "paypal", runtime, currency);
+    if (oErr || !rp) return rpcError(oErr ?? { code: "P0003", message: "unavailable" }, origin, allowed, 409);
+    const { request, order } = rp;
+
+    const created = await providers.paypal.createPaymentRequest!({
+      requestId: request.id, publicReference: request.public_reference, externalReference: request.external_reference,
+      amount: request.amount, currency: request.currency,                       // trusted: the order snapshot
+      description: `Coach Gari coaching package (${request.public_reference})`,
+      customerEmail: order.customer_contact,
+      uiMode: "hosted", hostApp: HOST_APP, merchantKey: MERCHANT_KEY,
+      returnUrls: { success: `${SITE_URL}/r/${token}?paid=1`, cancel: `${SITE_URL}/r/${token}?cancelled=1` },
+      attempt: (request.attempts ?? 0) + 1,
+    }, env);
+    if (created.kind !== "redirect") {
+      log("paypal_failed", { reason: created.kind === "unavailable" ? created.reason : created.kind });
+      return json(502, { ok: false, error: "payment_provider_error" }, origin, allowed);
+    }
+    const { error: aErr } = await attachCheckout(supabase, order.reference, created.providerReference, created.url, created.expiresAt);
+    if (aErr) return rpcError(aErr, origin, allowed, 409);
+    log("paypal_order_created", { status: "ok", request_id: request.id, public_reference: request.public_reference,
+                                  order: created.providerReference, mode: rt.mode });
+    return json(200, { ok: true, ui: "redirect", url: created.url, expires_at: created.expiresAt }, origin, allowed);
   }
 
   return json(400, { ok: false, error: "validation", fields: ["action"] }, origin, allowed);

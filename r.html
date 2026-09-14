@@ -92,6 +92,8 @@
       <p class="note" id="fx-note" hidden></p>
       <div class="pay">
         <button class="paybtn card" id="btn-card" hidden>Pay securely by card</button>
+        <button class="paybtn card" id="btn-paypal" hidden>Pay with PayPal</button>
+        <p class="note" id="paypal-status" role="status" aria-live="polite" hidden></p>
         <div class="aani" id="card-panel" hidden>
           <div class="aani-h row-h">Pay by card <button class="copy" id="btn-card-close" type="button">Cancel</button></div>
           <div id="card-mount" class="card-mount" aria-live="polite"></div>
@@ -116,6 +118,19 @@
           <div class="aani-line"><div><div class="k">Amount</div><div class="val" id="bank-amt"></div></div><button class="copy" data-copy="#bank-amt">Copy</button></div>
           <div class="aani-line"><div><div class="k">Reference</div><div class="val" id="bank-ref"></div></div><button class="copy" data-copy="#bank-ref">Copy</button></div>
           <p class="note" id="bank-note"></p>
+        </div>
+        <div class="aani" id="wise-panel" hidden>
+          <div class="aani-h">Pay by local transfer (Wise)</div>
+          <p class="muted" style="font-size:13px;margin:2px 0 8px">A local transfer in your own country and currency, usually cheaper and faster than an international wire. Include the reference so we can match your payment.</p>
+          <div class="aani-line"><div><div class="k">Account holder</div><div class="val" id="wise-holder"></div></div><button class="copy" data-copy="#wise-holder">Copy</button></div>
+          <div class="aani-line" id="wise-ccy-line"><div><div class="k">Account currency</div><div class="val" id="wise-ccy"></div></div></div>
+          <div class="aani-line"><div><div class="k">IBAN / account number</div><div class="val" id="wise-iban"></div></div><button class="copy" data-copy="#wise-iban">Copy</button></div>
+          <div class="aani-line" id="wise-bic-line"><div><div class="k">SWIFT / BIC</div><div class="val" id="wise-bic"></div></div><button class="copy" data-copy="#wise-bic">Copy</button></div>
+          <div class="aani-line" id="wise-routing-line"><div><div class="k">Routing / sort code</div><div class="val" id="wise-routing"></div></div><button class="copy" data-copy="#wise-routing">Copy</button></div>
+          <div class="aani-line" id="wise-bank-line"><div><div class="k">Bank</div><div class="val" id="wise-bank"></div></div><button class="copy" data-copy="#wise-bank">Copy</button></div>
+          <div class="aani-line"><div><div class="k">Amount</div><div class="val" id="wise-amt"></div></div><button class="copy" data-copy="#wise-amt">Copy</button></div>
+          <div class="aani-line"><div><div class="k">Reference</div><div class="val" id="wise-ref"></div></div><button class="copy" data-copy="#wise-ref">Copy</button></div>
+          <p class="note" id="wise-note"></p>
         </div>
         <div class="aani" id="cash-panel" hidden>
           <div class="aani-h">Pay in cash</div>

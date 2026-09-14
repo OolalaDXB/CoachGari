@@ -99,6 +99,27 @@ function render(d) {
       $('bank-ref').textContent = bank.reference || d.pay_ref || '';
       $('bank-note').textContent = ins.instructions || '';
     }
+    // Wise: a local transfer that lands in a Wise Business account. Only the
+    // fields the merchant actually configured are shown; a blank line is worse
+    // than no line when someone is copying details into a bank app.
+    const wise = method('wise');
+    if (wise) {
+      const ins = wise.instructions || {};
+      $('wise-panel').hidden = false;
+      $('wise-holder').textContent = ins.account_holder || '';
+      const line = (id, val) => { if (val) $(id.replace('-line', '')).textContent = val; else $(id).hidden = true; };
+      line('wise-ccy-line', ins.wise_currency);
+      $('wise-iban').textContent = ins.iban || '';
+      line('wise-bic-line', ins.swift_bic);
+      line('wise-routing-line', ins.routing);
+      line('wise-bank-line', ins.bank_name);
+      $('wise-amt').textContent = money(payAmt, payCur);
+      $('wise-ref').textContent = wise.reference || d.pay_ref || '';
+      $('wise-note').textContent = ins.notes || ins.instructions || '';
+    }
+    // PayPal is a redirect, so it is a button rather than a panel. The server
+    // decides whether it is offered; this page only renders the answer.
+    if (method('paypal') && d.paypal_enabled) $('btn-paypal').hidden = false;
     const cash = method('cash');
     if (cash) {
       const ins = cash.instructions || {};
@@ -173,7 +194,7 @@ $('btn-card-close').addEventListener('click', closeCard);
 $('pay-ccy').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-ccy]'); if (!b || b.classList.contains('on')) return;
   payCurrency = b.dataset.ccy; closeCard();
-  for (const id of ['btn-card', 'aani-panel', 'bank-panel', 'cash-panel', 'pay-none']) $(id).hidden = true;
+  for (const id of ['btn-card', 'btn-paypal', 'aani-panel', 'bank-panel', 'wise-panel', 'cash-panel', 'pay-none']) $(id).hidden = true;
   $('aani-amt-line').hidden = false; $('bank-name-line').hidden = false;
   const { res, data } = await api('view', {});
   if (res.ok && data.ok) render(data);
@@ -198,3 +219,27 @@ async function init() {
   if (qs.get('paid') === '1' && data.recap && data.recap.payment_status !== 'paid') confirmPaid();
 }
 init().catch(() => fail('Something went wrong', 'Please try again shortly.'));
+
+/* ---- PayPal: a hosted redirect ----
+   The server creates the order from the pack's own amount and hands back the
+   approval link. Coming back from PayPal proves nothing: the page re-reads the
+   authoritative state, and only the verified webhook ever marks it paid. */
+async function payWithPayPal() {
+  const btn = $('btn-paypal'), status = $('paypal-status');
+  btn.disabled = true; status.hidden = false; status.textContent = 'Opening PayPal…';
+  try {
+    const r = await api('pay_paypal', {});
+    if (!r.ok || !r.data || !r.data.ok || !r.data.url) {
+      btn.disabled = false;
+      status.textContent = r.data && r.data.error === 'payments_not_configured'
+        ? 'PayPal is not available right now. Please use another option.'
+        : 'That did not work. Please try again, or use another option.';
+      return;
+    }
+    window.location.assign(r.data.url);
+  } catch {
+    btn.disabled = false;
+    status.textContent = 'That did not work. Please try again, or use another option.';
+  }
+}
+$('btn-paypal').addEventListener('click', payWithPayPal);

@@ -68,6 +68,8 @@ jobs:
         run: node scripts/test-whatsapp.mjs
       - name: Signed agreement — PDF validity, determinism, what it may claim (offline)
         run: node --experimental-strip-types scripts/test-agreement.mjs
+      - name: PayPal and Wise rails — mode gate, order shape, signature verification (offline)
+        run: node --experimental-strip-types scripts/test-paypal-wise.mjs
 
       - name: Verify config is valid ES module
         run: node --input-type=module -e "import('./config.js').then(m => { if (!m.CONFIG) { console.error('CONFIG export missing'); process.exit(1); } console.log('config.js OK'); })"

@@ -1077,6 +1077,73 @@ licence number and address now live in two places. If either changes, change
 both. The live values are Oolala Next FZ-LLC, licence 47017963 RAK (U.A.E.),
 PO Box 644762, The Sustainable City, Dubai.
 
+## Wise and PayPal (BEAU PH)
+
+Two rails added to the payment hub, and they are **not the same kind of thing**.
+
+**Wise is a manual rail.** Wise's API sends money and reads balances; it has no
+hosted checkout and no way to tell us a payment arrived. What a Wise Business
+account gives a merchant is local bank details in several currencies, so a payer
+makes a cheap local transfer instead of an international wire. That is a bank
+transfer that lands in Wise, and it is modelled as exactly that: instructions
+shown, an authorised operator confirms receipt. Calling it an integration would
+be dressing up a manual rail, so the adapter says so in its own header.
+
+**PayPal is a real online rail.** Orders v2 with intent `CAPTURE`: the payer
+approves on PayPal and the payment is confirmed **only** by a signature-verified
+webhook. Returning to the site from PayPal is a navigation, not a receipt, and
+nothing on the return path marks anything paid.
+
+| | Wise | PayPal |
+|---|---|---|
+| Kind | manual | online |
+| Confirmed by | operator | verified webhook |
+| Secrets | none | three |
+| Checkout | no | yes |
+
+**Business accounts, and never friends and family.** Receiving business income
+into a personal Wise or PayPal account is outside both providers' terms, and a
+commercial payment sent as friends-and-family removes protection for both sides
+and is the usual reason a receiving account is limited. Nothing is seeded, the
+instruction fields offer no friends-and-family wording, and the test suite
+asserts that none ever appears.
+
+**Secrets for PayPal**, owner-set, never committed:
+
+```
+supabase secrets set PAYPAL_CLIENT_ID=...       # business app credentials
+supabase secrets set PAYPAL_SECRET=...
+supabase secrets set PAYPAL_WEBHOOK_ID=...      # the webhook's id from the PayPal dashboard
+```
+
+Without the webhook id the rail refuses to be configured at all: taking a
+payment nothing could ever confirm is worse than not offering the button. The
+mode gate is the same as Stripe's — `PAYMENTS_MODE=test` talks to the sandbox,
+`live` to production, unset refuses everything. PayPal publishes no livemode
+flag in its events, so the adapter stamps the mode of the credentials that
+verified the event, and the hub keeps refusing anything whose mode does not
+match the merchant's.
+
+Subscribe the webhook endpoint (`/functions/v1/paypal-webhook`) to
+`PAYMENT.CAPTURE.COMPLETED`, `PAYMENT.CAPTURE.DENIED`,
+`PAYMENT.CAPTURE.REFUNDED`, `PAYMENT.CAPTURE.REVERSED` and
+`CHECKOUT.ORDER.APPROVED`.
+
+**What is deliberately not automated.** A PayPal refund is recorded as BEAU PH
+evidence and then left alone: on a refund the resource is the refund, not the
+capture, and mapping it onto the ledger needs a capture link PayPal only
+supplies on some event shapes. Guessing would credit the wrong payment, so a
+refund goes through the same operator path as every other manual correction
+until a real refund event has been read.
+
+**Tests.** `PAYPAL_WISE_TESTS ok=60` offline — the adapter is driven against a
+fake fetch, so the order it builds, the environment it talks to and the
+signature checks are exercised rather than pattern-matched, including that a
+certificate URL which is not PayPal's is refused. `CG021_TESTS ok=21` proves a
+verified capture marks the order paid once with the real PayPal fee, that a
+replay changes nothing, and that a wrong amount, a ghost order and an approval
+event are all refused but recorded.
+
 ## Continuous integration
 
 `.github/workflows/ci.yml`, three jobs.

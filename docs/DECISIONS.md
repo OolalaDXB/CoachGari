@@ -2472,3 +2472,52 @@ trust service provider is attached. Overclaiming the weight of a signature is th
 one thing that would make this document worse than no document at all, so the
 test suite asserts the disclaimer is present and that no phrase implying an
 accredited certificate ever appears.
+
+## Two rails, and only one of them is an integration (14/09/2026)
+
+Wise and PayPal were added because they already existed in a sister project and
+the question was fair: why not here. The answer shaped the work.
+
+**What that project has is not an integration.** Its PayPal and Wise are payment
+destinations: display the coordinates, the guest pays out of band, an admin
+confirms. No API call, no webhook, no reconciliation. That shape already existed
+in BEAU PH as bank transfer and cash, so copying it was small.
+
+**Wise stays that way, because Wise cannot be anything else.** Wise's API sends
+money and reads balances. There is no hosted checkout and no event that says a
+payment arrived. A Wise Business account gives local bank details in several
+currencies, which is genuinely valuable — a payer in Lagos or Paris sends a
+local transfer instead of an international wire — but it is a bank transfer, and
+the adapter's own header says so rather than letting the name imply more.
+
+**PayPal became a real rail, because PayPal has a real acceptance API.** Orders
+v2 with intent CAPTURE, confirmed only by a signature-verified webhook. Three
+decisions inside it are worth recording:
+
+*Refuse to be configured without a webhook id.* Credentials alone would let the
+button appear and a payment be taken that nothing could confirm. That is worse
+than no button, so the absent webhook id makes `runtime()` report not configured.
+
+*Stamp the mode at verification.* PayPal publishes no livemode flag, so the
+symmetric test-versus-live guard the Stripe path relies on has nothing to read.
+It does not need one: verification runs against the environment the credentials
+belong to, so a sandbox event cannot verify with live credentials. The adapter
+therefore stamps the mode of the credentials that just verified the event, and
+the database check works unchanged.
+
+*Refuse three-decimal currencies rather than round them.* PayPal cannot quote
+KWD or BHD. Rounding one into two decimals would take the wrong amount, so both
+the adapter and the database helper return nothing instead.
+
+**And the part left undone on purpose.** A PayPal refund event carries the
+refund as its resource, not the capture, and the link back to the capture is not
+always present. Automating the ledger credit on that would eventually credit the
+wrong payment. The evidence is stored, the refund is applied by an operator, and
+the gap is written into the function's header rather than discovered later.
+
+On the terms: the sister project pays PayPal as friends-and-family into a
+personal address. That breaches PayPal's terms for a commercial payment, removes
+protection for both sides, and is the ordinary way a receiving account gets
+limited. Neither rail here offers that wording to copy, both name a business
+account, and the test suite fails if friends-and-family appears anywhere in the
+payer-facing fields.
