@@ -205,5 +205,24 @@ begin
   begin perform public.crm_dashboard(); fail := fail + 1; log := log || ' [dashboard open to finance]'; exception when sqlstate '42501' then ok := ok + 1; end;
   execute 'reset role';
 
+  /* ---- 11. the Overview charts (20261036): 12 months always, each block by permission ---- */
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000002","email":"coach@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.admin_overview_charts(12);
+  if (j ? 'pipeline') and not (j ? 'revenue') and jsonb_array_length(j -> 'pipeline') = 12
+     and (j -> 'pipeline' -> 11 ->> 'month') = to_char(now(), 'YYYY-MM') and (j -> 'pipeline' -> 11 ->> 'enquiries')::int >= 7   -- this suite's own enquiries land in the current month
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [charts coach ' || left(j::text, 200) || ']'; end if;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000005","email":"fin@test.local"}', true);
+  execute 'set local role authenticated';
+  j := public.admin_overview_charts(3);
+  if (j ? 'revenue') and not (j ? 'pipeline') and jsonb_array_length(j -> 'revenue') = 3 and jsonb_typeof(j -> 'revenue' -> 0 -> 'by_currency') = 'object'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [charts finance ' || left(j::text, 200) || ']'; end if;
+  execute 'reset role';
+  perform set_config('request.jwt.claims', '{"role":"authenticated","sub":"00000000-0000-4000-8000-000000000006","email":"ana@test.local"}', true);
+  execute 'set local role authenticated';
+  begin perform public.admin_overview_charts(12); fail := fail + 1; log := log || ' [charts open to analytics]'; exception when sqlstate '42501' then ok := ok + 1; end;
+  execute 'reset role';
+
   raise exception 'CG009_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

@@ -340,7 +340,7 @@ destination is a permission-gated tab; sign-in is a Supabase Auth magic link
 with `shouldCreateUser: false`, so an email the owner has not invited cannot
 even create an auth user. What a person sees is decided by the database, not
 the page; the page never writes permissions directly. Navigation:
-**Overview · CRM · Schedule · Bookings · Services · Finance · BEAU PH ·
+**Overview · CRM · Schedule · Services · Collaborations · Finance · BEAU PH ·
 Analytics · Access**. Schedule merges the four time-management domains
 (Calendar, Weekly availability, Exceptions, Tour stops) as sub-tabs; CRM has
 Dashboard (default) + Leads + Contacts; Finance has Transactions (default) + Payment methods; BEAU PH
@@ -352,7 +352,7 @@ magic-link sign-in.
 
 | Permission | What it unlocks in `/admin` |
 |---|---|
-| `coach:operations` | CRM › Leads (enquiries, clickable to the client popup), Schedule (Calendar / Availability / Exceptions / Tour stops), Bookings; the Enquiries / Bookings / Media / Attribution sections of a client profile |
+| `coach:operations` | CRM › Leads (enquiries, clickable to the client popup), Schedule (Calendar / Bookings / Sessions / Availability / Exceptions / Tour stops); the Enquiries / Bookings / Media / Attribution sections of a client profile |
 | `client_profile:view` | CRM › Contacts (canonical people with enquiry/booking counts) and the profile Overview / Notes |
 | `client_profile:manage` | Edit a canonical profile, create a contact, add / edit internal notes (all through audited RPCs) |
 | `health_metrics:view` | The Progress section of a profile: weight, BMI, body-fat, muscle history |
@@ -492,7 +492,7 @@ to it through a back-filled `crm_contact_id`.
   RPCs (`crm_save_contact`, `crm_add_note`, `crm_edit_note`, `metrics_add`,
   `metrics_edit`); the tables have no direct write grant, anon has nothing,
   and changes are recorded in `public.admin_audit`.
-- **Tests** (`supabase/tests/cg009_crm.sql`, `CG009_TESTS ok=51 fail=0`):
+- **Tests** (`supabase/tests/cg009_crm.sql`, `CG009_TESTS ok=54 fail=0`):
   matching (email / phone / ambiguous / same-name), enquiry immutability,
   direct-booking linkage, note authz + audit, metric history + height
   snapshot + BMI correctness + BMI-not-writable + partial + range rejection,
@@ -502,8 +502,21 @@ to it through a back-filled `crm_contact_id`.
 - **Leads live in CRM, not in the Overview** (`20261035`). CRM opens on a
   **Dashboard**: the funnel in numbers (new to handle, 7 / 30 days, converted,
   archived) plus the two action lists — new leads (*Make client · Archive ·
-  Delete · Open*) and possible duplicates. The Overview keeps the sessions and
-  the headline numbers and shows one line — "3 new leads to handle · Open CRM".
+  Delete · Open*) and possible duplicates. The Overview shows one line —
+  "3 new leads to handle · Open CRM".
+- **The Overview is a cockpit** (`20261036`): a greeting instead of a third
+  "Overview" title, the next sessions, the next five bookings (→ Schedule ›
+  Bookings / Calendar), the CRM line, two 12-month charts and the headline
+  numbers. `admin_overview_charts(p_months)` returns, gated like
+  `admin_overview`: **revenue** per month per currency (paid orders by
+  `paid_at`, gross as collected — Finance is the ledger) and the **pipeline**
+  (enquiries received, clients won by `first_seen_at`, sessions held). The
+  charts are plain SVG columns (no library — the admin CSP is `script-src
+  'self'`): ≤ 24px columns, 4px caps, hairline grid, a legend for ≥ 2 series,
+  hover tooltip per column, values in text tokens; the blue / orange / green
+  triple passes the six colour checks. **Bookings moved under Schedule** as a
+  list view of the same time (Calendar · Bookings · Sessions · …); the old
+  `#bookings` link and the push notification deep links still land there.
   **Delete** (`lead_delete`, `coach:operations`) removes the enquiry for good:
   the row, its attachment rows by cascade, and the files through the Storage
   API (SQL cannot delete `storage.objects`; a scoped delete policy on the

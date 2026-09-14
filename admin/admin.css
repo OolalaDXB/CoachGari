@@ -265,6 +265,15 @@ details.pf-tech summary{cursor:pointer;font-size:12.5px;font-weight:700;color:va
 /* overview action inbox */
 .ov-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:0 0 18px;}
 .ov-crm{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:16px 20px;} .ov-crm b{font-weight:800;}
+/* Overview charts: plain SVG columns, hairline grid, text in text tokens, a legend for ≥ 2 series, hover tooltip */
+.ov-charts{margin-bottom:18px;} .ov-chartpanel{margin-bottom:0;min-width:0;}
+.ov-chart-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px;} .ov-chart-head .ov-lbl{margin-bottom:2px;}
+.ov-hero{font-size:26px;font-weight:800;letter-spacing:-.02em;}
+.ov-chart{position:relative;} .ov-chart svg{display:block;width:100%;height:auto;}
+.ov-ax{font:11px/1 'Manrope',system-ui,sans-serif;fill:var(--grey-text);}
+.ov-chart path{transition:opacity .12s;} .ov-chart rect:hover + path,.ov-chart path:hover{opacity:.85;}
+.ov-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--grey-text);margin:0 0 6px;} .ov-legend i,.ov-tip i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px;}
+.ov-tip{position:absolute;pointer-events:none;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.08);white-space:nowrap;z-index:2;} .ov-tip b{display:block;margin-bottom:3px;}
 @media(max-width:820px){.ov-cols{grid-template-columns:1fr;}}
 .ov-panel{margin-bottom:0;}
 .ov-item{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--line);}

@@ -23,9 +23,9 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 /* One fixed sentence per kind. No value from the row ever reaches this text. */
 const TEXT: Record<string, { t: string; u: string }> = {
   lead_notification:  { t: "New enquiry",             u: "/admin/#crm" },
-  booking_confirmed:  { t: "New booking",             u: "/admin/#bookings" },
+  booking_confirmed:  { t: "New booking",             u: "/admin/#schedule/bookings" },
   payment_received:   { t: "Payment received",        u: "/admin/#finance" },
-  booking_cancelled:  { t: "A booking was cancelled", u: "/admin/#bookings" },
+  booking_cancelled:  { t: "A booking was cancelled", u: "/admin/#schedule/bookings" },
   reschedule:         { t: "A session moved",         u: "/admin/#schedule" },
   collab_request:     { t: "New collaboration enquiry", u: "/admin/#collaborations" },
   collab_accepted:    { t: "A collaboration was accepted", u: "/admin/#collaborations" },

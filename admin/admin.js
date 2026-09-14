@@ -204,11 +204,11 @@ function navModel() {
               { key: 'contacts', label: 'Contacts', show: () => has('client_profile:view'), run: crmContacts } ] },
     { key: 'schedule', label: 'Schedule', icon: '◷', show: () => has('coach:operations'),
       subs: [ { key: 'calendar', label: 'Calendar', show: () => true, run: calendar },
+              { key: 'bookings', label: 'Bookings', show: () => true, run: bookings },
               { key: 'sessions', label: 'Sessions', show: () => true, run: sessionsList },
               { key: 'availability', label: 'Availability', show: () => true, run: availability },
               { key: 'exceptions', label: 'Exceptions', show: () => true, run: exceptions },
               { key: 'tours', label: 'Tour stops', show: () => true, run: tours } ] },
-    { key: 'bookings', label: 'Bookings', icon: '▤', show: () => has('coach:operations'), run: bookings },
     { key: 'services', label: 'Services', icon: '❖', show: () => has('catalog:view'), run: catalogue },
     { key: 'collab', label: 'Collaborations', icon: '⇄', show: () => has('collab:view'), run: collabList },
     // Finance = the daily business surface (Transactions first, never the infrastructure). BEAU PH = the temporary embedded
@@ -278,6 +278,7 @@ function renderAccount(session) {
 
 // route to a section (and optional sub-tab); keeps the hash in sync
 function go(sectionKey, subKey) {
+  if (sectionKey === 'bookings') { sectionKey = 'schedule'; subKey = 'bookings'; }   // Bookings moved under Schedule; old links still land
   const section = NAV.find((s) => s.key === sectionKey) || NAV[0];
   cur.section = section.key;
   for (const a of $('#nav').querySelectorAll('[data-section]')) a.classList.toggle('on', a.dataset.section === section.key);
@@ -482,21 +483,61 @@ async function crmContacts() {
 }
 
 /* =============================== OVERVIEW =============================== */
-// The Overview is the daily cockpit: what needs action first (leads to handle, duplicates
-// to resolve), then the sessions ahead, then headline numbers that jump to their list.
+// The Overview is the cockpit, not an inbox: the sessions ahead, the bookings ahead, one
+// line on what waits in CRM, two charts over 12 months (revenue → Finance, pipeline → CRM),
+// then the headline numbers. Lead handling lives in CRM › Dashboard.
+
+// A column chart in plain SVG (no library: the admin CSP allows self-hosted script only).
+// series: [{ name, color, values[] }] on shared labels[]; grouped when > 1 series. Columns
+// ≤ 24px, 4px rounded cap, square at the baseline; hairline grid; a legend for ≥ 2 series;
+// a hover tooltip per column. Value text wears text tokens, never the series colour.
+function columnChart({ labels, series, fmtValue = (v) => String(v), id }) {
+  const W = 560, H = 220, padL = 44, padR = 10, padT = 12, padB = 26;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const max = Math.max(1, ...series.flatMap((s) => s.values));
+  // clean ticks: 4 steps on a 1-2-5 grid
+  const raw = max / 4, mag = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 5, 10].map((k) => k * mag).find((k) => k >= raw);
+  const top = Math.ceil(max / step) * step; const ticks = []; for (let t = 0; t <= top; t += step) ticks.push(t);
+  const y = (v) => padT + ih - (v / top) * ih;
+  const band = iw / labels.length, gap = 2, n = series.length;
+  const colW = Math.min(24, (band * 0.7 - gap * (n - 1)) / n);
+  const groupW = colW * n + gap * (n - 1);
+  const col = (x, v, color, i, k) => {
+    const h = padT + ih - y(v), r = Math.min(4, h), yy = y(v), x2 = x + colW;
+    const d = h <= 0 ? '' : `M${x},${padT + ih} V${yy + r} Q${x},${yy} ${x + r},${yy} H${x2 - r} Q${x2},${yy} ${x2},${yy + r} V${padT + ih} Z`;
+    return `<path d="${d}" fill="${color}" data-i="${i}" data-k="${k}"></path><rect x="${x - 2}" y="${padT}" width="${colW + 4}" height="${ih}" fill="transparent" data-i="${i}" data-k="${k}"></rect>`;
+  };
+  const cols = labels.map((_, i) => series.map((s, k) => col(padL + band * i + (band - groupW) / 2 + k * (colW + gap), s.values[i] || 0, s.color, i, k)).join('')).join('');
+  const grid = ticks.map((t) => `<line x1="${padL}" x2="${W - padR}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"></line><text x="${padL - 6}" y="${y(t) + 4}" text-anchor="end" class="ov-ax">${esc(fmtValue(t, true))}</text>`).join('');
+  const xl = labels.map((l, i) => `<text x="${padL + band * i + band / 2}" y="${H - 8}" text-anchor="middle" class="ov-ax">${esc(l)}</text>`).join('');
+  const legend = series.length > 1 ? `<div class="ov-legend">${series.map((s) => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('')}</div>` : '';
+  return `${legend}<div class="ov-chart" id="${id}"><svg viewBox="0 0 ${W} ${H}" role="img">${grid}${cols}${xl}</svg><div class="ov-tip" hidden></div></div>`;
+}
+function wireChart(id, labels, series, fmtValue) {
+  const root = $('#' + id); if (!root) return; const tip = root.querySelector('.ov-tip');
+  root.querySelectorAll('[data-i]').forEach((el) => {
+    el.onmouseenter = (e) => { const i = +el.dataset.i, k = +el.dataset.k; tip.innerHTML = `<b>${esc(labels[i])}</b>${series.map((s) => `<div><i style="background:${s.color}"></i>${esc(s.name)} · ${esc(fmtValue(s.values[i] || 0, false, s.name))}</div>`).join('')}`; tip.hidden = false; void k; };
+    el.onmousemove = (e) => { const r = root.getBoundingClientRect(); tip.style.left = Math.min(e.clientX - r.left + 12, r.width - tip.offsetWidth - 4) + 'px'; tip.style.top = (e.clientY - r.top - 10) + 'px'; };
+    el.onmouseleave = () => { tip.hidden = true; };
+  });
+}
+const CHART_COLORS = ['#1540E8', '#eb6834', '#1baf7a'];   // validated pair/triple (dataviz six checks, light surface)
+
 async function overview() {
   const { data, error } = await sb.rpc('admin_overview'); if (error) throw error;
   const o = data.operations, f = data.finance, c = data.crm;
+  const tz = view.dataset.tz || 'Asia/Dubai';
 
-  // next sessions + what waits in CRM (counts only — lead handling lives in CRM › Dashboard)
-  let upcoming = [], newLeads = 0, review = 0;
-  if (has('coach:operations')) {
-    const [uR, lR] = await Promise.all([
-      sb.rpc('sessions_upcoming', { p_limit: 6 }),
-      sb.from('contacts').select('id', { count: 'exact', head: true }).eq('status', 'new'),
-    ]);
-    upcoming = uR.data || []; newLeads = lR.count || 0;
-  }
+  // next sessions, next bookings, what waits in CRM (counts only), the two charts
+  let upcoming = [], nextBookings = [], newLeads = 0, review = 0, charts = {};
+  const jobs = [sb.rpc('admin_overview_charts', { p_months: 12 })];
+  if (has('coach:operations')) jobs.push(
+    sb.rpc('sessions_upcoming', { p_limit: 6 }),
+    sb.from('contacts').select('id', { count: 'exact', head: true }).eq('status', 'new'),
+    sb.from('bookings').select(BOOKING_COLS).in('status', ['confirmed', 'pending_payment', 'hold']).gte('start_at', new Date().toISOString()).order('start_at', { ascending: true }).limit(5));
+  const [chR, uR, lR, bR] = await Promise.all(jobs);
+  charts = chR.data || {};
+  if (uR) { upcoming = uR.data || []; newLeads = lR.count || 0; nextBookings = bR.data || []; }
   if (c) review = c.needs_review || 0;
 
   const nextCard = (s) => {
@@ -511,7 +552,7 @@ async function overview() {
         ${online && s.meeting_url ? `<a class="btn btn-line btn-sm" href="${esc(s.meeting_url)}" target="_blank" rel="noopener">Join</a>` : (!online && (s.location_name || s.location_address) ? `<a class="btn btn-line btn-sm" href="${ml.gmaps}" target="_blank" rel="noopener">Directions</a>` : '')}</div></div>`;
   };
   const kpis = [];
-  if (o) kpis.push(['New leads · 7 days', o.new_leads_7d, () => go('crm', 'dashboard')], ["Today's sessions", o.today_sessions, () => go('schedule')], ['Upcoming bookings', o.upcoming_bookings, () => go('bookings')]);
+  if (o) kpis.push(['New leads · 7 days', o.new_leads_7d, () => go('crm', 'dashboard')], ["Today's sessions", o.today_sessions, () => go('schedule')], ['Upcoming bookings', o.upcoming_bookings, () => go('schedule', 'bookings')]);
   if (f) kpis.push(['Orders awaiting payment', f.pending_payment_orders, () => go('finance', 'transactions')], ['Unsettled Gari payable', money(f.unsettled_payable), () => go('finance', 'commissions')]);
   if (c) kpis.push(['CRM contacts', c.total_contacts, () => { view.dataset.cReview = ''; go('crm', 'contacts'); }], ['Flagged for review', c.needs_review, () => { view.dataset.cReview = '1'; go('crm', 'contacts'); }]);
 
@@ -522,17 +563,54 @@ async function overview() {
   const crmLine = (has('coach:operations') || has('client_profile:view'))
     ? `<div class="ad-panel ov-crm"><div>${waiting.length ? waiting.join(' · ') : 'CRM is clear — no new leads, nothing to review.'}</div><button class="btn ${waiting.length ? 'btn-accent' : 'btn-line'} btn-sm" id="ov-crm">Open CRM</button></div>` : '';
 
+  // charts: revenue by month (per currency, the biggest first, at most three) and the pipeline
+  const monthLabel = (ym) => new Date(ym + '-01T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' });
+  let revenueHtml = '', pipelineHtml = '', revSeries = [], pipeSeries = [], revLabels = [], pipeLabels = [];
+  if (charts.revenue) {
+    revLabels = charts.revenue.map((m) => monthLabel(m.month));
+    const totals = {}; charts.revenue.forEach((m) => Object.entries(m.by_currency || {}).forEach(([cur, v]) => { totals[cur] = (totals[cur] || 0) + Number(v); }));
+    const curs = Object.keys(totals).sort((a, b) => totals[b] - totals[a]).slice(0, 3);
+    revSeries = curs.map((cur, k) => ({ name: cur, color: CHART_COLORS[k], values: charts.revenue.map((m) => Number((m.by_currency || {})[cur] || 0) / 100) }));
+    const main = curs[0];
+    const revFmt = (v, axis, cur) => main ? (axis ? (v >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'k' : String(v)) : money(Math.round(v * 100), cur || main)) : String(v);
+    revenueHtml = `<div class="ad-panel ov-chartpanel"><div class="ov-chart-head"><div><div class="ov-lbl">Revenue · 12 months</div><div class="ov-hero">${main ? money(Math.round(totals[main]), main) : '—'}</div></div><button class="btn btn-line btn-xs" id="ov-fin">Finance</button></div>
+      ${main ? columnChart({ labels: revLabels, series: revSeries, fmtValue: revFmt, id: 'ov-rev' }) : '<p class="ad-empty">No paid order yet.</p>'}
+      ${curs.length > 1 ? `<p class="ad-note">Each currency as collected; the headline is ${esc(main)} only.</p>` : ''}</div>`;
+    revSeries._fmt = revFmt;
+  }
+  if (charts.pipeline) {
+    pipeLabels = charts.pipeline.map((m) => monthLabel(m.month));
+    pipeSeries = [['enquiries', 'Enquiries'], ['clients', 'New clients'], ['sessions', 'Sessions']].map(([k, name], i) => ({ name, color: CHART_COLORS[i], values: charts.pipeline.map((m) => Number(m[k] || 0)) }));
+    const any = pipeSeries.some((s) => s.values.some((v) => v > 0));
+    const won = pipeSeries[1].values.reduce((a, b) => a + b, 0);
+    pipelineHtml = `<div class="ad-panel ov-chartpanel"><div class="ov-chart-head"><div><div class="ov-lbl">Pipeline · 12 months</div><div class="ov-hero">${won} new client${won === 1 ? '' : 's'}</div></div><button class="btn btn-line btn-xs" id="ov-crm2">CRM</button></div>
+      ${any ? columnChart({ labels: pipeLabels, series: pipeSeries, id: 'ov-pipe' }) : '<p class="ad-empty">Nothing yet — the first enquiry starts the curve.</p>'}</div>`;
+  }
+
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hour12: false, timeZone: tz }).format(new Date()));
+  const first = ((me && me.display_name) || '').split(' ')[0];
+  const hello = `${hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}${first ? ', ' + esc(first) : ''}.`;
+  const today = new Intl.DateTimeFormat('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: tz }).format(new Date());
+
   view.innerHTML = `
-    <div class="ad-head"><div><h1>Overview</h1><p class="ad-muted">Sessions ahead, what waits in CRM, and the headline numbers. Only what you're allowed to see.</p></div></div>
+    <div class="ad-head"><div><h1>${hello}</h1><p class="ad-muted">${esc(today)} · ${esc(tz)}</p></div></div>
     ${upcoming.length ? `<div class="ov-nextwrap"><div class="ov-lbl">Next session${upcoming.length > 1 ? 's' : ''}</div>
       <div class="ov-nextrow">${upcoming.map(nextCard).join('')}</div></div>` : ''}
+    ${has('coach:operations') ? `<div class="ad-panel"><div class="ov-chart-head"><div class="ov-lbl">Upcoming bookings${nextBookings.length ? ` (${nextBookings.length})` : ''}</div><div class="cg-actions"><button class="btn btn-line btn-xs" id="ov-bk">All bookings</button><button class="btn btn-line btn-xs" id="ov-cal">Calendar</button></div></div>
+      ${nextBookings.length ? table(['Time', 'Session', 'Client', 'Ref · status', 'Price'], nextBookings.map((b) => bookingRow(b, tz, false)), '') : '<p class="ad-empty">No booking ahead.</p>'}</div>` : ''}
     ${crmLine}
+    ${revenueHtml || pipelineHtml ? `<div class="ad-grid2 ov-charts">${revenueHtml}${pipelineHtml}</div>` : ''}
     <div class="ad-kpis">${kpis.map(([l, v], i) => `<button class="ad-kpi${kpis[i][2] ? ' ov-kpi-click' : ''}" data-kpi="${i}"><b>${v}</b><span>${esc(l)}</span></button>`).join('') || '<p class="ad-empty">Nothing to show yet.</p>'}</div>`;
 
   // next-session cards
   calData = { sessions: upcoming, blocks: [] };
   view.querySelectorAll('.ov-next').forEach((el) => { const openBtn = el.querySelector('[data-open]'); const go2 = () => openSession(el.dataset.sess); el.onclick = go2; if (openBtn) openBtn.onclick = (e) => { e.stopPropagation(); go2(); }; el.querySelectorAll('a').forEach((a) => a.onclick = (e) => e.stopPropagation()); });
-  const ovCrm = $('#ov-crm'); if (ovCrm) ovCrm.onclick = () => go('crm', 'dashboard');
+  const on = (id, fn) => { const el = $('#' + id); if (el) el.onclick = fn; };
+  on('ov-crm', () => go('crm', 'dashboard')); on('ov-crm2', () => go('crm', 'dashboard'));
+  on('ov-bk', () => go('schedule', 'bookings')); on('ov-cal', () => go('schedule', 'calendar'));
+  on('ov-fin', () => go('finance', 'transactions'));
+  if (revSeries.length) wireChart('ov-rev', revLabels, revSeries, revSeries._fmt);
+  if (pipeSeries.length) wireChart('ov-pipe', pipeLabels, pipeSeries, (v) => String(v));
   // headline numbers jump to their list
   view.querySelectorAll('[data-kpi]').forEach((b) => { const fn = kpis[+b.dataset.kpi][2]; if (fn) b.onclick = fn; });
 }

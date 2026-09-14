@@ -5,6 +5,39 @@ documented but deliberately **not** implemented. Newest sprint first.
 
 ---
 
+## Overview — a cockpit with two charts; Bookings under Schedule (2026-09-14)
+
+The owner: "trop d'overview" (the word appeared three times on one screen),
+upcoming bookings with a link to the schedule, two charts — revenue linking to
+Finance and client evolution — and an open question: should Bookings be a
+tab inside Schedule, a list view next to the agenda?
+
+- **Yes to Bookings under Schedule.** A booking is a point in time; the
+  calendar and the list are two views of the same thing, so they sit together:
+  Calendar · Bookings · Sessions · Availability · Exceptions · Tour stops. The
+  top-level entry goes; `go('bookings')` and the `#bookings` hash alias to
+  `schedule/bookings` so push deep links and bookmarks still land.
+- **Charts without a library.** The admin CSP is `script-src 'self'`; a
+  chart lib would mean vendoring. Two column charts in plain SVG cost ~40
+  lines and follow the dataviz method: form by job (magnitude over time →
+  columns), ≤ 24px columns with 4px caps square at the baseline, hairline
+  grid, legend for ≥ 2 series, hover tooltip, text in text tokens; the
+  palette (`#1540E8`, `#eb6834`, `#1baf7a`) passes the validator (worst
+  CVD ΔE 32.6, normal 44.1).
+- **Revenue is per currency, not converted.** `admin_overview_charts` sums
+  paid orders by `paid_at` month per currency; the chart shows up to three
+  currencies side by side and the headline is the main one. No FX conversion
+  on the Overview: Finance already holds the reporting-currency view and a
+  converted "total" here would be a second, drifting number.
+- **Pipeline = enquiries, new clients, sessions.** Three counts on one
+  scale (grouped columns). "Clients won" is `crm_contacts.first_seen_at` with
+  status active/past — no activation timestamp exists and adding one for a
+  chart would be over-engineering.
+- **One h1.** The topbar names the section; the page greets the person and
+  gives the date instead of repeating "Overview".
+
+---
+
 ## CRM — leads are deletable, and handled in CRM, not the Overview (2026-09-14)
 
 The owner: leads must be deletable or they pollute; the Overview and the CRM
@@ -31,7 +64,7 @@ CRM. `20261035_cg_lead_delete_and_crm_dashboard.sql`:
   which now shows one line and an *Open CRM* button. One home for one job.
 - **Restore** for archived / spam leads (status back to `new`), the mirror
   Contacts already had.
-- Suite `cg009_crm.sql` 43 → **51**.
+- Suite `cg009_crm.sql` 43 → **51** (→ **54** with the Overview charts checks).
 
 ---
 
