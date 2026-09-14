@@ -198,7 +198,7 @@ async function boot() {
 function navModel() {
   return [
     { key: 'overview', label: 'Overview', icon: '▦', show: () => true, run: overview },
-    { key: 'crm', label: 'CRM', icon: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="7.5" r="3"/><path d="M3.8 19c0-2.9 2.3-5 5.2-5s5.2 2.1 5.2 5"/><path d="M16.2 5.2a3 3 0 0 1 0 5.6"/><path d="M17 14.3c2.3.4 3.9 2.2 3.9 4.7"/></svg>', show: () => has('coach:operations') || has('client_profile:view'),
+    { key: 'crm', label: 'Clients', icon: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="7.5" r="3"/><path d="M3.8 19c0-2.9 2.3-5 5.2-5s5.2 2.1 5.2 5"/><path d="M16.2 5.2a3 3 0 0 1 0 5.6"/><path d="M17 14.3c2.3.4 3.9 2.2 3.9 4.7"/></svg>', show: () => has('coach:operations') || has('client_profile:view'),
       subs: [ { key: 'dashboard', label: 'Dashboard', show: () => true, run: crmDashboard },
               { key: 'leads', label: 'Leads', show: () => has('coach:operations'), run: leads },
               { key: 'contacts', label: 'Contacts', show: () => has('client_profile:view'), run: crmContacts } ] },
@@ -410,7 +410,7 @@ async function crmDashboard() {
     ['Archived / spam', L.closed + L.spam, () => { view.dataset.leadStatus = 'closed'; go('crm', 'leads'); }]);
   if (K) kpis.push(
     ['Active clients', K.active, () => { view.dataset.cStatus = 'active'; view.dataset.cReview = ''; go('crm', 'contacts'); }],
-    ['CRM contacts', K.total, () => { view.dataset.cStatus = ''; view.dataset.cReview = ''; go('crm', 'contacts'); }],
+    ['Contacts', K.total, () => { view.dataset.cStatus = ''; view.dataset.cReview = ''; go('crm', 'contacts'); }],
     ['Flagged for review', K.needs_review, () => { view.dataset.cReview = '1'; go('crm', 'contacts'); }]);
 
   const leadItem = (c) => `<div class="ov-item" data-enq="${c.id}" data-crm="${esc(c.crm_contact_id || '')}">
@@ -425,7 +425,7 @@ async function crmDashboard() {
   const stale = L && L.oldest_new_days >= 3 ? `<p class="ad-note" style="margin:0 0 14px">The oldest unanswered lead is ${L.oldest_new_days} days old.</p>` : '';
 
   view.innerHTML = `
-    <div class="ad-head"><div><h1>CRM</h1><p class="ad-muted">The funnel in numbers, then what to act on: new leads to convert, archive or delete, and possible duplicates to resolve.</p></div></div>
+    <div class="ad-head"><div><h1>Clients</h1><p class="ad-muted">The funnel in numbers, then what to act on: new leads to convert, archive or delete, and possible duplicates to resolve.</p></div></div>
     <div class="ad-kpis">${kpis.map(([l, v], i) => `<button class="ad-kpi ov-kpi-click" data-kpi="${i}"><b>${v ?? 0}</b><span>${esc(l)}</span></button>`).join('')}</div>
     ${stale}
     <div class="ov-cols">${L ? panel('New leads', newLeads, leadItem, 'No new leads. Inbox zero.') : ''}${K ? panel('To review — possible duplicates', review, reviewItem, 'Nothing flagged.') : ''}</div>`;
@@ -554,14 +554,14 @@ async function overview() {
   const kpis = [];
   if (o) kpis.push(['New leads · 7 days', o.new_leads_7d, () => go('crm', 'dashboard')], ["Today's sessions", o.today_sessions, () => go('schedule')], ['Upcoming bookings', o.upcoming_bookings, () => go('schedule', 'bookings')]);
   if (f) kpis.push(['Orders awaiting payment', f.pending_payment_orders, () => go('finance', 'transactions')], ['Unsettled Gari payable', money(f.unsettled_payable), () => go('finance', 'commissions')]);
-  if (c) kpis.push(['CRM contacts', c.total_contacts, () => { view.dataset.cReview = ''; go('crm', 'contacts'); }], ['Flagged for review', c.needs_review, () => { view.dataset.cReview = '1'; go('crm', 'contacts'); }]);
+  if (c) kpis.push(['Contacts', c.total_contacts, () => { view.dataset.cReview = ''; go('crm', 'contacts'); }], ['Flagged for review', c.needs_review, () => { view.dataset.cReview = '1'; go('crm', 'contacts'); }]);
 
   // one line, one button: the inbox itself is CRM › Dashboard
   const waiting = [];
   if (newLeads) waiting.push(`<b>${newLeads}</b> new lead${newLeads > 1 ? 's' : ''} to handle`);
   if (review) waiting.push(`<b>${review}</b> possible duplicate${review > 1 ? 's' : ''} to review`);
   const crmLine = (has('coach:operations') || has('client_profile:view'))
-    ? `<div class="ad-panel ov-crm"><div>${waiting.length ? waiting.join(' · ') : 'CRM is clear — no new leads, nothing to review.'}</div><button class="btn ${waiting.length ? 'btn-accent' : 'btn-line'} btn-sm" id="ov-crm">Open CRM</button></div>` : '';
+    ? `<div class="ad-panel ov-crm"><div>${waiting.length ? waiting.join(' · ') : 'Nothing waiting — no new leads, nothing to review.'}</div><button class="btn ${waiting.length ? 'btn-accent' : 'btn-line'} btn-sm" id="ov-crm">Open Clients</button></div>` : '';
 
   // charts: revenue by month (per currency, the biggest first, at most three) and the pipeline
   const monthLabel = (ym) => new Date(ym + '-01T00:00:00Z').toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' });
@@ -583,7 +583,7 @@ async function overview() {
     pipeSeries = [['enquiries', 'Enquiries'], ['clients', 'New clients'], ['sessions', 'Sessions']].map(([k, name], i) => ({ name, color: CHART_COLORS[i], values: charts.pipeline.map((m) => Number(m[k] || 0)) }));
     const any = pipeSeries.some((s) => s.values.some((v) => v > 0));
     const won = pipeSeries[1].values.reduce((a, b) => a + b, 0);
-    pipelineHtml = `<div class="ad-panel ov-chartpanel"><div class="ov-chart-head"><div><div class="ov-lbl">Pipeline · 12 months</div><div class="ov-hero">${won} new client${won === 1 ? '' : 's'}</div></div><button class="btn btn-line btn-xs" id="ov-crm2">CRM</button></div>
+    pipelineHtml = `<div class="ad-panel ov-chartpanel"><div class="ov-chart-head"><div><div class="ov-lbl">Pipeline · 12 months</div><div class="ov-hero">${won} new client${won === 1 ? '' : 's'}</div></div><button class="btn btn-line btn-xs" id="ov-crm2">Clients</button></div>
       ${any ? columnChart({ labels: pipeLabels, series: pipeSeries, id: 'ov-pipe' }) : '<p class="ad-empty">Nothing yet — the first enquiry starts the curve.</p>'}</div>`;
   }
 

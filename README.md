@@ -340,9 +340,9 @@ destination is a permission-gated tab; sign-in is a Supabase Auth magic link
 with `shouldCreateUser: false`, so an email the owner has not invited cannot
 even create an auth user. What a person sees is decided by the database, not
 the page; the page never writes permissions directly. Navigation:
-**Overview · CRM · Schedule · Services · Collaborations · Finance · BEAU PH ·
+**Overview · Clients · Schedule · Services · Collaborations · Finance · BEAU PH ·
 Analytics · Access**. Schedule merges the four time-management domains
-(Calendar, Weekly availability, Exceptions, Tour stops) as sub-tabs; CRM has
+(Calendar, Weekly availability, Exceptions, Tour stops) as sub-tabs; Clients (the CRM — section key `crm`) has
 Dashboard (default) + Leads + Contacts; Finance has Transactions (default) + Payment methods; BEAU PH
 has Rails + FX (the embedded payment hub's operator workspace, see
 `beau-ph/docs/`). Both launch users — Gari (`grej28roux@gmail.com`) and Mickaël
