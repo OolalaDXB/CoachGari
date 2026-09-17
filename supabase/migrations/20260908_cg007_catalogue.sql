@@ -370,7 +370,10 @@ values
   ('live-group', 'Live Group Sessions', 'group', 'Together',
    'Train live with me and everyone else, twice a week. Camera on or off — nobody''s watching but me.',
    60, 1200, 'USD', 'per month', 'online', 20, 'enquiry',
-   array['2 live classes a week', 'Replays if you miss one', 'No equipment needed', 'Cancel whenever'], false, true, true, 3)
+   -- 'Cancel whenever' was removed on 2026-09-17 at the coach's request. It was also a
+   -- promise with no machinery behind it: the monthly products are sold by enquiry and
+   -- paid one-off, so there is no subscription to cancel.
+   array['2 live classes a week', 'Replays if you miss one', 'No equipment needed'], false, true, true, 3)
 on conflict (slug) do nothing;
 
 -- The Conversation: presentation fields only; price (100 USD) and duration are untouched
