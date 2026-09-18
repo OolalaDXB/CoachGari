@@ -479,3 +479,8 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
 .pf-check{display:flex;align-items:center;gap:9px;font-size:14px;padding:7px 0;cursor:pointer;}
 .pf-check input{width:17px;height:17px;accent-color:var(--accent);flex:0 0 auto;}
 .pf-check input:disabled{opacity:.45;} .pf-check:has(input:disabled){color:var(--grey-text);cursor:default;}
+/* Subscriptions: a late plan is the only row that needs a human today, so it
+   is the only row that looks different. */
+.row-warn > td{background:var(--accent-tint);}
+.sub-form{grid-template-columns:repeat(auto-fit,minmax(200px,1fr));}
+.sub-form > div{grid-column:1/-1;}

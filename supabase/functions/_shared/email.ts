@@ -100,6 +100,14 @@ const replyNote = (t: string) => `<p style="margin:0 0 8px;font-size:14px;color:
 const roomBtn = (p: Payload) => { const u = str(p, "room_url"); return u ? `<p style="margin:0 0 20px"><a href="${esc(u)}" style="display:inline-block;background:#1540E8;color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 24px;border-radius:9px">Open your collaboration room →</a></p>` : ""; };
 const roomLine = (p: Payload) => { const u = str(p, "room_url"); return u ? `\nOpen your collaboration room:\n${u}\n` : ""; };
 
+/* Subscription invoices. `pay_url` is injected by email_outbox_claim at send
+   time — the stored row holds a pack id, never a link — so every one of these
+   templates has to read correctly with no button at all, which is what a
+   revoked or expired link produces. */
+const payBtn = (p: Payload, label = "Pay this month →") => { const u = str(p, "pay_url"); return u ? `<p style="margin:0 0 20px"><a href="${esc(u)}" style="display:inline-block;background:#1540E8;color:#fff;text-decoration:none;font-weight:700;font-size:15px;padding:13px 24px;border-radius:9px">${esc(label)}</a></p>` : ""; };
+const payLine = (p: Payload) => { const u = str(p, "pay_url"); return u ? `\nPay here:\n${u}\n` : ""; };
+const dateLabel = (v: string) => { if (!v) return ""; try { return new Intl.DateTimeFormat("en-GB", { dateStyle: "long", timeZone: "UTC" }).format(new Date(`${v}T00:00:00Z`)); } catch { return v; } };
+
 function sessionRows(p: Payload, whenLabel = "When") {
   const w = whenParts(str(p, "start_at"), str(p, "timezone", "UTC"));
   const dur = str(p, "duration_minutes"); const where = str(p, "where");
@@ -244,6 +252,43 @@ export function render(kind: string, p: Payload): Rendered {
         html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B"><p style="margin:0 0 14px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6C6C78">Reminder · collaborations</p><p>Collaboration <b>${esc(str(p, "public_ref"))}</b>: ${esc(what)}.</p><p style="font-size:13px;color:#6C6C78">Reply, propose, or decline politely from the back-office.</p></div>`,
         text: `Collaboration ${str(p, "public_ref")}: ${what}.\nReply, propose, or decline politely from the back-office.` };
     }
+    /* ---- subscriptions ----
+       Three messages that escalate in urgency but never in temperature. A
+       coaching client who is late is a person with a busy month, not a
+       debtor, and the wording stays on that side of the line. */
+    case "subscription_invoice": {
+      const amt = money(p.amount, p.currency);
+      const period = str(p, "period_label");
+      const sessions = str(p, "sessions");
+      return { subject: `${period} — ${str(p, "title")} · ${amt}`,
+        html: wrap("Coaching", `${esc(period)} is ready.`,
+          `<p style="margin:0 0 20px">${esc(firstName(p))}, here's this month's ${esc(str(p, "title"))}${sessions ? ` — ${esc(sessions)} session${sessions === "1" ? "" : "s"} to use` : ""}. Pay whenever suits you before ${esc(dateLabel(str(p, "due_date")))}, by card or any of the other methods on the page.</p>${payBtn(p)}${table(row("Amount", amt, true) + row("Period", period) + row("Due by", dateLabel(str(p, "due_date"))) + row("Reference", str(p, "reference")))}${replyNote("Anything to change this month?")}`),
+        text: `${period} is ready.\n${firstName(p)}, here's this month's ${str(p, "title")}${sessions ? ` — ${sessions} session${sessions === "1" ? "" : "s"} to use` : ""}. Pay whenever suits you before ${dateLabel(str(p, "due_date"))}, by card or any of the other methods on the page.\n${payLine(p)}\nAmount: ${amt}\nPeriod: ${period}\nDue by: ${dateLabel(str(p, "due_date"))}\nReference: ${str(p, "reference")}\n\nAnything to change this month? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+    }
+    case "subscription_reminder": {
+      const amt = money(p.amount, p.currency);
+      return { subject: `Due ${dateLabel(str(p, "due_date"))} — ${str(p, "title")}`,
+        html: wrap("Coaching", `Just a nudge, ${esc(firstName(p))}.`,
+          `<p style="margin:0 0 20px">This month's ${esc(str(p, "title"))} is due on ${esc(dateLabel(str(p, "due_date")))} — <b>${esc(amt)}</b>. It takes a minute, and nothing about your sessions changes either way.</p>${payBtn(p, "Pay now →")}${table(row("Amount", amt, true) + row("Due by", dateLabel(str(p, "due_date"))) + row("Reference", str(p, "reference")))}${replyNote("Need a different arrangement?")}`),
+        text: `Just a nudge, ${firstName(p)}.\nThis month's ${str(p, "title")} is due on ${dateLabel(str(p, "due_date"))} — ${amt}. It takes a minute, and nothing about your sessions changes either way.\n${payLine(p)}\nAmount: ${amt}\nDue by: ${dateLabel(str(p, "due_date"))}\nReference: ${str(p, "reference")}\n\nNeed a different arrangement? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+    }
+    case "subscription_overdue": {
+      const amt = money(p.amount, p.currency);
+      /* This is the message that says "talk to me", not "pay me". Next month
+         is genuinely not being invoiced until this is settled, and saying so
+         plainly is kinder than letting a bill quietly stack up. */
+      return { subject: `About this month — ${str(p, "title")}`,
+        html: wrap("Coaching", `Let's sort this out.`,
+          `<p style="margin:0 0 20px">${esc(firstName(p))}, this month's ${esc(str(p, "title"))} (<b>${esc(amt)}</b>, due ${esc(dateLabel(str(p, "due_date")))}) hasn't come through. Nothing is cancelled and nothing more will be billed until it's settled — but if something's changed, tell me and we'll work it out.</p>${payBtn(p, "Settle this month →")}${table(row("Amount", amt, true) + row("Was due", dateLabel(str(p, "due_date"))) + row("Reference", str(p, "reference")))}${replyNote("Can't right now?")}`),
+        text: `Let's sort this out.\n${firstName(p)}, this month's ${str(p, "title")} (${amt}, due ${dateLabel(str(p, "due_date"))}) hasn't come through. Nothing is cancelled and nothing more will be billed until it's settled — but if something's changed, tell me and we'll work it out.\n${payLine(p)}\nAmount: ${amt}\nWas due: ${dateLabel(str(p, "due_date"))}\nReference: ${str(p, "reference")}\n\nCan't right now? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+    }
+    case "subscription_ended": {
+      return { subject: `That's a wrap — ${str(p, "title")}`,
+        html: wrap("Coaching", `Thank you, ${esc(firstName(p))}.`,
+          `<p style="margin:0 0 20px">Your ${esc(str(p, "title"))} finishes on ${esc(dateLabel(str(p, "last_day")))}, as arranged. Nothing further will be billed. Whatever you've built over these months is yours to keep going with — and if you want to pick it back up, you know where I am.</p>${replyNote("Want to come back?")}`),
+        text: `Thank you, ${firstName(p)}.\nYour ${str(p, "title")} finishes on ${dateLabel(str(p, "last_day"))}, as arranged. Nothing further will be billed. Whatever you've built over these months is yours to keep going with — and if you want to pick it back up, you know where I am.\n\nWant to come back? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+    }
+
     case "collab_received": {   // owner, internal
       return { subject: `New collaboration enquiry — ${str(p, "type", "other")} — ${str(p, "name", str(p, "company", "someone"))}`,
         html: `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.55;color:#0A0A0B">

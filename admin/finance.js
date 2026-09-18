@@ -813,3 +813,220 @@ export async function phFx() {
     } catch (err) { out.textContent = err.message; }
   };
 }
+
+/* =============================== FINANCE · SUBSCRIPTIONS ===============================
+   The recurring side of the business, on one screen: who is on a plan, what
+   is owed, and what is late. Past due sorts first because it is the only row
+   that needs a human today.
+
+   Everything here is one RPC call per action; the page computes no money and
+   decides no eligibility. It cannot: the figures come from snapshots the
+   database took when each invoice went out, and an invoice already sent is
+   never recalculated by anybody.
+
+   The pay link is deliberately awkward to get: one button, one audited call,
+   and the link is put on the clipboard rather than drawn on screen, so it is
+   not left sitting in a screenshot or a shared session. */
+const SUB_STATUS_LABEL = { active: 'Active', past_due: 'Past due', paused: 'Paused', cancelled: 'Cancelled', ended: 'Ended' };
+const CYCLE_STATUS_LABEL = { issued: 'Awaiting payment', paid: 'Paid', skipped: 'Skipped', cancelled: 'Cancelled', written_off: 'Written off' };
+const every = (s) => s.interval_count === 1 ? `per ${s.interval_unit}` : `every ${s.interval_count} ${s.interval_unit}s`;
+const dateOnly = (d) => d ? C.fmt(`${d}T00:00:00Z`, 'UTC', { dateStyle: 'medium' }) : '—';
+
+export async function financeSubscriptions() {
+  const { esc, money, view, has } = C;
+  const rows = (await rpc('subscriptions_list', { p_status: null, p_contact_id: null, p_limit: 200 })) || [];
+  const manage = has('finance:manage');
+  const live = rows.filter((r) => ['active', 'past_due', 'paused'].includes(r.status));
+
+  /* Recurring revenue is only meaningful per currency — adding dirhams to
+     dollars would produce a number that looks authoritative and means
+     nothing. Paused plans are excluded: they are not billing. */
+  const mrr = {};
+  for (const r of live) {
+    if (r.status === 'paused') continue;
+    const months = r.interval_unit === 'week' ? (r.interval_count * 7) / 30.44 : r.interval_count;
+    mrr[r.currency] = (mrr[r.currency] || 0) + Math.round(r.price_amount / months);
+  }
+  const overdue = rows.filter((r) => Number(r.overdue_cycles) > 0);
+
+  view.innerHTML = `
+    <div class="ad-head">
+      <div><h1>Subscriptions</h1><p class="ad-muted">Recurring plans. Each period is invoiced as its own package, payable on any rail — the same page and the same rails as everything else. An unpaid plan stops being invoiced until it is settled.</p></div>
+      ${manage ? '<button type="button" class="btn btn-accent btn-sm" id="sub-new">Start a subscription</button>' : ''}
+    </div>
+    <div class="ad-kpis">
+      <div class="ad-kpi"><b>${live.filter((r) => r.status !== 'paused').length}</b><span>billing now${live.some((r) => r.status === 'paused') ? ` · ${live.filter((r) => r.status === 'paused').length} paused` : ''}</span></div>
+      ${Object.entries(mrr).map(([c, v]) => `<div class="ad-kpi"><b>${money(v, c)}</b><span>recurring per month · ${esc(c)}</span></div>`).join('') || '<div class="ad-kpi"><b>—</b><span>nothing recurring yet</span></div>'}
+      <div class="ad-kpi"><b>${overdue.length}</b><span>${overdue.length === 1 ? 'plan is' : 'plans are'} late</span></div>
+    </div>
+    <div class="ad-panel">
+      ${C.table(['Client', 'Plan', 'Amount', 'Status', 'Next invoice', 'Open', 'Paid to date', ''],
+        rows.map((r) => `<tr${Number(r.overdue_cycles) > 0 ? ' class="row-warn"' : ''}>
+          <td><b>${esc(r.client_name || '—')}</b></td>
+          <td>${esc(r.title)}<div class="ad-muted" style="font-size:12px">${r.sessions_per_cycle} session${r.sessions_per_cycle === 1 ? '' : 's'} ${esc(every(r))}</div></td>
+          <td class="num">${money(r.price_amount, r.currency)}<div class="ad-muted" style="font-size:12px">${esc(every(r))}</div></td>
+          <td>${C.st(r.status)}${r.cancel_at_period_end && r.status === 'active' ? '<div class="msg" style="font-size:12px">stops at period end</div>' : ''}</td>
+          <td>${dateOnly(r.next_billing_date)}</td>
+          <td class="num">${r.open_cycles || 0}${Number(r.overdue_cycles) > 0 ? `<div class="msg" style="font-size:12px">${r.overdue_cycles} overdue</div>` : ''}</td>
+          <td class="num">${money(r.paid_to_date, r.currency)}</td>
+          <td><button type="button" class="btn btn-line btn-sm" data-sub="${esc(r.id)}">Open</button></td></tr>`),
+        'No subscriptions yet. Start one from a client who has agreed to a monthly plan.')}
+    </div>
+    <div id="sub-detail"></div>`;
+
+  view.querySelectorAll('[data-sub]').forEach((b) => b.onclick = () => openSubscription(b.dataset.sub));
+  const nb = view.querySelector('#sub-new'); if (nb) nb.onclick = () => newSubscriptionForm();
+}
+
+async function openSubscription(id) {
+  const { esc, money, $ } = C;
+  const d = await rpc('subscription_get', { p_id: id }, { fresh: true });
+  const manage = !!d.can_manage;
+  const cycles = d.cycles || [];
+  const host = $('#sub-detail');
+  host.innerHTML = `
+    <div class="ad-panel" id="sub-panel">
+      <div class="ad-head" style="margin-bottom:8px">
+        <div><h2 style="font-size:17px;margin:0">${esc(d.title)} · ${esc(d.client_name || '—')}</h2>
+        <p class="ad-muted" style="margin:4px 0 0">${money(d.price_amount, d.currency)} ${esc(every(d))} · ${esc(d.sessions_per_cycle)} session${d.sessions_per_cycle === 1 ? '' : 's'} a period · started ${dateOnly(d.start_date)} · ${C.st(d.status)}</p></div>
+      </div>
+      ${d.status === 'past_due' ? '<p class="msg">Nothing more will be invoiced until the open period is settled or written off.</p>' : ''}
+      ${d.cancel_at_period_end && d.status === 'active' ? `<p class="msg">Stopping at the end of the current period. The last invoice will be the one for ${esc(dateOnly(d.next_billing_date))} minus a day; nothing will be issued after it.</p>` : ''}
+      ${manage ? `<div class="ad-actions" style="margin:12px 0 16px;display:flex;gap:8px;flex-wrap:wrap">
+        ${['active', 'past_due'].includes(d.status) ? '<button type="button" class="btn btn-line btn-sm" data-a="pause">Pause</button>' : ''}
+        ${d.status === 'paused' ? '<button type="button" class="btn btn-line btn-sm" data-a="resume">Resume</button>' : ''}
+        ${['active', 'past_due', 'paused'].includes(d.status) ? '<button type="button" class="btn btn-line btn-sm" data-a="price">Change price</button>' : ''}
+        ${d.status === 'active' ? '<button type="button" class="btn btn-line btn-sm" data-a="issue">Invoice the next period now</button>' : ''}
+        ${['active', 'past_due', 'paused'].includes(d.status) ? '<button type="button" class="btn btn-dark btn-sm" data-a="cancel">Stop</button>' : ''}
+      </div>` : ''}
+      ${C.table(['Period', 'Amount', 'Status', 'Due', 'Package', ''], cycles.map((k) => `<tr${k.overdue ? ' class="row-warn"' : ''}>
+        <td><b>${dateOnly(k.period_start)}</b> → ${dateOnly(k.period_end)}</td>
+        <td class="num">${money(k.amount, k.currency)}</td>
+        <td>${C.st(k.status)}<div class="ad-muted" style="font-size:12px">${esc(CYCLE_STATUS_LABEL[k.status] || k.status)}</div></td>
+        <td>${dateOnly(k.due_date)}${k.overdue ? '<div class="msg" style="font-size:12px">overdue</div>' : ''}</td>
+        <td>${esc(k.pack_ref || '—')}${k.order_reference ? `<div class="ad-muted" style="font-size:12px">${esc(k.order_reference)}</div>` : ''}</td>
+        <td>${manage && k.status === 'issued' ? `<button type="button" class="btn btn-line btn-sm" data-pay="${esc(k.id)}">Copy pay link</button> <button type="button" class="btn btn-line btn-sm" data-off="${esc(k.id)}">Write off</button>` : ''}</td></tr>`),
+        'No periods invoiced yet.')}
+    </div>`;
+  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  const reload = () => { invalidate('subscriptions_list', 'subscription_get'); financeSubscriptions().then(() => openSubscription(id)); };
+
+  host.querySelectorAll('[data-pay]').forEach((b) => b.onclick = async () => {
+    try {
+      const r = await write('subscription_copy_pay_link', { p_cycle_id: b.dataset.pay });
+      await navigator.clipboard.writeText(r.url);
+      C.toast('Pay link copied — it opens the usual payment page for that period');
+    } catch (e) { C.fail(e); }
+  });
+  host.querySelectorAll('[data-off]').forEach((b) => b.onclick = async () => {
+    if (!(await modal({ title: 'Write this period off?', danger: true, confirm: 'Write off',
+      body: '<p>The invoice stops being chased and stops counting as owed. The sessions and the package are left exactly as they are — whether they happened is a coaching record, not an accounting one.</p>' }))) return;
+    try { await write('subscription_write_off_cycle', { p_cycle_id: b.dataset.off, p_reason: null }); C.toast('Written off'); reload(); } catch (e) { C.fail(e); }
+  });
+
+  host.querySelectorAll('[data-a]').forEach((b) => b.onclick = async () => {
+    const a = b.dataset.a;
+    try {
+      if (a === 'pause') {
+        if (!(await modal({ title: 'Pause this subscription?', confirm: 'Pause', body: '<p>No further invoices go out until it is resumed. Open invoices stay open. Resuming never back-bills the paused months.</p>' }))) return;
+        await write('subscription_pause', { p_id: id, p_reason: null });
+      } else if (a === 'resume') {
+        if (!(await modal({ title: 'Resume this subscription?', confirm: 'Resume', body: '<p>Billing starts again from today. The paused months are not charged.</p>' }))) return;
+        await write('subscription_resume', { p_id: id, p_next_billing_date: null });
+      } else if (a === 'issue') {
+        if (!(await modal({ title: 'Invoice the next period now?', confirm: 'Invoice now',
+          body: `<p>Issues the period starting ${C.esc(dateOnly(d.next_billing_date))} straight away and emails the client a pay link. Doing this twice for the same period still produces one invoice.</p>` }))) return;
+        await write('subscription_issue_now', { p_id: id });
+      } else if (a === 'price') {
+        const v = prompt(`New price per period, in ${d.currency} (currently ${(d.price_amount / 100).toFixed(2)}):`, (d.price_amount / 100).toFixed(2));
+        if (v === null) return;
+        const minor = Math.round(Number(v) * 100);
+        if (!Number.isFinite(minor) || minor <= 0) return C.toast('That is not a price');
+        if (!(await modal({ title: 'Change the price?', confirm: 'Change price',
+          body: `<p>From <b>${C.money(d.price_amount, d.currency)}</b> to <b>${C.money(minor, d.currency)}</b> ${C.esc(every(d))}, from the next period on. Invoices already sent are not rewritten.</p>` }))) return;
+        await write('subscription_set_price', { p_id: id, p_price_amount: minor, p_reason: null });
+      } else if (a === 'cancel') {
+        const atEnd = await modal({ title: 'Stop this subscription', confirm: 'At the end of the period', cancel: 'Immediately, cancelling the open invoice',
+          body: '<p><b>At the end of the period</b> is the honest default: the client keeps what they have paid for and nothing further is issued.</p><p><b>Immediately</b> also cancels any invoice still open — for a client who has already gone, and should not be chased for a month they will not get.</p>' });
+        await write('subscription_cancel', { p_id: id, p_at_period_end: atEnd, p_reason: null });
+      }
+      C.toast('Done'); reload();
+    } catch (e) { C.fail(e); }
+  });
+}
+
+/* Starting one. The client must already exist in the CRM — a subscription is
+   an agreement with somebody Gari has spoken to, and inventing a contact from
+   a billing screen is how duplicates get made. */
+async function newSubscriptionForm() {
+  const { esc, $ } = C;
+  const { data: svc } = await C.sb.from('services').select('id,title,price_amount,currency,price_unit').eq('active', true).order('sort_order');
+  const monthly = (svc || []).filter((s) => s.price_unit === 'per month');
+  const host = $('#sub-detail');
+  host.innerHTML = `
+    <div class="ad-panel">
+      <h2 style="font-size:17px;margin:0 0 4px">Start a subscription</h2>
+      <p class="ad-muted" style="margin:0 0 16px">The first invoice goes out as soon as you save, unless the start date is in the future.</p>
+      <form id="sub-form" class="ad-form sub-form">
+        <label>Client<input name="client" id="sub-client" autocomplete="off" placeholder="Search client…" required><div id="sub-client-res" class="cg-cl-res"></div><input type="hidden" name="crm_contact_id"></label>
+        <label>Plan<select name="service_id" id="sub-service"><option value="">— no catalogue product —</option>${(svc || []).map((s) => `<option value="${esc(s.id)}" data-price="${s.price_amount || ''}" data-cur="${esc(s.currency)}" data-title="${esc(s.title)}"${monthly.length && monthly[0].id === s.id ? ' selected' : ''}>${esc(s.title)}${s.price_unit === 'per month' ? ' (monthly)' : ''}</option>`).join('')}</select></label>
+        <label>Title on the invoice<input name="title" id="sub-title" placeholder="Defaults to the plan's name"></label>
+        <label>Price per period<input name="price" id="sub-price" type="number" step="0.01" min="0.01" required></label>
+        <label>Currency<select name="currency" id="sub-cur">${CURRENCIES.map((c) => `<option${c === 'USD' ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
+        <label>Billed<select name="interval_unit"><option value="month" selected>every month</option><option value="week">every week</option></select></label>
+        <label>Sessions included per period<input name="sessions_per_cycle" type="number" min="1" max="100" value="2" required></label>
+        <label>First period starts<input name="start_date" type="date" value="${new Date().toISOString().slice(0, 10)}"></label>
+        <label>Payable within (days)<input name="due_days" type="number" min="0" max="60" value="7"></label>
+        <label style="grid-column:1/-1">Note (internal)<input name="note" placeholder="Agreed rate, anything worth remembering"></label>
+        <div style="grid-column:1/-1;display:flex;gap:8px"><button type="submit" class="btn btn-accent btn-sm">Start it</button><button type="button" class="btn btn-line btn-sm" id="sub-cancel">Cancel</button></div>
+      </form>
+    </div>`;
+  host.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  const form = $('#sub-form'), box = $('#sub-client'), res = $('#sub-client-res');
+  const sel = $('#sub-service');
+  const applyService = () => {
+    const o = sel.selectedOptions[0]; if (!o || !o.value) return;
+    if (o.dataset.price) $('#sub-price').value = (Number(o.dataset.price) / 100).toFixed(2);
+    if (o.dataset.cur) $('#sub-cur').value = o.dataset.cur;
+    $('#sub-title').placeholder = o.dataset.title || '';
+  };
+  sel.onchange = applyService; applyService();
+
+  box.oninput = async () => {
+    const q = box.value.trim(); if (q.length < 2) { res.innerHTML = ''; return; }
+    const { data } = await C.sb.rpc('crm_list_contacts', { p_search: q, p_review_only: false });
+    res.innerHTML = (data || []).slice(0, 6).map((c) => `<button type="button" data-cid="${c.id}" data-name="${esc(c.display_name || '')}">${esc(c.display_name || '—')} · ${esc(c.email || c.phone || '')}</button>`).join('');
+    res.querySelectorAll('[data-cid]').forEach((b) => b.onclick = () => { form.crm_contact_id.value = b.dataset.cid; box.value = b.dataset.name; res.innerHTML = ''; });
+  };
+  $('#sub-cancel').onclick = () => { host.innerHTML = ''; };
+
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    if (!f.get('crm_contact_id')) return C.toast('Pick a client from the list');
+    const p = {
+      crm_contact_id: f.get('crm_contact_id'),
+      service_id: f.get('service_id') || null,
+      title: String(f.get('title') || '').trim() || null,
+      price_amount: Math.round(Number(f.get('price')) * 100),
+      currency: String(f.get('currency')),
+      interval_unit: String(f.get('interval_unit')),
+      sessions_per_cycle: Number(f.get('sessions_per_cycle')),
+      start_date: String(f.get('start_date') || ''),
+      due_days: Number(f.get('due_days') || 7),
+      note: String(f.get('note') || '').trim() || null,
+    };
+    const ok = await modal({ title: 'Start this subscription?', confirm: 'Start it',
+      body: `<p><b>${C.money(p.price_amount, p.currency)}</b> ${p.interval_unit === 'month' ? 'every month' : 'every week'}, ${p.sessions_per_cycle} session${p.sessions_per_cycle === 1 ? '' : 's'} a period, from ${esc(p.start_date)}.</p>
+             <p>${p.start_date <= new Date().toISOString().slice(0, 10) ? 'The first invoice goes out now and the client gets a pay link by email.' : 'The first invoice goes out on the start date.'}</p>` });
+    if (!ok) return;
+    try {
+      const s = await write('subscription_start', p);
+      invalidate('subscriptions_list', 'subscription_get');
+      C.toast('Subscription started');
+      await financeSubscriptions(); openSubscription(s.id);
+    } catch (err) { C.fail(err); }
+  };
+}

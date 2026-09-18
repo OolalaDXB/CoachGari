@@ -57,7 +57,29 @@ const FORBIDDEN = /donat|charit|fundrais|tax[- ]deductible|contribution to a cau
   check('lead_notification: html escaped, text complete', /&lt;script&gt;/.test(ln.html) && !/<script>/.test(ln.html) && /Contact: lee@example.com/.test(ln.text));
   const pr = render('payment_received', { ...booking, type: 'booking', contact: 'amina@example.com' });
   check('payment_received (owner): who, what, amount', /Amina Test/.test(pr.html) && /CG-ABC123/.test(pr.html) && /US\$100\.00|\$100\.00/.test(pr.html), pr.html);
-  const all = ['booking_confirmed', 'reschedule', 'booking_cancelled', 'payment_confirmed', 'support_thanks', 'enquiry_received', 'lead_notification', 'payment_received']
+  /* subscriptions: the three chasing messages, and the one rule that matters —
+     the pay button is injected at send time, so every one of them has to read
+     correctly with no link at all (revoked, expired, or a claim that could not
+     build one). */
+  const subPayload = { name: 'Amara K', title: 'Online coaching', period_label: 'October 2026', period_start: '2026-10-01', period_end: '2026-10-31',
+                       amount: 7900, currency: 'USD', due_date: '2026-10-08', sessions: 2, reference: 'CG-0042' };
+  const si = render('subscription_invoice', { ...subPayload, pay_url: 'https://coachgari28.com/r/' + 'a'.repeat(64) });
+  check('subscription_invoice: amount, period, due date, reference, pay button', /\$79\.00/.test(si.html) && /October 2026/.test(si.html)
+    && /8 October 2026/.test(si.html) && /CG-0042/.test(si.html) && /coachgari28\.com\/r\/a{64}/.test(si.html), si.html);
+  const siNoLink = render('subscription_invoice', subPayload);
+  check('subscription_invoice without a link still renders, and invents none',
+    /October 2026/.test(siNoLink.html) && /\$79\.00/.test(siNoLink.html) && !/\/r\//.test(siNoLink.html + siNoLink.text), siNoLink.text);
+  const sr = render('subscription_reminder', subPayload);
+  const so = render('subscription_overdue', subPayload);
+  check('subscription_reminder and _overdue render, name the amount, and stay human',
+    /\$79\.00/.test(sr.html) && /\$79\.00/.test(so.html) && /nudge/i.test(sr.html) && /sort this out/i.test(so.html), so.html);
+  check('the overdue message says billing has stopped rather than threatening', /nothing more will be billed/i.test(so.text) && !/debt|owe|legal|collection/i.test(so.text), so.text);
+  const se = render('subscription_ended', { name: 'Amara K', title: 'Online coaching', last_day: '2026-12-31' });
+  check('subscription_ended thanks them and names the last day', /31 December 2026/.test(se.html) && /Thank you/i.test(se.html), se.html);
+  check('subscription HTML escapes what the client is called', /&lt;b&gt;/.test(render('subscription_invoice', { ...subPayload, name: '<b>x</b> K' }).html));
+
+  const all = ['booking_confirmed', 'reschedule', 'booking_cancelled', 'payment_confirmed', 'support_thanks', 'enquiry_received', 'lead_notification', 'payment_received',
+               'subscription_invoice', 'subscription_reminder', 'subscription_overdue', 'subscription_ended']
     .map((k) => render(k, { ...booking, previous_start_at: booking.start_at, cancelled_by: 'coach', pack_title: 'P', sessions: 5, type: 'booking', contact: 'a@b.co', record: 'r' }));
   const bareGari = all.map((r) => (r.html + ' ' + r.text + ' ' + r.subject).match(/(?<!Coach )\bGari\b/g) || []).flat();
   check('every template says "Coach Gari", never "Gari" alone', bareGari.length === 0, JSON.stringify(bareGari));
