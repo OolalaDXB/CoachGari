@@ -360,15 +360,15 @@ insert into public.services (slug, title, category, tagline, description, durati
                              delivery_mode, default_capacity, booking_mode, features, featured, active, listed, sort_order)
 values
   ('programme-12w', 'The Programme', 'programme', 'Self-guided',
-   'Twelve weeks of training and eating, on video. Yours to keep, run at your own pace.',
+   'Own your personal twelve-week meal plan and training programme.',
    60, 2900, 'USD', 'one-off', 'online', 1, 'enquiry',
    array['12-week training plan', 'Video demo for every move', 'Eating habits built in', 'Home version, no equipment'], false, true, true, 1),
   ('online-coaching', 'Online Coaching', 'coaching', 'Most popular',
    'One to one with me, live on video. A plan that changes as you do, and someone who notices when you stop.',
    60, 7900, 'USD', 'per month', 'online', 1, 'enquiry',
-   array['2 live video sessions a month', 'Plan rewritten every month', 'Food sorted alongside training', 'WhatsApp check-ins between'], true, true, true, 2),
+   array['2 live video sessions a month', 'Monthly training plan review', 'Monthly meal plan review', 'WhatsApp check-ins between'], true, true, true, 2),
   ('live-group', 'Live Group Sessions', 'group', 'Together',
-   'Train live with me and everyone else, twice a week. Camera on or off — nobody''s watching but me.',
+   'Let''s train as a group and push each other to be the best versions of ourselves.',
    60, 1200, 'USD', 'per month', 'online', 20, 'enquiry',
    -- 'Cancel whenever' was removed on 2026-09-17 at the coach's request. It was also a
    -- promise with no machinery behind it: the monthly products are sold by enquiry and
