@@ -282,6 +282,16 @@ export function render(kind: string, p: Payload): Rendered {
           `<p style="margin:0 0 20px">${esc(firstName(p))}, this month's ${esc(str(p, "title"))} (<b>${esc(amt)}</b>, due ${esc(dateLabel(str(p, "due_date")))}) hasn't come through. Nothing is cancelled and nothing more will be billed until it's settled — but if something's changed, tell me and we'll work it out.</p>${payBtn(p, "Settle this month →")}${table(row("Amount", amt, true) + row("Was due", dateLabel(str(p, "due_date"))) + row("Reference", str(p, "reference")))}${replyNote("Can't right now?")}`),
         text: `Let's sort this out.\n${firstName(p)}, this month's ${str(p, "title")} (${amt}, due ${dateLabel(str(p, "due_date"))}) hasn't come through. Nothing is cancelled and nothing more will be billed until it's settled — but if something's changed, tell me and we'll work it out.\n${payLine(p)}\nAmount: ${amt}\nWas due: ${dateLabel(str(p, "due_date"))}\nReference: ${str(p, "reference")}\n\nCan't right now? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
     }
+    case "subscription_card_failed": {
+      const amt = money(p.amount, p.currency);
+      /* Said once, without drama and without blame. The card is the thing that
+         stopped working, not the client, and the only ask is one tap on a link
+         they already know. */
+      return { subject: `Your card didn't go through — ${str(p, "title")}`,
+        html: wrap("Coaching", `Your card needs a look, ${esc(firstName(p))}.`,
+          `<p style="margin:0 0 20px">The card on file didn't go through for this month's ${esc(str(p, "title"))} (<b>${esc(amt)}</b>), so I've turned the automatic payment off rather than keep trying it. Nothing has changed about your sessions. Pay this month whenever you like — by card or any other way — and if you'd like it back on automatic afterwards, just say.</p>${payBtn(p, "Pay this month →")}${table(row("Amount", amt, true))}${replyNote("Card changed, or something else going on?")}`),
+        text: `Your card needs a look, ${firstName(p)}.\nThe card on file didn't go through for this month's ${str(p, "title")} (${amt}), so I've turned the automatic payment off rather than keep trying it. Nothing has changed about your sessions. Pay this month whenever you like — by card or any other way — and if you'd like it back on automatic afterwards, just say.\n${payLine(p)}\nAmount: ${amt}\n\nCard changed, or something else going on? Just reply to this email — it reaches Coach Gari directly.\n\nCoach Gari · coachgari28.com` };
+    }
     case "subscription_ended": {
       return { subject: `That's a wrap — ${str(p, "title")}`,
         html: wrap("Coaching", `Thank you, ${esc(firstName(p))}.`,

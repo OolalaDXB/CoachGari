@@ -110,6 +110,7 @@ create index if not exists subscriptions_due_idx on public.subscriptions (next_b
 create unique index if not exists subscriptions_one_live_per_service
   on public.subscriptions (crm_contact_id, service_id)
   where status in ('active','past_due','paused') and service_id is not null;
+drop trigger if exists subscriptions_updated_at on public.subscriptions;
 create trigger subscriptions_updated_at before update on public.subscriptions
   for each row execute function public.set_updated_at();
 
@@ -138,6 +139,7 @@ create table if not exists public.subscription_cycles (
 );
 create index if not exists subscription_cycles_open_idx on public.subscription_cycles (due_date) where status = 'issued';
 create index if not exists subscription_cycles_pack_idx on public.subscription_cycles (session_pack_id);
+drop trigger if exists subscription_cycles_updated_at on public.subscription_cycles;
 create trigger subscription_cycles_updated_at before update on public.subscription_cycles
   for each row execute function public.set_updated_at();
 

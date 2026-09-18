@@ -1,7 +1,9 @@
 -- =====================================================================
--- CG-022 — Recurring billing: the spine
--- One rolled-back transaction. It proves the claims the migration makes, and
--- it is written to fail if any of them stops being true:
+-- CG-022 — Recurring billing: the spine, and collecting from a card
+-- One rolled-back transaction. It proves the claims both migrations make, and
+-- it is written to fail if any of them stops being true.
+--
+-- The spine (20261056):
 --
 --   * a cycle is a session pack, and the money path is the existing one;
 --   * issuing twice for the same period issues ONE invoice;
@@ -15,6 +17,20 @@
 --   * a price change never rewrites an invoice already sent;
 --   * the pay link is readable for a reminder, and reachable by nobody a
 --     browser can be.
+--
+-- Collecting from a card (20261057):
+--   * a card is kept exactly once, on the invoice that needs to, and never on
+--     an ordinary package;
+--   * a period that has not started, and one already paid on another rail,
+--     are not charged;
+--   * a claim leases, a second runner gets nothing, and a run that died is
+--     revived rather than lost;
+--   * OUR failures never cost the client their card; a transient one is
+--     retried; three real declines drop it and say so, once;
+--   * a successful charge settles NOTHING — the webhook does that;
+--   * a PaymentIntent from the ordinary Checkout flow is never stolen, a
+--     wrong amount is never credited, a replay never doubles;
+--   * and nothing that could move money is ever returned to a browser.
 -- Run by scripts/db-tests.sh; nothing persists (final RAISE).
 -- =====================================================================
 do $$
@@ -252,6 +268,203 @@ begin
      and exists (select 1 from public.admin_audit where area = 'subscription' and action = 'cycle_paid')
      and exists (select 1 from public.admin_audit where area = 'subscription' and action = 'past_due')
     then ok := ok + 1; else fail := fail + 1; log := log || ' [audit-thin]'; end if;
+
+  /* ---- 12. auto-charge: the mandate ---- */
+  -- a subscription on auto without a card is the NORMAL first state, and it is
+  -- the only state in which a checkout is told to keep the card
+  j := public.subscription_start(jsonb_build_object(
+        'crm_contact_id', cid, 'title', 'Auto plan', 'price_amount', 5000, 'currency', 'USD',
+        'sessions_per_cycle', 4, 'billing_mode', 'auto'));
+  sid := (j ->> 'id')::uuid;
+  select k3.id, k3.session_pack_id into cyc1, pack1 from public.subscription_cycles k3 where k3.subscription_id = sid and k3.seq = 1;
+  if (j ->> 'billing_mode') = 'auto' and not (j ->> 'has_mandate')::boolean and (j ->> 'awaiting_card')::boolean
+     and public.pack_wants_card_on_file(pack1)
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [auto-start:' || j::text || ']'; end if;
+  -- an ordinary pack is never asked to keep a card
+  if not public.pack_wants_card_on_file(pack2) then ok := ok + 1; else fail := fail + 1; log := log || ' [stray-pack-keeps-card]'; end if;
+
+  j := public.subscription_mandate_record(
+        (select o.reference from public.orders o where o.session_pack_id = pack1 order by o.created_at desc limit 1),
+        jsonb_build_object('customer_id','cus_T1','payment_method_id','pm_T1','brand','visa','last4','4242','exp_month','4','exp_year','2030'));
+  -- no order exists for that pack yet, so the mandate cannot attach to anything
+  if not (j ->> 'ok')::boolean then ok := ok + 1; else fail := fail + 1; log := log || ' [mandate-without-order]'; end if;
+
+  j := public.create_order_for_pack(pack1);
+  j := public.subscription_mandate_record(j ->> 'reference',
+        jsonb_build_object('customer_id','cus_T1','payment_method_id','pm_T1','brand','visa','last4','4242','exp_month','4','exp_year','2030'));
+  if (j ->> 'ok')::boolean then ok := ok + 1; else fail := fail + 1; log := log || ' [mandate-not-recorded:' || j::text || ']'; end if;
+
+  j := public.subscription_get(sid);
+  if (j ->> 'has_mandate')::boolean and (j ->> 'card_last4') = '4242' and (j ->> 'card_expiry') = '04/30'
+     and not (j ->> 'awaiting_card')::boolean and not (j ->> 'card_expired')::boolean
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [mandate-shape:' || j::text || ']'; end if;
+  -- and once there is a card, the next checkout is NOT asked to keep another
+  if not public.pack_wants_card_on_file(pack1) then ok := ok + 1; else fail := fail + 1; log := log || ' [asks-for-a-second-card]'; end if;
+
+  /* ---- 13. what may be charged, and what may not ---- */
+  j := public.subscription_charges_enqueue();
+  if (select count(*) from public.subscription_charges c join public.subscription_cycles k3 on k3.id = c.cycle_id where k3.subscription_id = sid) = 1
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [not-queued:' || j::text || ']'; end if;
+  -- twice is still once
+  perform public.subscription_charges_enqueue();
+  if (select count(*) from public.subscription_charges c join public.subscription_cycles k3 on k3.id = c.cycle_id where k3.subscription_id = sid) = 1
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [queued-twice]'; end if;
+
+  -- a period that has not started yet is not charged, whatever else is true
+  update public.subscriptions set next_billing_date = current_date + 60, status = 'active' where id = sid;
+  k := public.subscription_issue_cycle(sid, 'test');
+  perform public.subscription_charges_enqueue();
+  if not exists (select 1 from public.subscription_charges where cycle_id = (k ->> 'id')::uuid)
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [charged-before-the-period]'; end if;
+
+  -- a cycle paid on another rail in the meantime is not charged
+  update public.session_packs set payment_status = 'paid', paid_at = now() where id = (k ->> 'session_pack_id')::uuid;
+  update public.subscription_cycles set period_start = current_date - 1 where id = (k ->> 'id')::uuid;
+  perform public.subscription_charges_enqueue();
+  if not exists (select 1 from public.subscription_charges where cycle_id = (k ->> 'id')::uuid)
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [charged-what-was-already-paid]'; end if;
+
+  /* ---- 14. claiming, leasing and reviving ---- */
+  select c.id into cyc2 from public.subscription_charges c join public.subscription_cycles k3 on k3.id = c.cycle_id where k3.subscription_id = sid limit 1;
+  j := public.subscription_charge_claim(5);
+  if jsonb_array_length(j) = 1 and (j -> 0 ->> 'customer_id') = 'cus_T1' and (j -> 0 ->> 'payment_method_id') = 'pm_T1'
+     and (j -> 0 ->> 'amount')::int = 5000 and (j -> 0 ->> 'attempt')::int = 1
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [claim:' || j::text || ']'; end if;
+  -- a second runner gets nothing while the lease holds
+  if public.subscription_charge_claim(5) = '[]'::jsonb then ok := ok + 1; else fail := fail + 1; log := log || ' [double-claim]'; end if;
+  -- a run that died leaves the row 'sent'; the next enqueue brings it back once the lease expires
+  update public.subscription_charges set next_attempt_at = now() - interval '1 minute' where id = cyc2;
+  j := public.subscription_charges_enqueue();
+  if (select status from public.subscription_charges where id = cyc2) = 'pending' and (j ->> 'revived')::int >= 1
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [never-revived]'; end if;
+
+  /* ---- 15. what a result does, and does not, do ---- */
+  -- a decline is recorded; the invoice stays open and nothing is marked paid
+  perform public.subscription_charge_claim(5);
+  j := public.subscription_charge_result(cyc2, false, 'pi_T1', 'Your card was declined.', 'card_declined');
+  if (select status from public.subscription_charges where id = cyc2) = 'failed'
+     and (select charge_failures from public.subscriptions where id = sid) = 1
+     and (select status from public.subscription_cycles where id = cyc1) = 'issued'
+     and (select payment_status from public.session_packs where id = pack1) = 'unpaid'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [decline-handling]'; end if;
+
+  -- a transient failure goes back in the queue instead of counting as a decline
+  update public.subscription_charges set status = 'sent', attempts = 1 where id = cyc2;
+  update public.subscriptions set charge_failures = 0 where id = sid;
+  j := public.subscription_charge_result(cyc2, false, null, 'network', null, true);
+  if (j ->> 'retrying')::boolean and (select status from public.subscription_charges where id = cyc2) = 'pending'
+     and (select charge_failures from public.subscriptions where id = sid) = 0
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [transient-counted-as-decline]'; end if;
+
+  -- our own failures never cost the client their card
+  update public.subscription_charges set status = 'sent' where id = cyc2;
+  j := public.subscription_charge_result(cyc2, false, null, 'no card on file', 'no_mandate');
+  if (j ->> 'internal')::boolean and (select charge_failures from public.subscriptions where id = sid) = 0
+     and (select stripe_payment_method_id from public.subscriptions where id = sid) = 'pm_T1'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [internal-failure-counted]'; end if;
+
+  -- three real declines and the card goes, with the client told once
+  update public.subscriptions set charge_failures = 2 where id = sid;
+  update public.subscription_charges set status = 'sent' where id = cyc2;
+  j := public.subscription_charge_result(cyc2, false, 'pi_T2', 'Your card has expired.', 'expired_card');
+  select * into s from public.subscriptions where id = sid;
+  if s.billing_mode = 'invoice' and s.stripe_payment_method_id is null and s.stripe_customer_id is null
+     and s.card_last4 is null
+     and exists (select 1 from public.email_events e where e.kind = 'subscription_card_failed' and e.payload ? 'pay_pack_id')
+     and exists (select 1 from public.admin_audit where area = 'subscription' and action = 'mandate_dropped')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [three-strikes:' || s.billing_mode || ']'; end if;
+
+  -- a success clears the counter and still does NOT settle anything: the webhook does that
+  update public.subscriptions set stripe_customer_id = 'cus_T1', stripe_payment_method_id = 'pm_T1',
+                                  billing_mode = 'auto', charge_failures = 2 where id = sid;
+  update public.subscription_charges set status = 'sent' where id = cyc2;
+  j := public.subscription_charge_result(cyc2, true, 'pi_T3');
+  if (select status from public.subscription_charges where id = cyc2) = 'succeeded'
+     and (select charge_failures from public.subscriptions where id = sid) = 0
+     and (select status from public.subscription_cycles where id = cyc1) = 'issued'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [success-settled-too-early]'; end if;
+
+  /* ---- 16. the webhook is what settles it ---- */
+  -- a PaymentIntent from the ordinary Checkout flow is never touched here
+  j := public.process_stripe_charge_event(jsonb_build_object(
+        'id','evt_X1','type','payment_intent.succeeded',
+        'data', jsonb_build_object('object', jsonb_build_object('id','pi_OTHER','amount_received',5000,'currency','usd','metadata','{}'::jsonb))));
+  if (j ->> 'status') = 'ignored' then ok := ok + 1; else fail := fail + 1; log := log || ' [checkout-pi-stolen]'; end if;
+
+  -- and one that names an amount the order does not have is recorded and refused
+  select o.reference into url from public.orders o where o.session_pack_id = pack1 order by o.created_at desc limit 1;
+  j := public.process_stripe_charge_event(jsonb_build_object(
+        'id','evt_X2','type','payment_intent.succeeded',
+        'data', jsonb_build_object('object', jsonb_build_object('id','pi_WRONG','amount_received',9999,'currency','usd',
+          'metadata', jsonb_build_object('cg_source','subscription_auto','order_reference', url)))));
+  if (j ->> 'status') = 'ignored' and (j ->> 'note') = 'amount mismatch'
+     and (select payment_status from public.session_packs where id = pack1) = 'unpaid'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [wrong-amount-credited:' || j::text || ']'; end if;
+
+  -- the real one: ledger, pack, cycle, all of it, from one event
+  j := public.process_stripe_charge_event(jsonb_build_object(
+        'id','evt_X3','type','payment_intent.succeeded',
+        '_enrich', jsonb_build_object('fee_amount', 175, 'charge_id','ch_T3','balance_transaction_id','txn_T3'),
+        'data', jsonb_build_object('object', jsonb_build_object('id','pi_T3','amount_received',5000,'currency','usd',
+          'metadata', jsonb_build_object('cg_source','subscription_auto','order_reference', url)))));
+  if (j ->> 'status') = 'processed'
+     and (select status from public.orders where reference = url) = 'paid'
+     and (select payment_status from public.session_packs where id = pack1) = 'paid'
+     and (select status from public.subscription_cycles where id = cyc1) = 'paid'
+     and (select fee_amount from public.payments where provider_payment_intent_id = 'pi_T3') = 175
+     and (select fee_known from public.payments where provider_payment_intent_id = 'pi_T3')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [auto-charge-not-settled:' || j::text || ']'; end if;
+
+  -- the commission was booked on it like any other payment
+  if exists (select 1 from public.partner_earnings e join public.orders o on o.id = e.order_id where o.reference = url)
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [no-earning-for-auto-charge]'; end if;
+
+  -- replaying the same event changes nothing
+  j := public.process_stripe_charge_event(jsonb_build_object(
+        'id','evt_X3','type','payment_intent.succeeded',
+        'data', jsonb_build_object('object', jsonb_build_object('id','pi_T3','amount_received',5000,'currency','usd',
+          'metadata', jsonb_build_object('cg_source','subscription_auto','order_reference', url)))));
+  if (j ->> 'duplicate')::boolean and (select count(*) from public.payments where provider_payment_intent_id = 'pi_T3') = 1
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [replay-doubled]'; end if;
+
+  -- a failed charge event is recorded and leaves the invoice exactly as it was
+  j := public.process_stripe_charge_event(jsonb_build_object(
+        'id','evt_X4','type','payment_intent.payment_failed',
+        'data', jsonb_build_object('object', jsonb_build_object('id','pi_T4','currency','usd',
+          'metadata', jsonb_build_object('cg_source','subscription_auto','order_reference', url)))));
+  if (j ->> 'status') = 'processed' and (j ->> 'outcome') = 'failed'
+     and (select count(*) from public.payments where provider_payment_intent_id = 'pi_T4') = 0
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [failed-event-mishandled]'; end if;
+
+  /* ---- 17. forgetting the card, and the doors ---- */
+  update public.subscriptions set stripe_customer_id = 'cus_T1', stripe_payment_method_id = 'pm_T1', billing_mode = 'auto' where id = sid;
+  j := public.subscription_forget_card(sid);
+  select * into s from public.subscriptions where id = sid;
+  if (j ->> 'detach_payment_method') = 'pm_T1' and s.billing_mode = 'invoice' and s.stripe_payment_method_id is null
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [forget-card]'; end if;
+
+  perform set_config('request.jwt.claims', VIEW, true);
+  begin
+    perform public.subscription_set_billing_mode(sid, 'auto');
+    fail := fail + 1; log := log || ' [viewer-can-switch-to-auto]';
+  exception when sqlstate '42501' then ok := ok + 1; when others then fail := fail + 1; log := log || ' [mode-wrong-error]'; end;
+  begin
+    perform public.subscription_forget_card(sid);
+    fail := fail + 1; log := log || ' [viewer-can-forget-card]';
+  exception when sqlstate '42501' then ok := ok + 1; when others then fail := fail + 1; log := log || ' [forget-wrong-error]'; end;
+  perform set_config('request.jwt.claims', BOSS, true);
+
+  -- the charging machinery is service_role's alone, and the queue is closed
+  if not has_function_privilege('authenticated', 'public.subscription_charge_claim(int)', 'execute')
+     and not has_function_privilege('authenticated', 'public.subscription_charge_result(uuid, boolean, text, text, text, boolean)', 'execute')
+     and not has_function_privilege('authenticated', 'public.process_stripe_charge_event(jsonb)', 'execute')
+     and not has_function_privilege('anon', 'public.pack_wants_card_on_file(uuid)', 'execute')
+     and not has_table_privilege('authenticated', 'public.subscription_charges', 'select')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [charging-exposed]'; end if;
+  -- and nothing that could move money is ever returned to a browser
+  j := public.subscription_get(sid);
+  if not (j ? 'stripe_customer_id') and not (j ? 'stripe_payment_method_id')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [card-ids-leaked]'; end if;
 
   raise exception 'CG022_TESTS ok=% fail=% %', ok, fail, case when log = '' then '' else '—' || log end;
 end $$;

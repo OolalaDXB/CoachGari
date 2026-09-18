@@ -25,6 +25,13 @@
 
 **V2/V3 are not built now** — a standalone dashboard, API or service requires separate approval.
 
+## Recurring collection (host-scheduled, provider-charged) ✔
+- The SCHEDULE belongs to the host, not to the provider: Coach Gari's `subscriptions` / `subscription_cycles` decide when a period is due, and every rail collects it the ordinary way. Stripe Subscriptions were deliberately not used — a provider-owned calendar would be a second source of truth about when a period is due, and every disagreement between the two would surface as a client charged twice or not at all.
+- BEAU PH's contribution is one optional flag on a request (`saveInstrument`) and one module outside the adapter contract (`providers/stripe/recurring.ts`). The flag asks a provider to keep the payer's instrument for later off-session use, with the consent given in the provider's own UI at payment time; a provider that cannot do this ignores it.
+- `recurring.ts` is deliberately NOT part of `ProviderAdapter`. The adapter contract describes a payment the PAYER initiates. Charging a stored instrument is the opposite — the merchant initiates and nobody is present — and putting the two behind one interface would let a host call the second while believing it was doing the first.
+- An off-session charge returns through the ordinary verified webhook and is reconciled by a host function of its own (`process_stripe_charge_event`), the same separation the PayPal rail has. It is admitted only by a marker the charge itself sets, so a PaymentIntent from the ordinary Checkout flow can never be settled twice.
+- Generalising this to other rails is a V1+ question and is not pretended to be solved: only Stripe has both the mandate and the off-session charge today.
+
 ## Known gaps carried from V0 (honest list)
 1. **Provider-side cancel on supersede** — when a request is cancelled (paid on another rail, or superseded by a manual receipt of another amount) the core marks it cancelled but does not call the adapter's `cancel()` to expire an open Stripe Checkout Session; a late card payment would then be refused by BEAU PH (ledger untouched, evidence kept) and would need a manual refund. V1: the Edge/host calls `adapter.cancel(provider_reference)` on cancellation events.
 2. **Legacy `no_request` path** — orders created before BEAU PH (or through `create_order_for_pack` without going through the request flow) are still validated by the host's original amount check when their webhook arrives. Remove once no pre-BEAU order can be in flight.

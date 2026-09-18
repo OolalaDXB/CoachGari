@@ -2837,3 +2837,73 @@ Two things could not be confirmed in the official docs and are recorded as
 unknown rather than guessed: the exact name of TikTok's statistics scope, and
 whether its 365-day refresh token re-arms on each rotation or expires from the
 first authorisation.
+
+---
+
+## Recurring billing (2026-09-18)
+
+Two catalogue products were priced "per month" with nothing recurring behind
+them. They were sold by enquiry and paid once, so month two never got invoiced
+unless somebody remembered — and "Cancel whenever" had to be deleted from the
+page because there was no subscription to cancel. Two migrations close that:
+`20261056` (the spine) and `20261057` (collecting from a card).
+
+**A billing cycle is a session pack.** This is the decision everything else
+follows from. Each period mints an ordinary `session_packs` row and the
+existing money path does the rest, untouched: `create_order_for_pack` → BEAU PH
+→ the `/r` page on every eligible rail → the ledger → `recompute_earning` → the
+receipt → the Finance list → the client's pack history.
+`session_packs.renewed_from_pack_id` already meant "this one follows that one";
+it had simply never been driven by a schedule. No rail had to learn a new
+concept, and a rail added later inherits recurring billing for free.
+
+The cost, stated rather than hidden: a subscription must grant a COUNTABLE
+entitlement, because a pack has `total_sessions > 0`. Both live products do. A
+subscription to something uncountable would need a different entitlement type.
+
+**Settlement is a trigger on `session_packs`, not a fifth edit to the four
+functions that mark an order paid.** Every rail — Stripe, PayPal, Wise, bank
+transfer, Aani, cash, an in-person terminal — lands on the same observable
+fact. Hooking the cycle to that fact means no rail can settle a subscription
+without the cycle noticing, including one written next year by someone who has
+never read the migration.
+
+**An unpaid subscription is not invoiced again.** Past the grace period the
+plan goes `past_due` and the issuer stops, waiting for the money or for a
+decision. Debt that stacks up while nobody is looking is how a coaching
+business ends up chasing four months at once.
+
+**Stripe Subscriptions were not used**, and that was the significant call. It
+would have been less code. It would also have created a SECOND schedule: two
+systems both believing they know when October is due, with every disagreement
+surfacing as a client charged twice or not at all. Our cycles already exist,
+are tested, mint the entitlement, and work for the clients who will never pay
+by card. So the schedule stays here and Stripe is asked to do one thing —
+charge this card, this much, now — through an off-session PaymentIntent that
+comes back as an ordinary webhook and is reconciled by a function of its own,
+exactly as the PayPal rail was in `20261046`.
+
+**There is no "add a card" page.** The client consents once, in Stripe's own
+UI, on the invoice they are already paying: the first checkout of a plan set to
+auto is created with `setup_future_usage=off_session`. Nothing new to explain
+and nothing for anyone to abandon. It also fails in the right direction — a
+client who never pays the first invoice never grants a mandate, and there was
+nothing to charge them for.
+
+**A declined card is ordinary.** The invoice stays open, the client keeps the
+pay link, and they can settle on any rail. Three consecutive declines drop the
+mandate and return the plan to invoicing, because a card that has failed three
+times is not a card. Our own failures (no mandate at run time, no order) are
+recorded but never counted towards that, or a working card would be thrown away
+after three deployment hiccups.
+
+**Double-charging is guarded in three independent places**: one charge row per
+cycle for ever (a unique index), the row id used as Stripe's idempotency key,
+and the amount check in the reconciler. A revived lease cannot become a second
+charge for the same reason.
+
+**What is stored about a card**: a Stripe customer id and a payment-method id —
+inert without the secret key, which never reaches the database — plus the brand
+and last four digits so a human can recognise it. No card number, no CVC. The
+back-office RPC does not return the ids at all, so the admin page cannot print
+one by accident.

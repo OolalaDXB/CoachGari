@@ -116,6 +116,10 @@ export interface CreateRequestInput {
   /** Reconciliation identifiers only (no personal data): the host application and merchant key, copied into provider metadata. */
   hostApp?: string;
   merchantKey?: string;
+  /** Ask the provider to keep the instrument for later off-session use (recurring collection). The
+      consent happens in the provider's own UI at payment time; BEAU PH never sees the instrument.
+      Providers that cannot do this ignore it — it is a request, never a promise. */
+  saveInstrument?: boolean;
 }
 
 export type CreateRequestResult =

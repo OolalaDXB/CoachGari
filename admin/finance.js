@@ -830,6 +830,10 @@ export async function phFx() {
 const SUB_STATUS_LABEL = { active: 'Active', past_due: 'Past due', paused: 'Paused', cancelled: 'Cancelled', ended: 'Ended' };
 const CYCLE_STATUS_LABEL = { issued: 'Awaiting payment', paid: 'Paid', skipped: 'Skipped', cancelled: 'Cancelled', written_off: 'Written off' };
 const every = (s) => s.interval_count === 1 ? `per ${s.interval_unit}` : `every ${s.interval_count} ${s.interval_unit}s`;
+/* The card, said the way a human recognises one. Never an id — the back-office
+   has no use for a Stripe customer or payment-method reference, so the RPC does
+   not return one and this cannot accidentally print one. */
+const cardLabel = (s) => !s.has_mandate ? '' : `${(s.card_brand || 'card').replace(/^./, (c) => c.toUpperCase())} ···· ${s.card_last4 || '????'}${s.card_expiry ? ` · ${s.card_expiry}` : ''}`;
 const dateOnly = (d) => d ? C.fmt(`${d}T00:00:00Z`, 'UTC', { dateStyle: 'medium' }) : '—';
 
 export async function financeSubscriptions() {
@@ -860,12 +864,16 @@ export async function financeSubscriptions() {
       <div class="ad-kpi"><b>${overdue.length}</b><span>${overdue.length === 1 ? 'plan is' : 'plans are'} late</span></div>
     </div>
     <div class="ad-panel">
-      ${C.table(['Client', 'Plan', 'Amount', 'Status', 'Next invoice', 'Open', 'Paid to date', ''],
+      ${C.table(['Client', 'Plan', 'Amount', 'Status', 'Collection', 'Next invoice', 'Open', 'Paid to date', ''],
         rows.map((r) => `<tr${Number(r.overdue_cycles) > 0 ? ' class="row-warn"' : ''}>
           <td><b>${esc(r.client_name || '—')}</b></td>
           <td>${esc(r.title)}<div class="ad-muted" style="font-size:12px">${r.sessions_per_cycle} session${r.sessions_per_cycle === 1 ? '' : 's'} ${esc(every(r))}</div></td>
           <td class="num">${money(r.price_amount, r.currency)}<div class="ad-muted" style="font-size:12px">${esc(every(r))}</div></td>
           <td>${C.st(r.status)}${r.cancel_at_period_end && r.status === 'active' ? '<div class="msg" style="font-size:12px">stops at period end</div>' : ''}</td>
+          <td>${r.billing_mode === 'auto'
+                ? (r.has_mandate ? `${esc(cardLabel(r))}${r.card_expired ? '<div class="msg" style="font-size:12px">card expired</div>' : ''}${r.charge_failures ? `<div class="msg" style="font-size:12px">${r.charge_failures} failed</div>` : ''}`
+                                 : '<span class="ad-muted">card pending</span>')
+                : '<span class="ad-muted">invoiced</span>'}</td>
           <td>${dateOnly(r.next_billing_date)}</td>
           <td class="num">${r.open_cycles || 0}${Number(r.overdue_cycles) > 0 ? `<div class="msg" style="font-size:12px">${r.overdue_cycles} overdue</div>` : ''}</td>
           <td class="num">${money(r.paid_to_date, r.currency)}</td>
@@ -888,8 +896,15 @@ async function openSubscription(id) {
     <div class="ad-panel" id="sub-panel">
       <div class="ad-head" style="margin-bottom:8px">
         <div><h2 style="font-size:17px;margin:0">${esc(d.title)} · ${esc(d.client_name || '—')}</h2>
-        <p class="ad-muted" style="margin:4px 0 0">${money(d.price_amount, d.currency)} ${esc(every(d))} · ${esc(d.sessions_per_cycle)} session${d.sessions_per_cycle === 1 ? '' : 's'} a period · started ${dateOnly(d.start_date)} · ${C.st(d.status)}</p></div>
+        <p class="ad-muted" style="margin:4px 0 0">${money(d.price_amount, d.currency)} ${esc(every(d))} · ${esc(d.sessions_per_cycle)} session${d.sessions_per_cycle === 1 ? '' : 's'} a period · started ${dateOnly(d.start_date)} · ${esc(SUB_STATUS_LABEL[d.status] || d.status)}</p></div>
       </div>
+      <p class="ad-muted" style="margin:0 0 4px">${d.billing_mode === 'auto'
+        ? (d.has_mandate
+            ? `Collected automatically from ${esc(cardLabel(d))}, kept since ${dateOnly((d.mandate_at || '').slice(0, 10))}.`
+            : 'Set to collect automatically. The card is kept when the client pays the first invoice — there is no separate form for them to fill in.')
+        : 'Invoiced. The client pays each period themselves, on any rail.'}</p>
+      ${d.card_expired ? '<p class="msg">That card has expired. The next charge will fail and the plan will fall back to being invoiced — worth a word with the client first.</p>' : ''}
+      ${d.charge_failures ? `<p class="msg">${d.charge_failures} charge${d.charge_failures === 1 ? '' : 's'} failed in a row${d.last_charge_error ? ` — ${esc(d.last_charge_error)}` : ''}. After three the card is dropped and the plan goes back to being invoiced.</p>` : ''}
       ${d.status === 'past_due' ? '<p class="msg">Nothing more will be invoiced until the open period is settled or written off.</p>' : ''}
       ${d.cancel_at_period_end && d.status === 'active' ? `<p class="msg">Stopping at the end of the current period. The last invoice will be the one for ${esc(dateOnly(d.next_billing_date))} minus a day; nothing will be issued after it.</p>` : ''}
       ${manage ? `<div class="ad-actions" style="margin:12px 0 16px;display:flex;gap:8px;flex-wrap:wrap">
@@ -897,6 +912,9 @@ async function openSubscription(id) {
         ${d.status === 'paused' ? '<button type="button" class="btn btn-line btn-sm" data-a="resume">Resume</button>' : ''}
         ${['active', 'past_due', 'paused'].includes(d.status) ? '<button type="button" class="btn btn-line btn-sm" data-a="price">Change price</button>' : ''}
         ${d.status === 'active' ? '<button type="button" class="btn btn-line btn-sm" data-a="issue">Invoice the next period now</button>' : ''}
+        ${['active', 'past_due', 'paused'].includes(d.status) && d.billing_mode === 'invoice' ? '<button type="button" class="btn btn-line btn-sm" data-a="auto">Collect automatically</button>' : ''}
+        ${d.billing_mode === 'auto' && !d.has_mandate ? '<button type="button" class="btn btn-line btn-sm" data-a="manual">Go back to invoicing</button>' : ''}
+        ${d.has_mandate ? '<button type="button" class="btn btn-line btn-sm" data-a="forget">Forget the card</button>' : ''}
         ${['active', 'past_due', 'paused'].includes(d.status) ? '<button type="button" class="btn btn-dark btn-sm" data-a="cancel">Stop</button>' : ''}
       </div>` : ''}
       ${C.table(['Period', 'Amount', 'Status', 'Due', 'Package', ''], cycles.map((k) => `<tr${k.overdue ? ' class="row-warn"' : ''}>
@@ -946,6 +964,16 @@ async function openSubscription(id) {
         if (!(await modal({ title: 'Change the price?', confirm: 'Change price',
           body: `<p>From <b>${C.money(d.price_amount, d.currency)}</b> to <b>${C.money(minor, d.currency)}</b> ${C.esc(every(d))}, from the next period on. Invoices already sent are not rewritten.</p>` }))) return;
         await write('subscription_set_price', { p_id: id, p_price_amount: minor, p_reason: null });
+      } else if (a === 'auto') {
+        if (!(await modal({ title: 'Collect this plan automatically?', confirm: 'Collect automatically',
+          body: '<p>The next invoice the client pays by card will keep that card, with their consent, on Stripe\'s own payment form. From the period after that it is charged without anybody doing anything.</p><p>Nothing changes for a client who pays by transfer, PayPal or cash — there is simply never a card to keep, and they carry on being invoiced.</p>' }))) return;
+        await write('subscription_set_billing_mode', { p_id: id, p_mode: 'auto' });
+      } else if (a === 'manual') {
+        await write('subscription_set_billing_mode', { p_id: id, p_mode: 'invoice' });
+      } else if (a === 'forget') {
+        if (!(await modal({ title: 'Forget this card?', danger: true, confirm: 'Forget it',
+          body: '<p>The card is detached at Stripe and the plan goes back to being invoiced each period. Nothing already paid is affected, and the client can put a card back by paying a future invoice once the plan is set to collect automatically again.</p>' }))) return;
+        await write('subscription_forget_card', { p_id: id });
       } else if (a === 'cancel') {
         const atEnd = await modal({ title: 'Stop this subscription', confirm: 'At the end of the period', cancel: 'Immediately, cancelling the open invoice',
           body: '<p><b>At the end of the period</b> is the honest default: the client keeps what they have paid for and nothing further is issued.</p><p><b>Immediately</b> also cancels any invoice still open — for a client who has already gone, and should not be chased for a month they will not get.</p>' });
@@ -978,6 +1006,7 @@ async function newSubscriptionForm() {
         <label>Sessions included per period<input name="sessions_per_cycle" type="number" min="1" max="100" value="2" required></label>
         <label>First period starts<input name="start_date" type="date" value="${new Date().toISOString().slice(0, 10)}"></label>
         <label>Payable within (days)<input name="due_days" type="number" min="0" max="60" value="7"></label>
+        <label>Collection<select name="billing_mode"><option value="invoice" selected>invoiced each period</option><option value="auto">automatic, once they have paid by card</option></select></label>
         <label style="grid-column:1/-1">Note (internal)<input name="note" placeholder="Agreed rate, anything worth remembering"></label>
         <div style="grid-column:1/-1;display:flex;gap:8px"><button type="submit" class="btn btn-accent btn-sm">Start it</button><button type="button" class="btn btn-line btn-sm" id="sub-cancel">Cancel</button></div>
       </form>
@@ -1016,6 +1045,7 @@ async function newSubscriptionForm() {
       sessions_per_cycle: Number(f.get('sessions_per_cycle')),
       start_date: String(f.get('start_date') || ''),
       due_days: Number(f.get('due_days') || 7),
+      billing_mode: String(f.get('billing_mode') || 'invoice'),
       note: String(f.get('note') || '').trim() || null,
     };
     const ok = await modal({ title: 'Start this subscription?', confirm: 'Start it',

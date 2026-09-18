@@ -94,6 +94,13 @@ Deno.serve(async (req: Request) => {
     const { data: rp, error: oErr } = await requestForPack(supabase, packId, "stripe", runtime, currency);
     if (oErr || !rp) return rpcError(oErr ?? { code: "P0003", message: "unavailable" }, origin, allowed, 409);
     const { request, order } = rp;
+    /* Recurring billing: when this package is the first invoice of a plan set
+       to collect automatically, the session is told to keep the card. The
+       consent is the payer's, given in Stripe's own UI on this page, and it is
+       the ONLY way a mandate is ever created — there is no separate "add a
+       card" flow. The database decides; a browser can neither ask for this nor
+       refuse it, and an ordinary package is never asked. */
+    const { data: saveCard } = await supabase.rpc("pack_wants_card_on_file", { p_pack_id: packId });
     const reply = (c: Extract<CreateRequestResult, { kind: "embedded" }>, reused: boolean) =>
       json(200, { ok: true, ui: "embedded", client_secret: c.clientSecret, publishable_key: c.publicConfig.publishable_key, expires_at: c.expiresAt, reused }, origin, allowed);
 
@@ -109,6 +116,7 @@ Deno.serve(async (req: Request) => {
       description: `Coach Gari coaching package (${request.public_reference})`,
       customerEmail: order.customer_contact,
       uiMode: "embedded", hostApp: HOST_APP, merchantKey: MERCHANT_KEY,
+      saveInstrument: saveCard === true,
       // only reached when Stripe itself must redirect (bank / 3DS flows); the page then re-reads the authoritative state
       returnUrls: { success: `${SITE_URL}/r/${token}?paid=1&session_id={CHECKOUT_SESSION_ID}`, cancel: `${SITE_URL}/r/${token}?cancelled=1` },
       attempt: (request.attempts ?? 0) + 1,

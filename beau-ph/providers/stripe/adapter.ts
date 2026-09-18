@@ -172,6 +172,14 @@ export function checkoutSessionParams(input: CreateRequestInput, expiresAt: numb
     params.set("cancel_url", input.returnUrls.cancel);
   }
   if (input.customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(input.customerEmail)) params.set("customer_email", input.customerEmail);
+  /* Keeping the card for next month. Stripe needs a customer to attach it to,
+     and in `payment` mode it does not make one unless asked — so both of these
+     go together or neither does. The consent is the payer's, given in Stripe's
+     own UI on the page they are already on; nothing about the card reaches us. */
+  if (input.saveInstrument) {
+    params.set("payment_intent_data[setup_future_usage]", "off_session");
+    params.set("customer_creation", "always");
+  }
   return params;
 }
 

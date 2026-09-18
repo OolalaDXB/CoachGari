@@ -74,6 +74,9 @@ const FORBIDDEN = /donat|charit|fundrais|tax[- ]deductible|contribution to a cau
   check('subscription_reminder and _overdue render, name the amount, and stay human',
     /\$79\.00/.test(sr.html) && /\$79\.00/.test(so.html) && /nudge/i.test(sr.html) && /sort this out/i.test(so.html), so.html);
   check('the overdue message says billing has stopped rather than threatening', /nothing more will be billed/i.test(so.text) && !/debt|owe|legal|collection/i.test(so.text), so.text);
+  const cf = render('subscription_card_failed', { ...subPayload, pay_url: 'https://coachgari28.com/r/' + 'b'.repeat(64) });
+  check('subscription_card_failed: blames the card, not the client, and offers every other way to pay',
+    /card/i.test(cf.html) && /any other way/i.test(cf.text) && !/fail(ed)? to pay|your fault|overdue/i.test(cf.text) && /\$79\.00/.test(cf.html), cf.text);
   const se = render('subscription_ended', { name: 'Amara K', title: 'Online coaching', last_day: '2026-12-31' });
   check('subscription_ended thanks them and names the last day', /31 December 2026/.test(se.html) && /Thank you/i.test(se.html), se.html);
   check('subscription HTML escapes what the client is called', /&lt;b&gt;/.test(render('subscription_invoice', { ...subPayload, name: '<b>x</b> K' }).html));
