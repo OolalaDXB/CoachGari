@@ -8,7 +8,7 @@
    Functions) goes to the network untouched and is never stored — nothing from the CRM,
    the calendar, the finance or the emails lives in this cache. Offline, a data request
    simply fails and the app shows its own error; the shell still opens. */
-const VERSION = 'cg-admin-v4';
+const VERSION = 'cg-admin-v5';
 const SHELL = [
   '/admin/', '/admin/index.html', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/admin/collab.js',
   '/admin/manifest.webmanifest', '/admin/icons/icon-192.png', '/admin/icons/icon-512.png', '/admin/icons/maskable-512.png',

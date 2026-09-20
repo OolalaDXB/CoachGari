@@ -2907,3 +2907,41 @@ inert without the secret key, which never reaches the database — plus the bran
 and last four digits so a human can recognise it. No card number, no CVC. The
 back-office RPC does not return the ids at all, so the admin page cannot print
 one by accident.
+
+---
+
+## CG-023 — Signing in with a passkey
+
+**A passkey is now the fast way into the back-office, and the email code is
+still the way.** Face ID, Touch ID or a security key, no inbox round-trip, no
+six digits typed on a phone. The button sits above the email form on
+`/admin/`, and it appears only where the browser actually supports WebAuthn.
+
+**Why the email code stays.** Supabase says it plainly: *"Passkey support is
+experimental. The API may change without notice."* This is the only door to
+the back-office. A library upgrade that changed a response shape must never
+be able to lock Gari out of his own business, so `signInWithOtp` +
+`verifyOtp` remain untouched underneath, and every passkey path degrades to a
+hidden element rather than to a dead end. The suite asserts both: that the
+passkey button disappears without WebAuthn, and that the code path is intact.
+
+**A passkey can only be enrolled from inside a session** — from the account
+menu, never from the sign-in screen. Otherwise anyone reaching `/admin/`
+could mint a credential against an address they do not own. The first way in
+for a new operator is still the owner provisioning the email, and the passkey
+is added afterwards, once per device.
+
+**The relying-party id is `coachgari28.com` and must never change.** It is
+configured server-side, never sent from the browser (a test checks that).
+Changing it invalidates every passkey ever enrolled, on every device, with no
+migration and no warning — the credentials simply stop being offered.
+
+**Nothing about a passkey reaches this codebase.** The private key never
+leaves the device's secure element; GoTrue holds the public key and the
+credential id. Removing a passkey from the list removes exactly one device's
+access, and that device falls back to the email code like any other.
+
+**Not 2FA yet.** A passkey here replaces the email code rather than adding to
+it: one strong factor instead of one weak one. Raising the sensitive screens
+(`coaching_sensitive`, `finance:manage`) to `aal2` is a separate step, and
+belongs with the MFA enrolment flow, not with this one.

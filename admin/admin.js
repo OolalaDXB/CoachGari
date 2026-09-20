@@ -32,7 +32,10 @@ import { initFinance, financeTransactions, financeSubscriptions, financeCommissi
 import { initCollab, collabList } from '/admin/collab.js';
 import { csvToSnapshots } from '/admin/csv.js';
 
-const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUBLISHABLE_KEY, { auth: { flowType: 'pkce', persistSession: true } });
+// experimental.passkey is the library's own opt-in: without it every passkey call
+// throws. The email code below is kept as the permanent way in — the passkey API is
+// marked experimental upstream and this is the only door to the back-office.
+const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUBLISHABLE_KEY, { auth: { flowType: 'pkce', persistSession: true, experimental: { passkey: true } } });
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
@@ -165,7 +168,93 @@ async function offerNotifications() {
     } catch (e) { toast(e.message || 'Could not turn notifications on', true); }
   };
 }
+/* ---------- passkeys ---------------------------------------------------------
+   A passkey is a key pair held by the device (Face ID / Touch ID / a security key)
+   and bound to this origin. Signing in with one asks for nothing but the gesture:
+   the credential is discoverable, so no email is typed and no code travels.
+
+   Two rules this file follows and must keep following:
+     · Enrolment needs an existing session. There is no way to create a first
+       passkey from the sign-in screen, by design — otherwise anyone could mint a
+       credential for an address they do not own. The owner's email code is how a
+       new operator gets in the first time; the passkey is added afterwards.
+     · The email code stays. Supabase marks this API experimental ("may change
+       without notice"), and it is the only door to the back-office: a library
+       upgrade must never be able to lock Gari out. Everything below degrades to
+       hidden when WebAuthn is missing or the project has passkeys switched off.
+
+   The relying-party id is fixed server-side to coachgari28.com. Changing it
+   invalidates every passkey ever enrolled, on every device. Don't. */
+const webauthnOk = !!(window.PublicKeyCredential && navigator.credentials
+  && typeof navigator.credentials.create === 'function' && typeof navigator.credentials.get === 'function');
+
+// The browser's own words are unhelpful ("The operation either timed out or was not
+// allowed"), and GoTrue answers a project with passkeys off with a 404-ish message.
+function passkeyMessage(e, ceremony) {
+  const msg = String(e?.message || e || '');
+  if (/NotAllowed|not allowed|timed out|abort/i.test(msg)) return ceremony === 'register' ? 'Enrolment was cancelled.' : 'No passkey was used. Use the email code below instead.';
+  if (/InvalidState|already registered|exists/i.test(msg)) return 'This device already holds a passkey for the back-office.';
+  if (/not enabled|disabled|not found|404/i.test(msg)) return 'Passkeys are not switched on for this project yet.';
+  return msg || 'Something went wrong';
+}
+
+async function passkeySignIn() {
+  const btn = $('#passkey-go'); const m = $('#login-msg');
+  m.hidden = false; m.className = 'ad-msg'; m.textContent = 'Waiting for your passkey…';
+  btn.disabled = true;
+  try {
+    const { error } = await sb.auth.signInWithPasskey();
+    if (error) throw error;
+    m.hidden = true;                                   // onAuthStateChange draws the cockpit
+  } catch (e) {
+    m.className = 'ad-msg err'; m.textContent = passkeyMessage(e, 'sign-in');
+  } finally { btn.disabled = false; }
+}
+
+const pkList = (data) => Array.isArray(data) ? data : (data?.passkeys || data?.data || []);
+const pkId = (p) => p.id || p.passkey_id || p.credential_id;
+
+async function openPasskeys() {
+  const host = $('#profile'); host.hidden = false; document.body.style.overflow = 'hidden';
+  const draw = (body) => { host.innerHTML = `<div class="sheet"><div class="pf-head"><div class="pf-id"><h2>Passkeys</h2></div><div class="pf-actions"><button class="pf-close" id="pk-x">×</button></div></div><div class="pf-body">${body}</div></div>`; $('#pk-x').onclick = pfClose; };
+  draw('<p class="ad-muted">Loading…</p>');
+  let rows = [];
+  try {
+    const { data, error } = await sb.auth.passkey.list();
+    if (error) throw error;
+    rows = pkList(data);
+  } catch (e) {
+    draw(`<p class="ad-msg err">${esc(passkeyMessage(e, 'list'))}</p><p class="ad-muted">The 6-digit email code still works; nothing is broken.</p>`);
+    return;
+  }
+  const body = `<p class="ad-muted">Sign in with Face ID, Touch ID or a security key instead of waiting for an email. Each device gets its own passkey — add one on every device you use. The email code keeps working either way.</p>
+    ${table(['Name', 'Added', 'Last used', ''], rows.map((p) => `<tr><td><b>${esc(p.friendly_name || 'Passkey')}</b></td><td>${fmt(p.created_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td><td>${p.last_used_at ? fmt(p.last_used_at, 'Asia/Dubai', { dateStyle: 'medium' }) : '—'}</td><td class="num"><button class="btn btn-line btn-sm" data-pk-del="${esc(pkId(p))}">Remove</button></td></tr>`), 'No passkey yet on any device.')}
+    <div class="actions"><button class="btn btn-accent btn-sm" id="pk-add">Add a passkey on this device</button></div>
+    <p id="pk-msg" class="ad-msg" hidden></p>`;
+  draw(body);
+  const say = (text, err = false) => { const m = $('#pk-msg'); m.hidden = false; m.className = 'ad-msg' + (err ? ' err' : ' ok'); m.textContent = text; };
+  $('#pk-add').onclick = async () => {
+    const b = $('#pk-add'); b.disabled = true;
+    try {
+      const { error } = await sb.auth.registerPasskey();
+      if (error) throw error;
+      toast('Passkey added on this device');
+      openPasskeys();                                  // redraw with the new row
+    } catch (e) { say(passkeyMessage(e, 'register'), true); b.disabled = false; }
+  };
+  host.querySelectorAll('[data-pk-del]').forEach((b) => b.onclick = async () => {
+    if (!await confirmAct('Remove this passkey? That device will need the email code again.')) return;
+    try {
+      const { error } = await sb.auth.passkey.delete({ passkeyId: b.dataset.pkDel });
+      if (error) throw error;
+      toast('Passkey removed');
+      openPasskeys();
+    } catch (e) { say(passkeyMessage(e, 'delete'), true); }
+  });
+}
+
 async function boot() {
+  if (webauthnOk) { $('#passkey-box').hidden = false; $('#passkey-go').onclick = passkeySignIn; }
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = new FormData(e.target).get('email').trim().toLowerCase();
@@ -187,6 +276,7 @@ async function boot() {
     m.hidden = true;
   });
   document.addEventListener('click', (e) => { if (e.target.closest('[data-signout]')) sb.auth.signOut().then(() => location.reload()); });
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-passkeys]')) openPasskeys(); });
   sb.auth.onAuthStateChange((_ev, session) => { render(session); });
   const { data } = await sb.auth.getSession();
   render(data.session);
@@ -272,7 +362,7 @@ function renderAccount(session) {
     e.stopPropagation();
     if ($('.ad-acct-menu')) { $('.ad-acct-menu').remove(); return; }
     const m = document.createElement('div'); m.className = 'ad-acct-menu';
-    m.innerHTML = `<div class="em">Signed in as<br><b>${esc(email)}</b></div><button data-signout>Sign out</button>`;
+    m.innerHTML = `<div class="em">Signed in as<br><b>${esc(email)}</b></div>${webauthnOk ? '<button data-passkeys>Passkeys</button>' : ''}<button data-signout>Sign out</button>`;
     $('#account').appendChild(m);
     setTimeout(() => document.addEventListener('click', function close() { m.remove(); document.removeEventListener('click', close); }), 0);
   };

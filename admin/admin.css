@@ -10,6 +10,13 @@
 .ad-card h1{font-size:30px;letter-spacing:-.02em;margin:0 0 12px;}
 .ad-muted{color:var(--grey-text);font-size:15px;}
 .ad-msg{margin-top:14px;font-size:14px;font-weight:600;}
+/* passkey entry on the sign-in card — unhidden by admin.js only where the browser
+   supports WebAuthn; the email form below it stays the permanent fallback. */
+.ad-passkey{margin-top:22px;display:grid;gap:10px;}
+.ad-passkey .btn{width:100%;justify-content:center;}
+.ad-passkey .ad-muted{font-size:13px;margin:0;}
+.ad-or{display:flex;align-items:center;gap:12px;margin:6px 0 0;color:var(--grey-text);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;}
+.ad-or::before,.ad-or::after{content:"";flex:1;height:1px;background:var(--line);}
 /* install invitation — only ever shown inside #app, i.e. to a signed-in person
    with back-office access (admin.js, offerInstall). Never on the login screen. */
 .ad-install{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:space-between;

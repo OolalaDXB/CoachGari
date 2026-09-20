@@ -54,10 +54,13 @@ const authCalls = [];
 await page.exposeFunction('__auth', (name, args) => { authCalls.push({ name, args }); });
 await page.addInitScript(() => {
   // frozen: the self-hosted supabase-js may arrive from the service-worker cache (page routes do not see worker fetches) and must not replace the stub
-  Object.defineProperty(window, 'supabase', { writable: false, configurable: false, value: { createClient: () => ({
+  Object.defineProperty(window, 'supabase', { writable: false, configurable: false, value: { createClient: (url, key, opts) => (window.__auth('createClient', opts), {
     auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => {},
             signInWithOtp: async (a) => { window.__auth('signInWithOtp', a); return {}; },
-            verifyOtp: async (a) => { window.__auth('verifyOtp', a); return { error: null }; }, signOut: async () => ({}) },
+            verifyOtp: async (a) => { window.__auth('verifyOtp', a); return { error: null }; }, signOut: async () => ({}),
+            signInWithPasskey: async (a) => { window.__auth('signInWithPasskey', a ?? null); return { data: {}, error: null }; },
+            registerPasskey: async (a) => { window.__auth('registerPasskey', a ?? null); return { data: {}, error: null }; },
+            passkey: { list: async () => ({ data: [], error: null }), delete: async (a) => { window.__auth('deletePasskey', a); return { error: null }; } } },
     rpc: async () => ({ data: null, error: null }), from: () => ({ select: async () => ({ data: [], error: null }) }),
   }) } });
 });
@@ -78,7 +81,7 @@ const cached = await page.evaluate(async (name) => { const c = await caches.open
 check('shell cached after install (html, css, js, config, manifest, icons)', ['/admin/index.html', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/config.js', '/assets/coach-gari.css', '/admin/manifest.webmanifest'].every((p) => cached.includes(p)), cached.join(' '));
 // a data request through the page: fetched, never stored
 await page.evaluate(() => fetch('https://acrjrlgeeyseyolmofuq.supabase.co/rest/v1/contacts?select=id').catch(() => {}));
-const dataCached = await page.evaluate(async () => { const c = await caches.open('cg-admin-v3'); return (await c.keys()).some((k) => k.url.includes('supabase.co')); });
+const dataCached = await page.evaluate(async (name) => { const c = await caches.open(name); return (await c.keys()).some((k) => k.url.includes('supabase.co')); }, CACHE);
 check('Supabase responses are never cached', !dataCached);
 // offline: the shell still opens
 await ctx.setOffline(true);
@@ -87,6 +90,22 @@ const offlineShell = await page.evaluate(() => !!document.querySelector('#login-
 check('offline: the shell opens from the cache', offlineShell);
 await ctx.setOffline(false);
 await page.reload();
+
+/* ---- passkeys ----------------------------------------------------------------
+   The passkey is the fast way in, never the only one: the email form and the
+   6-digit code below it are checked right after, unchanged. The vendor bundle is
+   stubbed here (as everywhere in this suite), so what is proven is the wiring —
+   the opt-in, the support gate, which call each button makes, and the rule that a
+   passkey can only be enrolled from inside a session. */
+{
+  const created = authCalls.find((c) => c.name === 'createClient');
+  check('the client opts in to the experimental passkey API', created?.args?.auth?.experimental?.passkey === true, JSON.stringify(created?.args));
+  check('the passkey button is offered where the browser supports WebAuthn', await page.evaluate(() => !document.querySelector('#passkey-box').hidden));
+  await page.click('#passkey-go');
+  await page.waitForFunction(() => document.querySelector('#login-msg').hidden);
+  check('it signs in with signInWithPasskey — no email, no code', authCalls.some((c) => c.name === 'signInWithPasskey'));
+  check('the email form is still there underneath', await page.evaluate(() => !!document.querySelector('#login-form [name=email]') && !!document.querySelector('#code-form')));
+}
 // sign-in: link + code
 await page.fill('#login-form [name=email]', 'gari@example.com');
 await page.click('#login-form button[type=submit]');
@@ -142,6 +161,38 @@ check('the worker shows only the sentence it was sent, never a field of its own'
 check('the notification stores nothing on the device', !/caches\.(open|put)[\s\S]{0,200}notification/i.test(swSrc));
 check('tapping it opens the back-office, which still asks for a session',
   /clients\.openWindow/.test(swSrc) && !/token|session|jwt/i.test(swSrc.slice(swSrc.indexOf("addEventListener('push'"))));
+/* Enrolment needs a session: there is no way to mint a first passkey from the
+   sign-in screen, or anyone could claim an address they do not own. The owner's
+   email code is how a new operator gets in the first time. */
+check('registerPasskey is reached only from the account menu, never from the login screen',
+  /data-passkeys[\s\S]{0,200}openPasskeys/.test(src) && !/#login[\s\S]{0,600}registerPasskey/.test(src));
+check('the passkey button is wired once, behind the WebAuthn support check',
+  (src.match(/registerPasskey\(\)/g) || []).length === 1 && /webauthnOk\)\s*\{\s*\$\('#passkey-box'\)\.hidden = false/.test(src));
+// the relying party is fixed server-side (coachgari28.com); changing it invalidates every enrolled passkey
+check('the relying-party id is never set from the browser', !/\brpId\b|\brp_id\b|\brp:\s*\{/.test(src));
+check('the email code is untouched as the permanent fallback',
+  /signInWithOtp/.test(src) && /verifyOtp/.test(src) && /type: 'email'/.test(src));
+
+/* A browser without WebAuthn (older Android WebViews, locked-down desktops) must
+   not be shown a button that cannot work — it gets the email form only. */
+{
+  const ctx2 = await browser.newContext();
+  await ctx2.addInitScript(() => {
+    delete window.PublicKeyCredential;
+    Object.defineProperty(window, 'supabase', { writable: false, configurable: false, value: { createClient: () => ({
+      auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => {}, signOut: async () => ({}) },
+      rpc: async () => ({ data: null, error: null }), from: () => ({ select: async () => ({ data: [], error: null }) }),
+    }) } });
+  });
+  await ctx2.route('**/admin/vendor/**', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: '/* stubbed */' }));
+  await ctx2.route('**/fonts.googleapis.com/**', (r) => r.abort());
+  const p2 = await ctx2.newPage();
+  await p2.goto(`${base}/admin/`);
+  check('no WebAuthn: the passkey button stays hidden and the email form still works',
+    await p2.evaluate(() => document.querySelector('#passkey-box').hidden === true && !!document.querySelector('#login-form [name=email]')));
+  await ctx2.close();
+}
+
 const errs = [];
 page.on('pageerror', (e) => errs.push(String(e)));
 await page.reload(); await page.waitForTimeout(300);

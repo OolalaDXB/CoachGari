@@ -44,6 +44,14 @@
         <p class="ad-eyebrow">Coach Gari · Back-office</p>
         <h1>Sign in</h1>
         <p class="ad-muted">Enter the email the owner provisioned. You'll receive a one-time sign-in link. There is no self-registration.</p>
+        <!-- Passkey: Face ID / Touch ID / a security key, no email round-trip. Unhidden by
+             admin.js only where the browser actually supports WebAuthn; a passkey is
+             enrolled from the account menu once signed in, never from this screen. -->
+        <div id="passkey-box" class="ad-passkey" hidden>
+          <button class="btn btn-dark" id="passkey-go" type="button">Sign in with a passkey</button>
+          <p class="ad-muted">Face ID, Touch ID or a security key on this device. Set one up from the account menu once you're in.</p>
+          <p class="ad-or"><span>or</span></p>
+        </div>
         <form id="login-form" class="ad-form">
           <label>Email <input type="email" name="email" required autocomplete="email" placeholder="you@example.com"></label>
           <button class="btn btn-accent" type="submit">Send me a sign-in link</button>
