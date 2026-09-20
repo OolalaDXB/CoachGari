@@ -90,7 +90,16 @@ if ('serviceWorker' in navigator && location.pathname.startsWith('/admin')) {
   // cleanUrls + trailingSlash:false), and a page outside its worker's scope is never
   // controlled — no offline, no push, nothing installable. Widening the scope past the
   // worker's own directory needs Service-Worker-Allowed: /admin on /admin/sw.js.
-  window.addEventListener('load', () => { navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin' }).catch(() => {}); });
+  window.addEventListener('load', async () => {
+    // A scope change leaves the old registration behind for ever, holding a cache nothing
+    // will ever read. Drop it on the way past; harmless once no browser has one.
+    try {
+      for (const r of await navigator.serviceWorker.getRegistrations()) {
+        if (new URL(r.scope).pathname === '/admin/') await r.unregister();
+      }
+    } catch {}
+    navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin' }).catch(() => {});
+  });
 }
 
 /* ---------- install prompt -------------------------------------------------
