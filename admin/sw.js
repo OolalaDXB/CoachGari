@@ -1,4 +1,4 @@
-/* Coach Gari back-office — service worker (scope /admin/ only; the public site has none).
+/* Coach Gari back-office — service worker (scope /admin only; the public site has none).
 
    What it does: makes the back-office installable and keeps its SHELL available offline —
    the HTML, the two stylesheets, the scripts, the config, the manifest and icons, the
@@ -8,9 +8,17 @@
    Functions) goes to the network untouched and is never stored — nothing from the CRM,
    the calendar, the finance or the emails lives in this cache. Offline, a data request
    simply fails and the app shows its own error; the shell still opens. */
-const VERSION = 'cg-admin-v5';
+/* The canonical path is '/admin', with NO trailing slash: vercel.json sets
+   cleanUrls + trailingSlash:false, so '/admin/' and '/admin/index.html' both
+   308 to '/admin'. Everything here — the scope in admin.js, the manifest's
+   start_url and scope, the precached entry, the offline fallback and the
+   notification target — must use that exact spelling. Caching a redirected
+   response and replaying it for a navigation is an error in Chrome, and a
+   scope of '/admin/' does not contain the page at '/admin', which leaves the
+   page uncontrolled: no offline, no push, and nothing to install. */
+const VERSION = 'cg-admin-v6';
 const SHELL = [
-  '/admin/', '/admin/index.html', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/admin/collab.js',
+  '/admin', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/admin/collab.js',
   '/admin/manifest.webmanifest', '/admin/icons/icon-192.png', '/admin/icons/icon-512.png', '/admin/icons/maskable-512.png',
   '/admin/vendor/supabase-js@2.116.0/supabase.js',
   '/assets/coach-gari.css', '/config.js',
@@ -26,6 +34,7 @@ self.addEventListener('activate', (e) => {
 
 function isShell(url) {
   if (url.origin === self.location.origin) {
+    if (url.pathname === '/admin') return true;
     if (url.pathname.startsWith('/admin/')) return !url.pathname.endsWith('/sw.js');
     return url.pathname.startsWith('/assets/') || url.pathname === '/config.js';
   }
@@ -38,8 +47,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.hostname.endsWith('.supabase.co')) return;      // data + auth: network only, never cached
   if (req.mode === 'navigate') {                          // the app entry: network first, cached shell when offline
-    e.respondWith(fetch(req).then((r) => { const copy = r.clone(); caches.open(VERSION).then((c) => c.put('/admin/index.html', copy)); return r; })
-      .catch(() => caches.match('/admin/index.html')));
+    e.respondWith(fetch(req).then((r) => { const copy = r.clone(); caches.open(VERSION).then((c) => c.put('/admin', copy)); return r; })
+      .catch(() => caches.match('/admin')));
     return;
   }
   if (!isShell(url)) return;
@@ -57,8 +66,8 @@ self.addEventListener('fetch', (e) => {
    never keeping data on the device. Tapping it opens the back-office, which asks
    for a session as usual; the notification carries no access of its own. */
 self.addEventListener('push', (e) => {
-  let d = { t: 'New activity in the back-office', u: '/admin/' };
-  try { if (e.data) { const j = e.data.json(); if (j && typeof j.t === 'string') d = { t: j.t, u: typeof j.u === 'string' ? j.u : '/admin/' }; } } catch {}
+  let d = { t: 'New activity in the back-office', u: '/admin' };
+  try { if (e.data) { const j = e.data.json(); if (j && typeof j.t === 'string') d = { t: j.t, u: typeof j.u === 'string' ? j.u : '/admin' }; } } catch {}
   e.waitUntil(self.registration.showNotification('Coach Gari.', {
     body: d.t,
     icon: '/admin/icons/icon-192.png',
@@ -71,7 +80,7 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const url = (e.notification.data && e.notification.data.url) || '/admin/';
+  const url = (e.notification.data && e.notification.data.url) || '/admin';
   e.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const open = all.find((c) => new URL(c.url).pathname.startsWith('/admin'));

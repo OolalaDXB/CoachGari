@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /* Back-office PWA — functional suite (Playwright + Chromium, no network).
-   Proves: the manifest is valid and scoped to /admin/, every icon resolves, the service worker registers with
-   scope /admin/ from the admin only (the public homepage registers nothing and links no manifest), the shell is
-   cached after install, a request to Supabase is never cached, the shell still opens offline, the sign-in offers
-   the 6-digit code path and calls verifyOtp with type "email". Run: node scripts/test-admin-pwa.mjs   */
+   Proves: the manifest is valid and scoped to /admin, every icon resolves, the service worker registers with
+   scope /admin from the admin only (the public homepage registers nothing and links no manifest) AND actually
+   controls the page, the shell is cached after install, a request to Supabase is never cached, the shell still
+   opens offline, the sign-in offers a passkey and the 6-digit code, and a browser without WebAuthn still gets
+   the email form. The server mimics vercel.json (cleanUrls, trailingSlash:false), which is what makes the scope
+   check meaningful. Run: node scripts/test-admin-pwa.mjs   */
 import { createRequire } from 'node:module';
 const chromium = await (async () => {
   try { return (await import('playwright')).chromium; }
@@ -15,12 +17,26 @@ import { extname, join, normalize } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg' };
+/* Serves the repo the way vercel.json does — cleanUrls + trailingSlash:false — because
+   the difference is not cosmetic here: production 308s /admin/ and /admin/index.html to
+   /admin, so a worker scoped to "/admin/" would never control the page. A test server
+   that happily serves /admin/ hides exactly that, and did for three versions. */
 const server = createServer(async (req, res) => {
-  let p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-  if (p.endsWith('/')) p += 'index.html';
-  if (!extname(p) && p !== '/admin/index.html') p += '.html';                          // clean URLs, like Vercel
-  try { const body = await readFile(normalize(join(ROOT, p))); res.writeHead(200, { 'Content-Type': MIME[extname(p)] || 'application/octet-stream' }); res.end(body); }
-  catch { res.writeHead(404); res.end('not found'); }
+  const u = new URL(req.url, 'http://x');
+  let p = decodeURIComponent(u.pathname);
+  const send301 = (to) => { res.writeHead(308, { Location: to + u.search }); res.end(); };
+  if (p !== '/' && p.endsWith('/')) return send301(p.replace(/\/+$/, ''));             // trailingSlash: false
+  if (p.endsWith('/index.html')) return send301(p.slice(0, -'/index.html'.length) || '/');  // cleanUrls
+  const tries = p === '/' ? ['/index.html'] : extname(p) ? [p] : [p + '.html', p + '/index.html'];
+  for (const t of tries) {
+    try {
+      const body = await readFile(normalize(join(ROOT, t)));
+      const headers = { 'Content-Type': MIME[extname(t)] || 'application/octet-stream' };
+      if (p === '/admin/sw.js') headers['Service-Worker-Allowed'] = '/admin';           // as vercel.json sets it
+      res.writeHead(200, headers); res.end(body); return;
+    } catch {}
+  }
+  res.writeHead(404); res.end('not found');
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -30,7 +46,7 @@ const check = (name, cond, extra = '') => { if (cond) ok++; else fail++; console
 /* ---- manifest + icons ---- */
 {
   const r = await fetch(`${base}/admin/manifest.webmanifest`); const m = await r.json();
-  check('manifest is valid JSON with scope and start_url under /admin/', r.ok && m.scope === '/admin/' && m.start_url === '/admin/' && m.display === 'standalone' && m.name.includes('Coach Gari'));
+  check('manifest is valid JSON with scope and start_url under /admin', r.ok && m.scope === '/admin' && m.start_url === '/admin' && m.display === 'standalone' && m.name.includes('Coach Gari'));
   check('manifest has 192, 512 and a maskable icon', m.icons.some((i) => i.sizes === '192x192') && m.icons.some((i) => i.sizes === '512x512' && !i.purpose) && m.icons.some((i) => i.purpose === 'maskable'));
   for (const i of m.icons) { const ir = await fetch(base + i.src); check(`icon resolves: ${i.src}`, ir.ok && ir.headers.get('content-type') === 'image/png'); }
   const at = await fetch(`${base}/admin/icons/apple-touch-icon.png`); check('apple-touch-icon resolves', at.ok);
@@ -67,9 +83,26 @@ await page.addInitScript(() => {
 await page.route('**/admin/vendor/**', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: '/* stubbed: the test injects window.supabase */' }));
 await page.route('**/fonts.googleapis.com/**', (r) => r.abort());
 await page.route('**/acrjrlgeeyseyolmofuq.supabase.co/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: '{"data":[]}' }));
-await page.goto(`${base}/admin/`);
-const reg = await page.evaluate(async () => { const r = await navigator.serviceWorker.ready; return { scope: r.scope, active: !!r.active }; });
-check('service worker registered with scope /admin/', reg.active && reg.scope === `${base}/admin/`, JSON.stringify(reg));
+await page.goto(`${base}/admin/`);                                // as a person would type it; production redirects
+check('the back-office is served at /admin, with no trailing slash', page.url() === `${base}/admin`, page.url());
+// .ready never settles when the page sits outside the worker's scope — which is the exact
+// regression this section guards. Race it, so a wrong scope fails the suite instead of hanging it.
+const reg = await page.evaluate(async () => Promise.race([
+  navigator.serviceWorker.ready.then((r) => ({ scope: r.scope, active: !!r.active })),
+  new Promise((r) => setTimeout(() => r({ scope: null, active: false, note: 'navigator.serviceWorker.ready never resolved: the page is out of scope' }), 8000)),
+]));
+check('service worker registered with scope /admin', reg.active && reg.scope === `${base}/admin`, JSON.stringify(reg));
+/* The whole point of the worker: a page outside its scope is never controlled, so
+   there is no offline shell, no push and nothing for the browser to install. */
+await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 5000 }).catch(() => {});
+check('the page at /admin is actually controlled by that worker',
+  await page.evaluate(() => !!navigator.serviceWorker.controller
+    && new URL(navigator.serviceWorker.controller.scriptURL).pathname === '/admin/sw.js'));
+{
+  const m = JSON.parse(await (await fetch(`${base}/admin/manifest.webmanifest`)).text());
+  check('the manifest start_url and scope match the path the worker controls',
+    m.start_url === '/admin' && m.scope === '/admin' && m.id === '/admin', JSON.stringify(m.start_url + ' ' + m.scope));
+}
 check('manifest linked from the admin page', await page.$eval('link[rel=manifest]', (l) => l.getAttribute('href')) === '/admin/manifest.webmanifest');
 /* The cache name follows the worker: read it from the source rather than pinning a
    literal here, which would quietly test a stale cache after the next bump. */
@@ -78,7 +111,7 @@ const CACHE = swSrc.match(/const VERSION = '([^']+)'/)[1];
 check('the service worker names its cache version', /^cg-admin-v[0-9]+$/.test(CACHE), CACHE);
 await page.waitForFunction(async (name) => { const c = await caches.open(name); return (await c.keys()).length >= 8; }, CACHE);
 const cached = await page.evaluate(async (name) => { const c = await caches.open(name); return (await c.keys()).map((k) => new URL(k.url).pathname); }, CACHE);
-check('shell cached after install (html, css, js, config, manifest, icons)', ['/admin/index.html', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/config.js', '/assets/coach-gari.css', '/admin/manifest.webmanifest'].every((p) => cached.includes(p)), cached.join(' '));
+check('shell cached after install (html, css, js, config, manifest, icons)', ['/admin', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/config.js', '/assets/coach-gari.css', '/admin/manifest.webmanifest'].every((p) => cached.includes(p)), cached.join(' '));
 // a data request through the page: fetched, never stored
 await page.evaluate(() => fetch('https://acrjrlgeeyseyolmofuq.supabase.co/rest/v1/contacts?select=id').catch(() => {}));
 const dataCached = await page.evaluate(async (name) => { const c = await caches.open(name); return (await c.keys()).some((k) => k.url.includes('supabase.co')); }, CACHE);

@@ -86,7 +86,11 @@ async function confirmAct(msg) { return window.confirm(msg); }
 const standalone = !!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
 if (standalone) document.documentElement.classList.add('standalone');
 if ('serviceWorker' in navigator && location.pathname.startsWith('/admin')) {
-  window.addEventListener('load', () => { navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' }).catch(() => {}); });
+  // scope '/admin', not '/admin/': production serves the page at /admin (vercel.json,
+  // cleanUrls + trailingSlash:false), and a page outside its worker's scope is never
+  // controlled — no offline, no push, nothing installable. Widening the scope past the
+  // worker's own directory needs Service-Worker-Allowed: /admin on /admin/sw.js.
+  window.addEventListener('load', () => { navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin' }).catch(() => {}); });
 }
 
 /* ---------- install prompt -------------------------------------------------

@@ -2945,3 +2945,44 @@ access, and that device falls back to the email code like any other.
 it: one strong factor instead of one weak one. Raising the sensitive screens
 (`coaching_sensitive`, `finance:manage`) to `aal2` is a separate step, and
 belongs with the MFA enrolment flow, not with this one.
+
+---
+
+## CG-023b — The back-office PWA was never installable, and why the tests said it was
+
+**The bug.** `vercel.json` sets `cleanUrls` and `trailingSlash: false`, so
+production serves the back-office at **`/admin`** — `/admin/` and
+`/admin/index.html` both 308 to it. The service worker was registered with
+scope `/admin/`, the manifest's `start_url` and `scope` were `/admin/`. A page
+outside its worker's scope is never controlled: `navigator.serviceWorker.ready`
+never resolves, the fetch handler never runs, and the browser has nothing to
+install. So: no install banner (it is drawn from a `beforeinstallprompt` that
+never fires), no notifications banner (`offerNotifications` awaits `.ready`
+and simply stops there), and no offline shell. All of it, since the day the
+PWA was added.
+
+**Why the suite was green.** `scripts/test-admin-pwa.mjs` ran its own static
+server that cheerfully served `/admin/`. The one difference between it and
+Vercel was the difference that mattered. The server now mimics `vercel.json` —
+308 on a trailing slash, 308 on `/index.html`, extensionless lookup — and the
+suite asserts what it had only been implying: that the page is served at
+`/admin`, that `serviceWorker.controller` is not null, and that the manifest's
+`start_url`/`scope` match the path the worker controls. With the old scope
+restored, three checks fail.
+
+**The rule this leaves behind: a test server that is kinder than production
+tests nothing.** Routing is part of the application. `.ready` is also raced
+against a timeout now, because the failure mode of a wrong scope is a promise
+that never settles — a suite that hangs teaches nobody anything.
+
+**The canonical path is `/admin`, everywhere**: the registration scope, the
+manifest's `id`/`start_url`/`scope`, the precached entry, the offline
+fallback, and the push notification targets (`/admin#crm`, not `/admin/#crm`).
+Widening the scope past the worker's own directory needs
+`Service-Worker-Allowed: /admin` on `/admin/sw.js`, which `vercel.json` now
+sends. The manifest `id` changed with it — safe precisely because nobody had
+been able to install the old one.
+
+**`emailRedirectTo` still ends in `/admin/`** on purpose: that exact string is
+in Supabase's redirect allow-list, and the 308 keeps the query. Changing it
+here would have risked the only working sign-in for a cosmetic gain.

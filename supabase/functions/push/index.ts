@@ -22,19 +22,19 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 
 /* One fixed sentence per kind. No value from the row ever reaches this text. */
 const TEXT: Record<string, { t: string; u: string }> = {
-  lead_notification:  { t: "New enquiry",             u: "/admin/#crm" },
-  booking_confirmed:  { t: "New booking",             u: "/admin/#schedule/sessions" },
-  payment_received:   { t: "Payment received",        u: "/admin/#finance" },
-  booking_cancelled:  { t: "A booking was cancelled", u: "/admin/#schedule/sessions" },
-  reschedule:         { t: "A session moved",         u: "/admin/#schedule" },
-  collab_received:    { t: "New collaboration enquiry", u: "/admin/#collaborations" },
-  collab_accepted:    { t: "A collaboration was accepted", u: "/admin/#collaborations" },
-  collab_counter:     { t: "A counter-offer came in",  u: "/admin/#collaborations" },
-  collab_declined:    { t: "A collaboration was declined", u: "/admin/#collaborations" },
-  collab_reminder:    { t: "A collaboration is waiting on you", u: "/admin/#collaborations" },
-  support_thanks:     { t: "Someone sent support",    u: "/admin/#finance" },
+  lead_notification:  { t: "New enquiry",             u: "/admin#crm" },
+  booking_confirmed:  { t: "New booking",             u: "/admin#schedule/sessions" },
+  payment_received:   { t: "Payment received",        u: "/admin#finance" },
+  booking_cancelled:  { t: "A booking was cancelled", u: "/admin#schedule/sessions" },
+  reschedule:         { t: "A session moved",         u: "/admin#schedule" },
+  collab_received:    { t: "New collaboration enquiry", u: "/admin#collaborations" },
+  collab_accepted:    { t: "A collaboration was accepted", u: "/admin#collaborations" },
+  collab_counter:     { t: "A counter-offer came in",  u: "/admin#collaborations" },
+  collab_declined:    { t: "A collaboration was declined", u: "/admin#collaborations" },
+  collab_reminder:    { t: "A collaboration is waiting on you", u: "/admin#collaborations" },
+  support_thanks:     { t: "Someone sent support",    u: "/admin#finance" },
 };
-const FALLBACK = { t: "New activity in the back-office", u: "/admin/" };
+const FALLBACK = { t: "New activity in the back-office", u: "/admin" };
 
 const BACKOFF_MINUTES = [1, 5, 20, 60];
 const MAX_ATTEMPTS = 5;
