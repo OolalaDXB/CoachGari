@@ -466,5 +466,27 @@ begin
   if not (j ? 'stripe_customer_id') and not (j ? 'stripe_payment_method_id')
     then ok := ok + 1; else fail := fail + 1; log := log || ' [card-ids-leaked]'; end if;
 
+  /* ---- 18. no SECURITY DEFINER helper is reachable by a browser role ----
+     20261058: the settlement trigger was executable by anon and the two
+     shapes by authenticated, which let a signed-in operator with no finance
+     permission read a subscription's figures by passing a hand-made row. The
+     permission check belongs in front of the data, not in front of one of
+     the two ways to reach it. */
+  if not has_function_privilege('anon', 'public.subscription_cycle_on_pack_payment()', 'execute')
+     and not has_function_privilege('authenticated', 'public.subscription_cycle_on_pack_payment()', 'execute')
+     and not has_function_privilege('authenticated', 'public.subscription_json(public.subscriptions)', 'execute')
+     and not has_function_privilege('authenticated', 'public.subscription_cycle_json(public.subscription_cycles)', 'execute')
+     and not has_function_privilege('authenticated', 'public.subscription_has_mandate(public.subscriptions)', 'execute')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [definer-helper-exposed]'; end if;
+  -- and the permission-checked RPCs still reach them, because they are definers themselves
+  if (public.subscription_get(sid) ? 'cycles') and jsonb_array_length(public.subscriptions_list()) >= 1
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [lockdown-broke-the-rpcs]'; end if;
+  -- every function this pair added pins its search_path, with no exception
+  if not exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                  where n.nspname = 'public'
+                    and (p.proname like 'subscription%' or p.proname in ('pack_pay_url','report_link_key','pack_wants_card_on_file','process_stripe_charge_event'))
+                    and not coalesce(p.proconfig::text, '') like '%search_path=%')
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [unpinned-search-path]'; end if;
+
   raise exception 'CG022_TESTS ok=% fail=% %', ok, fail, case when log = '' then '' else '—' || log end;
 end $$;
