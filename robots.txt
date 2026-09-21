@@ -1,0 +1,19 @@
+# Coach Gari — crawling rules.
+#
+# Disallowed below are the paths that must never be fetched by anyone: the
+# back-office, and the two tokenised routes (/r/<token> a client's report,
+# /c/<token> a collaboration room). Those carry a secret in the URL, are served
+# no-store, and are never linked from a public page.
+#
+# Deliberately NOT disallowed: /routes/a, /routes/b, /collab and /p/. They each
+# send "noindex" in the page, and a crawler has to be allowed to fetch a page to
+# read that. Blocking them here would do the opposite of what it looks like —
+# Google can list a URL it was forbidden to open, having never seen the noindex.
+
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /r/
+Disallow: /c/
+
+Sitemap: https://coachgari28.com/sitemap.xml

@@ -3127,3 +3127,55 @@ in GoTrue's settings, not in a page anyone can edit.
 **The passkey remains the destination.** Password to get in once, passkey
 enrolled on each device, and after that the password is what you use the day
 you lose the device.
+
+---
+
+## CG-024 — Being found
+
+An audit of what the crawler is actually served, not a checklist. Two findings
+mattered more than the rest.
+
+**The commercial content was not in the HTML.** The programmes render from the
+database through `site.js`, and what sat in the served page was
+`<p>Loading the programmes…</p>`. The most keyword-bearing, most relevant text
+on the site — what Gari sells — was the one thing a crawler could not read
+without executing JavaScript and waiting on an Edge Function. Googlebot does
+render, eventually and not always. Anything that has to rank belongs in the
+HTML.
+
+The fix keeps the database as the source of truth: the fallback names the four
+families in prose with anchors, and `site.js` replaces the whole block the
+moment the live cards arrive. **It carries no price and no duration**, so it
+cannot drift from the catalogue — those still come only from the database, and
+a test asserts the fallback stays free of them.
+
+**Nothing told anyone the site existed.** No `robots.txt`, no `sitemap.xml`, no
+canonical on any page, no meta description on the one page that sells, and no
+Open Graph anywhere — so every link shared in a WhatsApp thread or an Instagram
+DM, which is how most of this traffic arrives, rendered as a bare URL.
+
+**`Disallow` and `noindex` are not two belts for one job.** A page that sends
+`noindex` must stay crawlable, or the crawler never reads the noindex and can
+list the bare URL anyway. So `robots.txt` blocks only what must never be
+fetched — the back-office and the two tokenised routes — and deliberately
+leaves `/routes/a`, `/routes/b`, `/collab` and `/consent` open, because each
+says noindex for itself. The suite asserts that pairing in both directions.
+
+**The structured data claims nothing the page does not.** No telephone, no
+address beyond the city, no price — all three are what a validator would like
+and none is stated anywhere a reader could check. Inventing them is how
+structured data turns into a liability. A full address and opening hours belong
+in a Google Business Profile, which is also what actually opens the local pack
+for "personal trainer Dubai" — and which no amount of markup here replaces.
+
+**What I expected to find and did not**: unoptimised images (the `<picture>`
+elements already serve AVIF and WebP at three widths with dimensions and lazy
+loading) and empty headings (an artefact of my own grep stopping at the first
+`<`, inside headings that contain `<br>`). Both were fine. Recorded because the
+audit is only worth something if it reports what is true rather than what was
+expected.
+
+**What this does not fix, and is the larger constraint**: the site is one
+indexable page competing for four unrelated intents — personal training in
+Dubai, padel coaching, online coaching, nutrition. No markup resolves that.
+A page per intention is the next piece of work, and it needs Gari's words.

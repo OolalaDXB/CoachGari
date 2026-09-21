@@ -30,6 +30,8 @@ jobs:
 
       - name: Check internal links & assets
         run: node scripts/check-links.mjs
+      - name: Discoverability — titles, canonicals, Open Graph, sitemap, structured data (offline)
+        run: node scripts/test-seo.mjs
 
       - name: Stripe webhook signature verification (offline, Stripe's scheme)
         run: node scripts/test-webhook-signature.mjs
