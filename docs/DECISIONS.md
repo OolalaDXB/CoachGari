@@ -2986,3 +2986,41 @@ been able to install the old one.
 **`emailRedirectTo` still ends in `/admin/`** on purpose: that exact string is
 in Supabase's redirect allow-list, and the 308 keeps the query. Changing it
 here would have risked the only working sign-in for a cosmetic gain.
+
+---
+
+## CG-023c — Why nobody could sign in, and the two separate reasons
+
+**1. The 6-digit code was never in the email.** I wrote the code form, the
+`verifyOtp` call and the tests around it, and told the owner the code was in
+the same email. It was not. `signInWithOtp` sends the project's **Magic Link**
+template, and Supabase's default version of that template renders only
+`{{ .ConfirmationURL }}`. The OTP exists server-side — GoTrue mints it on every
+`/otp` call — but nothing prints it unless the template contains `{{ .Token }}`.
+No amount of client code can fix that; it is one line in the dashboard. The
+feature was never verified end to end because the account it was built for was
+rate-limited out of the flow at the time, and I presented an untested path as
+a working fallback.
+
+**2. The link works, but only in the browser that asked for it.** The auth logs
+show `/verify` returning 303 with `auth_event.action = login` — GoTrue accepts
+the token and signs the user in. The failure is entirely client-side:
+`flowType: 'pkce'` stores a code verifier in *this* browser's storage when the
+link is requested, and the callback needs it. A link opened from a mail app's
+own in-app browser arrives with a valid `?code=` and no verifier, so no session
+is created. This is inherent to PKCE, not a bug, and it is why the code — which
+has no tie to a browser — is the path that has to work.
+
+**The failure was invisible, which was the real defect.** When the exchange
+failed, `getSession()` returned null, `render(null)` drew the sign-in card, and
+nothing was said. From the outside that is identical to never having clicked.
+The page now inspects the callback (`?code`, `?error`, `#error`,
+`#access_token`) and, when no session results, says what happened, reveals the
+code form for the address this device last requested a link for — asking when
+it remembers none — and strips the spent code from the URL. Four assertions
+cover it.
+
+**PKCE stays.** Switching to the implicit flow would make links portable
+between browsers by putting access and refresh tokens in the URL fragment of
+the only door to the back-office. That trade is not worth making for a
+convenience the code already provides.

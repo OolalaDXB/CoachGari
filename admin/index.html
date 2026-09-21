@@ -57,9 +57,13 @@
           <button class="btn btn-accent" type="submit">Send me a sign-in link</button>
         </form>
         <p id="login-msg" class="ad-msg" hidden></p>
-        <!-- the installed app (home-screen) cannot receive the link: the code from the same email signs it in -->
+        <!-- The code from the same email. This is the device-independent way in: the
+             installed app cannot receive the link, and a magic link only opens a session
+             in the browser that asked for it — opening it from a mail app's own browser
+             loses the PKCE verifier and lands back here. The code has no such tie. -->
         <form id="code-form" class="ad-form" hidden>
-          <label>Or enter the 6-digit code from that email <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456"></label>
+          <label id="code-email" hidden>The email you asked the link for <input type="email" name="email" autocomplete="email" placeholder="you@example.com"></label>
+          <label>Enter the 6-digit code from that email <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456"></label>
           <button class="btn btn-line" type="submit">Sign in with the code</button>
         </form>
       </section>

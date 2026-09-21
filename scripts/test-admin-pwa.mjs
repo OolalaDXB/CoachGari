@@ -151,6 +151,33 @@ const v = authCalls.find((c) => c.name === 'verifyOtp');
 check('the code signs in with verifyOtp(email, token, type "email")', v && v.args.email === 'gari@example.com' && v.args.token === '123456' && v.args.type === 'email', JSON.stringify(v));
 check('the link is still requested with the /admin/ redirect', authCalls.some((c) => c.name === 'signInWithOtp' && c.args.options.emailRedirectTo.endsWith('/admin/')));
 
+/* A magic link that comes back without opening a session used to redraw the sign-in
+   card and say nothing — indistinguishable from never having clicked. It must say what
+   happened and offer the code, which has no tie to one browser. */
+{
+  await page.goto(`${base}/admin?code=not-a-real-code`);
+  await page.waitForFunction(() => !document.querySelector('#code-form').hidden, null, { timeout: 5000 }).catch(() => {});
+  const s = await page.evaluate(() => ({
+    msg: document.querySelector('#login-msg').hidden ? '' : document.querySelector('#login-msg').textContent,
+    err: document.querySelector('#login-msg').className.includes('err'),
+    code: !document.querySelector('#code-form').hidden,
+    asksEmail: !document.querySelector('#code-email').hidden,
+    knows: document.querySelector('#code-form').dataset.email || '',
+    url: location.search,
+  }));
+  check('a link that opens no session says so instead of silently redrawing the form', s.err && /did not open a session|did not work/i.test(s.msg), JSON.stringify(s));
+  // the address was remembered from the request earlier in this suite, so it should not be asked for again
+  check('it offers the 6-digit code, for the address this device last asked a link for', s.code && s.knows === 'gari@example.com' && !s.asksEmail, JSON.stringify(s));
+  // and when nothing is remembered, it asks rather than presenting a form that cannot work
+  await page.evaluate(() => localStorage.removeItem('cg-email'));
+  await page.goto(`${base}/admin?code=not-a-real-code`);
+  await page.waitForFunction(() => !document.querySelector('#code-form').hidden, null, { timeout: 5000 }).catch(() => {});
+  check('with no remembered address, it asks which one the code belongs to',
+    await page.evaluate(() => !document.querySelector('#code-email').hidden && !document.querySelector('#code-form').dataset.email));
+  check('the spent code is stripped from the URL so a refresh does not replay it', s.url === '', s.url);
+  await page.goto(`${base}/admin`);
+}
+
 /* The install invitation is for people who work here, not for anyone who reaches the URL.
    Two independent guards, so neither alone has to hold: the banner lives inside #app, which
    stays hidden until a session AND a non-empty NAV, and offerInstall() is called from exactly

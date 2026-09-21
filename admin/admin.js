@@ -266,6 +266,20 @@ async function openPasskeys() {
   });
 }
 
+/* The code form, revealed either after sending a link or after a link failed to open a
+   session here. It needs to know which address the code belongs to: normally the one
+   just typed, otherwise the one remembered from the last request on this device, and
+   failing that it asks. Only an email address is kept, and only locally. */
+function showCodeForm(email) {
+  const f = $('#code-form'); f.hidden = false;
+  const known = (email || '').trim().toLowerCase();
+  if (known) f.dataset.email = known; else delete f.dataset.email;
+  $('#code-email').hidden = !!known;
+  if (known) { try { localStorage.setItem('cg-email', known); } catch {} }
+  (known ? f.querySelector('[name=code]') : f.querySelector('[name=email]')).focus();
+}
+const lastEmail = () => { try { return localStorage.getItem('cg-email') || ''; } catch { return ''; } };
+
 async function boot() {
   if (webauthnOk) { $('#passkey-box').hidden = false; $('#passkey-go').onclick = passkeySignIn; }
   $('#login-form').addEventListener('submit', async (e) => {
@@ -275,15 +289,18 @@ async function boot() {
     m.textContent = 'Sending…';
     const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: `${location.origin}/admin/`, shouldCreateUser: false } });
     if (error) { m.className = 'ad-msg err'; m.textContent = /signup|not allowed|not found/i.test(error.message) ? 'This email is not provisioned for the back-office. Ask the owner.' : error.message; return; }
-    m.className = 'ad-msg ok'; m.textContent = standalone ? 'Check your inbox: enter the 6-digit code from the email below (the link opens in the browser, not in this app).' : 'Check your inbox and open the link on this device, or enter the code from the email below.';
-    $('#code-form').hidden = false; $('#code-form').dataset.email = email; $('#code-form [name=code]').focus();
+    m.className = 'ad-msg ok'; m.textContent = 'Check your inbox. Enter the 6-digit code below — that always works. The link only works in this exact browser, so opening it from your mail app will not sign you in.';
+    showCodeForm(email);
   });
   // the same one-time email carries a 6-digit code: the way in for the installed app, where the link cannot land
   $('#code-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = e.target.dataset.email; const token = new FormData(e.target).get('code').replace(/\D/g, '');
+    const f = new FormData(e.target);
+    const email = (e.target.dataset.email || String(f.get('email') || '')).trim().toLowerCase();
+    const token = String(f.get('code') || '').replace(/\D/g, '');
     const m = $('#login-msg'); m.hidden = false; m.className = 'ad-msg'; m.textContent = 'Checking…';
-    if (!email || token.length !== 6) { m.className = 'ad-msg err'; m.textContent = 'Enter the 6 digits from the email.'; return; }
+    if (!email) { m.className = 'ad-msg err'; m.textContent = 'Enter the email you asked the link for.'; return; }
+    if (token.length !== 6) { m.className = 'ad-msg err'; m.textContent = 'Enter the 6 digits from the email.'; return; }
     const { error } = await sb.auth.verifyOtp({ email, token, type: 'email' });
     if (error) { m.className = 'ad-msg err'; m.textContent = /expired|invalid/i.test(error.message) ? 'That code is not valid any more. Send a new link and use the fresh code.' : error.message; return; }
     m.hidden = true;
@@ -291,7 +308,28 @@ async function boot() {
   document.addEventListener('click', (e) => { if (e.target.closest('[data-signout]')) sb.auth.signOut().then(() => location.reload()); });
   document.addEventListener('click', (e) => { if (e.target.closest('[data-passkeys]')) openPasskeys(); });
   sb.auth.onAuthStateChange((_ev, session) => { render(session); });
+
+  /* A magic link comes back here as ?code=… (PKCE) or with an error in the query or the
+     hash. supabase-js consumes it before getSession() resolves — and when it cannot, the
+     sign-in card simply reappears with nothing said, which is indistinguishable from
+     never having clicked. The usual cause is not an expired link: PKCE stores a verifier
+     in THIS browser's storage when the link is requested, so a link opened from a mail
+     app's own browser arrives with a code and no verifier. The code from the same email
+     has no such tie, so that is what we point at. */
+  const q = new URL(location.href);
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
+  const cameFromLink = q.searchParams.has('code') || q.searchParams.has('error') || hash.has('error') || hash.has('access_token');
+  const linkError = q.searchParams.get('error_description') || hash.get('error_description') || '';
+
   const { data } = await sb.auth.getSession();
+  if (!data.session && cameFromLink) {
+    const m = $('#login-msg'); m.hidden = false; m.className = 'ad-msg err';
+    m.textContent = linkError
+      ? `That link did not work: ${linkError}`
+      : 'That link did not open a session in this browser. A sign-in link only works in the browser that asked for it — if you opened it from your mail app, come back here and use the 6-digit code from that same email.';
+    showCodeForm(lastEmail());
+  }
+  if (cameFromLink) history.replaceState(null, '', location.pathname);   // don't replay it on refresh
   render(data.session);
 }
 
