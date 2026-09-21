@@ -3024,3 +3024,33 @@ cover it.
 between browsers by putting access and refresh tokens in the URL fragment of
 the only door to the back-office. That trade is not worth making for a
 convenience the code already provides.
+
+---
+
+## CG-023d — A sign-in link that works in any browser
+
+The PKCE link is not portable, by construction: the verifier lives in the
+storage of the browser that asked for it. On an iPad that is fatal in the
+ordinary case — Spark opens the link in a **private** Safari tab, which is
+neither the requesting browser nor one with usable storage. Explaining that to
+the person holding the iPad is not a fix.
+
+**So the page now accepts the other shape.** A link built on `{{ .TokenHash }}`
+carries the token to us instead of to GoTrue's `/verify`, and `admin.js` calls
+`verifyOtp({ token_hash, type })` itself. No exchange, no verifier, nothing tied
+to a browser: the mail app's browser, a private window and another device all
+work. `{{ .ConfirmationURL }}` keeps working unchanged, so the template can move
+at its own pace.
+
+`type` arrives in a URL, so it is checked against a fixed list before being
+passed to `verifyOtp` rather than forwarded blind.
+
+**A rejected token_hash now says "expired or already used", not "wrong
+browser".** Those are different failures with different remedies, and the second
+message sent to someone holding a genuinely spent link is worse than no message.
+Mail apps that follow links to generate previews spend them, which is worth
+saying out loud — it is the likeliest cause of a link that fails on first click.
+
+The order of trust for getting in is now: passkey, then the 6-digit code, then
+the link. The link is last on purpose — it is the one with a moving part we do
+not control.

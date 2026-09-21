@@ -309,23 +309,45 @@ async function boot() {
   document.addEventListener('click', (e) => { if (e.target.closest('[data-passkeys]')) openPasskeys(); });
   sb.auth.onAuthStateChange((_ev, session) => { render(session); });
 
-  /* A magic link comes back here as ?code=… (PKCE) or with an error in the query or the
-     hash. supabase-js consumes it before getSession() resolves — and when it cannot, the
-     sign-in card simply reappears with nothing said, which is indistinguishable from
-     never having clicked. The usual cause is not an expired link: PKCE stores a verifier
-     in THIS browser's storage when the link is requested, so a link opened from a mail
-     app's own browser arrives with a code and no verifier. The code from the same email
-     has no such tie, so that is what we point at. */
+  /* ---- coming back from a sign-in email -------------------------------------
+     Two shapes arrive here, and only one of them is portable.
+
+     ?token_hash=…&type=magiclink — built from {{ .TokenHash }} in the email
+       template. It is verified below, by this page, against GoTrue's /verify
+       endpoint with no PKCE exchange. Nothing about it is tied to a browser, so
+       it works from the mail app's own browser, a private window, another
+       device. This is the shape the template should use.
+
+     ?code=… — GoTrue's own {{ .ConfirmationURL }}, which redirects here after
+       consuming the token. supabase-js exchanges the code for a session using a
+       verifier PKCE stored when the link was REQUESTED, so it only ever works in
+       that one browser. A link opened from a mail app arrives with a valid code
+       and no verifier and opens nothing.
+
+     Either way, a failure used to be silent: getSession() returned null, the
+     sign-in card was redrawn, and nothing said whether the click had even
+     registered. Now it says which of the two happened. */
   const q = new URL(location.href);
   const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
-  const cameFromLink = q.searchParams.has('code') || q.searchParams.has('error') || hash.has('error') || hash.has('access_token');
-  const linkError = q.searchParams.get('error_description') || hash.get('error_description') || '';
+  const tokenHash = q.searchParams.get('token_hash');
+  const OTP_TYPES = ['magiclink', 'email', 'signup', 'invite', 'recovery', 'email_change'];
+  let linkError = q.searchParams.get('error_description') || hash.get('error_description') || '';
+  let expired = false;
 
+  if (tokenHash && !linkError) {
+    const asked = String(q.searchParams.get('type') || 'magiclink');
+    const type = OTP_TYPES.includes(asked) ? asked : 'magiclink';      // never pass the URL through blind
+    const { error } = await sb.auth.verifyOtp({ token_hash: tokenHash, type });
+    if (error) { linkError = error.message; expired = /expired|invalid|not found/i.test(error.message); }
+  }
+
+  const cameFromLink = !!tokenHash || q.searchParams.has('code') || q.searchParams.has('error') || hash.has('error') || hash.has('access_token');
   const { data } = await sb.auth.getSession();
   if (!data.session && cameFromLink) {
     const m = $('#login-msg'); m.hidden = false; m.className = 'ad-msg err';
-    m.textContent = linkError
-      ? `That link did not work: ${linkError}`
+    m.textContent = expired
+      ? 'That link has expired or was already used. Send a new one — and note that some mail apps open links once on their own, which spends them.'
+      : linkError ? `That link did not work: ${linkError}`
       : 'That link did not open a session in this browser. A sign-in link only works in the browser that asked for it — if you opened it from your mail app, come back here and use the 6-digit code from that same email.';
     showCodeForm(lastEmail());
   }

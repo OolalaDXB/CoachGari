@@ -73,7 +73,8 @@ await page.addInitScript(() => {
   Object.defineProperty(window, 'supabase', { writable: false, configurable: false, value: { createClient: (url, key, opts) => (window.__auth('createClient', opts), {
     auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => {},
             signInWithOtp: async (a) => { window.__auth('signInWithOtp', a); return {}; },
-            verifyOtp: async (a) => { window.__auth('verifyOtp', a); return { error: null }; }, signOut: async () => ({}),
+            // a token_hash link is verified by the page; the stub refuses it so the failure path is exercised
+            verifyOtp: async (a) => { window.__auth('verifyOtp', a); return a.token_hash ? { error: { message: 'Token has expired or is invalid' } } : { error: null }; }, signOut: async () => ({}),
             signInWithPasskey: async (a) => { window.__auth('signInWithPasskey', a ?? null); return { data: {}, error: null }; },
             registerPasskey: async (a) => { window.__auth('registerPasskey', a ?? null); return { data: {}, error: null }; },
             passkey: { list: async () => ({ data: [], error: null }), delete: async (a) => { window.__auth('deletePasskey', a); return { error: null }; } } },
@@ -175,6 +176,22 @@ check('the link is still requested with the /admin/ redirect', authCalls.some((c
   check('with no remembered address, it asks which one the code belongs to',
     await page.evaluate(() => !document.querySelector('#code-email').hidden && !document.querySelector('#code-form').dataset.email));
   check('the spent code is stripped from the URL so a refresh does not replay it', s.url === '', s.url);
+
+  /* The portable shape: a link built on {{ .TokenHash }} is verified by this page, with
+     no PKCE exchange, so it works from a mail app's browser or a private window. */
+  authCalls.length = 0;
+  await page.goto(`${base}/admin?token_hash=abc123&type=magiclink`);
+  await page.waitForFunction(() => !document.querySelector('#login-msg').hidden, null, { timeout: 5000 }).catch(() => {});
+  const v = authCalls.find((c) => c.name === 'verifyOtp');
+  check('a token_hash link is verified here, not exchanged through PKCE', v && v.args.token_hash === 'abc123' && v.args.type === 'magiclink', JSON.stringify(v));
+  check('a token_hash that GoTrue rejects is reported as spent, not as a browser problem',
+    await page.evaluate(() => /expired or was already used/i.test(document.querySelector('#login-msg').textContent)));
+  // the type comes from a URL: anything unknown falls back rather than being passed through
+  authCalls.length = 0;
+  await page.goto(`${base}/admin?token_hash=abc123&type=../evil`);
+  await page.waitForFunction(() => !document.querySelector('#login-msg').hidden, null, { timeout: 5000 }).catch(() => {});
+  check('an unknown type in the URL is not passed through to verifyOtp',
+    authCalls.find((c) => c.name === 'verifyOtp')?.args.type === 'magiclink');
   await page.goto(`${base}/admin`);
 }
 
