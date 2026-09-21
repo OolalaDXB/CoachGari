@@ -73,25 +73,50 @@ const wellPlaced = (l) => l.atBottom || (l.gap >= 8 && l.gap <= 80);
     const bad = links.filter((id) => !document.getElementById(id) && !(aliases[id] && document.getElementById(aliases[id])));
     const removed = [...document.querySelectorAll('footer a, footer h4')].map((a) => a.textContent.trim()).filter((t) => /^(Zimbabwe|Dubai one-to-one|Padel & corporate|Live events|Live group sessions|Train online|In person|More)$|letsgo@|Padel one-to-one|Group session|Replay/i.test(t));
     const cols = document.querySelectorAll('.f-top > div').length;
-    const col1 = [...document.querySelectorAll('.f-top > div:nth-child(1) li a')].map((a) => a.textContent.trim());
-    const col2 = [...document.querySelectorAll('.f-top > div:nth-child(2) li a')].map((a) => a.textContent.replace(/\s*→\s*$/, '').trim());
+    const label = (a) => a.textContent.replace(/\s*→\s*$/, '').replace(/\s+/g, ' ').trim();
+    const col1 = [...document.querySelectorAll('.f-top > div:nth-child(1) li a')].map(label);
+    const col2 = [...document.querySelectorAll('.f-top > div:nth-child(2) li a')].map(label);
     const heads = [...document.querySelectorAll('.f-top h4')].map((h) => h.textContent.trim() + '|' + getComputedStyle(h).textTransform);
+    const lead = document.querySelector('.f-top > div:nth-child(1) li a.f-lead');
+    const leadIsBooking = !!lead && lead.getAttribute('href') === '#book' && /→/.test(lead.textContent);
+    // Support is a call to action in the second column, below its list — not one link among the others
     const support = document.querySelector('.f-top > div:nth-child(2) a[data-support-open]');
-    const supportInCol = !!support && !support.classList.contains('btn') && getComputedStyle(support).backgroundColor === 'rgba(0, 0, 0, 0)';
-    const supportRow = !document.querySelector('footer .btn[data-support-open]');
-    const external = [...document.querySelectorAll('.f-top a[href^="http"]')].map((a) => a.getAttribute('href'));
+    const supportInCol = !!support && support.classList.contains('btn') && !support.closest('ul');
+    const supportOnlyThere = document.querySelectorAll('footer a[data-support-open]').length === 1;
+    const external = [...document.querySelectorAll('footer .f-social a[href^="http"]')].map((a) => a.getAttribute('href'));
+    // these two are filled from config.js at runtime; unresolved they stay "#" and go nowhere
+    const configured = [...document.querySelectorAll('footer a[data-config-href]')].map((a) => a.getAttribute('href'));
+    const externalInCols = document.querySelectorAll('.f-top a[href^="http"]').length;
     const dupIds = (() => { const seen = new Set(), dup = []; document.querySelectorAll('[id]').forEach((e) => { if (seen.has(e.id)) dup.push(e.id); seen.add(e.id); }); return dup; })();
     const fixedIds = ['programme', 'online-coaching', 'conversation', 'padel', 'corporate', 'about', 'book', 'contact'].filter((id) => !document.getElementById(id));
-    return { links: links.length, bad, removed, cols, col1, col2, heads, supportInCol, supportRow, external, dupIds, fixedIds };
+    return { links: links.length, bad, removed, cols, col1, col2, heads, leadIsBooking, supportInCol, supportOnlyThere, external, externalInCols, configured, dupIds, fixedIds };
   });
   check('header + footer anchors all resolve', r.bad.length === 0, JSON.stringify(r.bad));
   check('confusing footer links removed', r.removed.length === 0, JSON.stringify(r.removed));
   check('footer has exactly 3 content columns', r.cols === 3, String(r.cols));
-  check('Services column: exact order, no subcategories', r.col1.join('|') === 'The Programme|Online coaching|The Conversation|Personal training|Padel|Corporate', r.col1.join('|'));
-  check('Coach Gari column: Book a session … Support Coach Gari', r.col2.join('|') === 'Book a session|About Coach Gari|Contact|TikTok|Instagram|Support Coach Gari', r.col2.join('|'));
-  check('column titles in sentence case, not uppercased', r.heads.join(',') === 'Services|none,Coach Gari|none,Next live session|none', r.heads.join(','));
-  check('Support Coach Gari is a link in the Coach Gari column, not a button', r.supportInCol && r.supportRow);
-  check('social links unchanged', r.external.join(',') === 'https://www.tiktok.com/@coach_gari28,https://www.instagram.com/coach_gari28', r.external.join(','));
+  /* The footer below is the coach's own second pass on the copy, not a default: the two
+     columns are "Get Energized" and "Going Beyond", booking leads the first, and Support
+     is a call to action under the second rather than one link among the others. These
+     assertions pin that arrangement so a later edit has to be deliberate — they are not a
+     preference of this suite, which is why each one says what it is protecting. */
+  check('first column leads with booking, then the offer in order, no subcategories',
+    r.col1.join('|') === 'Book a session|The Programme|Online coaching|The Conversation|Personal training|Padel|Corporate', r.col1.join('|'));
+  check('the lead link is the booking one, and is marked as the lead', r.leadIsBooking);
+  check('second column: about, contact, collaborate — and nothing else in the list',
+    r.col2.join('|') === 'About Coach Gari|Contact|Collaborate with Coach Gari', r.col2.join('|'));
+  check('column titles in sentence case, not uppercased by CSS',
+    r.heads.join(',') === 'Get Energized|none,Going Beyond|none,Next live session|none', r.heads.join(','));
+  check('Support is a call to action under the second column, outside its list', r.supportInCol);
+  check('Support appears once in the footer, not twice', r.supportOnlyThere);
+  /* The social links moved to the bottom bar with the copyright. What matters is that
+     there are exactly two, that they are the right two, and that the columns stay free of
+     outbound links — a column of internal navigation that quietly gains an external one
+     is how a footer starts leaking attention. */
+  check('social links: exactly TikTok then Instagram in the bottom bar',
+    r.external.join(',') === 'https://www.tiktok.com/@coach_gari28,https://www.instagram.com/coach_gari28', r.external.join(','));
+  check('the config-driven footer links resolved to a real destination, not "#"',
+    r.configured.length > 0 && r.configured.every((h) => /^https?:\/\//.test(h)), r.configured.join(','));
+  check('the navigation columns carry no outbound links', r.externalInCols === 0, String(r.externalInCols));
   check('no duplicate ids on the page', r.dupIds.length === 0, JSON.stringify(r.dupIds));
   check('normalised section ids exist', r.fixedIds.length === 0, JSON.stringify(r.fixedIds));
   const bareGari = await page.$eval('footer', (f) => (f.textContent.match(/(?<!Coach )\bGari\b(?!\.)/g) || []).length);

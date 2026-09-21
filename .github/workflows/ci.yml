@@ -60,6 +60,9 @@ jobs:
         run: node scripts/test-admin-pwa.mjs
       - name: Booking picker (offline)
         run: node scripts/test-booking-picker.mjs
+
+      - name: Anchor navigation and footer structure (offline)
+        run: node scripts/test-anchors.mjs
       - name: Stripe adapter — embedded Checkout contract (offline)
         run: node --experimental-strip-types scripts/test-stripe-embedded.mjs
       - name: Audience — platform CSV import (offline)

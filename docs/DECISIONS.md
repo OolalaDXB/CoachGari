@@ -3179,3 +3179,41 @@ expected.
 indexable page competing for four unrelated intents — personal training in
 Dubai, padel coaching, online coaching, nutrition. No markup resolves that.
 A page per intention is the next piece of work, and it needs Gari's words.
+
+---
+
+## CG-025 — Putting the anchor suite back on its feet
+
+Six failures, and the first job was to sort them into the two kinds, because
+the wrong move here is to edit a test until it passes.
+
+**Five were the test being out of date.** The footer was rewritten in the
+coach's second copy pass: the columns became "Get Energized" and "Going
+Beyond", booking moved to the top of the first column, Support became a call to
+action under the second rather than one link among the others, and the social
+pair moved down to the bottom bar. The site is the intent; the assertions had
+simply not followed. They now pin the current arrangement, each one saying what
+it protects, so the next change to that footer has to be deliberate rather than
+accidental.
+
+**One was a real defect**, and it is the reason this was worth doing:
+`#personal-training` landed 454px above the header — the visitor clicked
+"Personal training" in the footer and arrived in the middle of the booking
+picker, its heading off-screen.
+
+The cause was a fix that existed but was scoped too narrowly. `site.js` already
+kept a target aligned while the layout settled around it, stopping on the first
+sign of the visitor's own intent — but only for a deep link **on load**. A click
+on an alias that preselects a booking family changes *more* layout than a cold
+load does, because the picker redraws underneath the scroll that has already
+happened, and that path got nothing. The settle window is now a function called
+from both places, superseding itself when a new jump arrives.
+
+**Two suites that still fail here are `test-booking` and `test-contact`.** They
+are not offline: they run against production, which this environment cannot
+reach. They fail identically on the commit before this one. Left alone, and
+named so the next person does not spend an hour on them.
+
+Both suites now run in CI — `test-anchors` next to the other Chromium-driven
+public-site tests, after the step that installs the browser. A suite nobody
+runs is a suite that drifts, which is how it got to six.

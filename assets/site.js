@@ -74,6 +74,34 @@ import { CONFIG } from '/config.js';
   (document.body.getAttribute('data-anchor-aliases') || '').split(/\s+/).forEach(function(pair){
     var i = pair.indexOf(':'); if (i > 0) ALIASES[pair.slice(0, i)] = pair.slice(i + 1);
   });
+  /* Keep a target aligned while the layout settles around it, then let go.
+
+     The page moves under a jump: the catalogue and the booking picker render
+     asynchronously, and selecting a booking family re-draws the picker — which
+     changes the height of what is above and below the target after the scroll has
+     already happened. Left alone, the visitor lands in the middle of a section
+     whose top has drifted off-screen.
+
+     This used to run on load only. A click on an alias that preselects a family
+     (#personal-training) changes MORE layout than a cold load does, and got
+     nothing — which is exactly the case that drifted, and what the anchor suite
+     was reporting as a 454px miss.
+
+     It stops on the first sign of the visitor's own intent, and after three
+     seconds regardless: keeping a scroll position is help until it is a fight. */
+  var settling = null;
+  function settle(target){
+    if (settling) settling();                                   // one at a time: a new jump supersedes the last
+    if (!target || !('ResizeObserver' in window)) return;
+    var stopped = false;
+    var stop = function(){ if (stopped) return; stopped = true; ro.disconnect(); if (settling === stop) settling = null; };
+    ['wheel', 'touchstart', 'keydown', 'pointerdown'].forEach(function(ev){ window.addEventListener(ev, stop, { once: true, passive: true }); });
+    var ro = new ResizeObserver(function(){ if (!stopped) target.scrollIntoView({ block: 'start', behavior: 'instant' }); });
+    ro.observe(document.body);
+    setTimeout(stop, 3000);
+    settling = stop;
+  }
+
   function resolve(){
     var id = (window.location.hash || '').slice(1);
     if (!id || !ALIASES[id] || document.getElementById(id)) return;
@@ -84,24 +112,13 @@ import { CONFIG } from '/config.js';
     target.scrollIntoView({ block: 'start' });
     if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
     target.focus({ preventScroll: true });
+    settle(target);                                             // the picker is about to redraw underneath
   }
   resolve();
   window.addEventListener('hashchange', resolve);
 
-  /* Deep link on load: sections above the target grow when the catalogue and the
-     booking picker render (async), which would leave the target further down the
-     page than where the browser first put it. For a short settle window after
-     load, keep the target aligned as the layout changes — but stop the moment the
-     visitor scrolls, touches or presses a key, so nothing fights their intent. */
   var id = (window.location.hash || '').slice(1);
-  var target = id && document.getElementById(id);
-  if (target && 'ResizeObserver' in window) {
-    var stopped = false, stop = function(){ stopped = true; ro.disconnect(); };
-    ['wheel', 'touchstart', 'keydown', 'pointerdown'].forEach(function(ev){ window.addEventListener(ev, stop, { once: true, passive: true }); });
-    var ro = new ResizeObserver(function(){ if (!stopped) target.scrollIntoView({ block: 'start', behavior: 'instant' }); });
-    ro.observe(document.body);
-    setTimeout(stop, 3000);
-  }
+  settle(id && document.getElementById(id));                    // deep link on load
 })();
 
 /* ---- 1c. current section in the navigation ---------------- */
