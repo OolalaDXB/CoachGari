@@ -491,3 +491,6 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
 .row-warn > td{background:var(--accent-tint);}
 .sub-form{grid-template-columns:repeat(auto-fit,minmax(200px,1fr));}
 .sub-form > div{grid-column:1/-1;}
+/* the secondary way in, below the password form: a link that looks like prose */
+.ad-alt{margin:16px 0 0;font-size:13.5px;}
+.ad-link{border:0;background:none;padding:0;font:inherit;font-weight:600;color:var(--accent);cursor:pointer;text-decoration:underline;}

@@ -297,8 +297,91 @@ function showCodeForm(email) {
 }
 const lastEmail = () => { try { return localStorage.getItem('cg-email') || ''; } catch { return ''; } };
 
+/* ---------- password ---------------------------------------------------------
+   Email + password: no inbox, no link, no device that has to remember anything.
+   It exists because the link-based routes each depend on something outside this
+   codebase behaving — a mail client that does not pre-open URLs, a browser that
+   keeps the storage it wrote, an email template carrying the right variable —
+   and on an iPad every one of those assumptions failed at once.
+
+   A password is only as good as its rotation, so an account issued a temporary
+   one carries `must_set_password` in its metadata and reaches nothing but the
+   screen that replaces it. */
+const mustSetPassword = (session) => session?.user?.user_metadata?.must_set_password === true;
+
+function passwordMessage(msg) {
+  if (/invalid login credentials/i.test(msg)) return 'That email and password do not match. If the owner has not given you a password yet, use a sign-in link.';
+  if (/email not confirmed/i.test(msg)) return 'This address has not been confirmed yet. Ask the owner.';
+  if (/password/i.test(msg) && /short|least|weak/i.test(msg)) return msg;
+  return msg;
+}
+
+/* Changing it later, from the account menu. Supabase does not ask for the current
+   password here — the session is the proof — so this screen is reachable only from
+   inside one, like every other thing in the sheet. */
+function openPassword() {
+  const host = $('#profile'); host.hidden = false; document.body.style.overflow = 'hidden';
+  host.innerHTML = `<div class="sheet"><div class="pf-head"><div class="pf-id"><h2>Change password</h2></div><div class="pf-actions"><button class="pf-close" id="pw-x">×</button></div></div>
+    <div class="pf-body"><form id="pw-form" class="ad-form">
+      <label>New password <input type="password" name="password" required minlength="12" autocomplete="new-password"></label>
+      <label>Repeat it <input type="password" name="confirm" required minlength="12" autocomplete="new-password"></label>
+      <p class="ad-muted">At least 12 characters. Signing in elsewhere is unaffected — this does not end your other sessions.</p>
+      <div class="actions"><button class="btn btn-accent btn-sm" type="submit">Save</button>
+      <button class="btn btn-line btn-sm" type="button" id="pw-cancel">Cancel</button></div>
+    </form><p id="pw-msg" class="ad-msg" hidden></p></div></div>`;
+  $('#pw-x').onclick = pfClose; $('#pw-cancel').onclick = pfClose;
+  $('#pw-form').onsubmit = async (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const password = String(f.get('password') || ''); const m = $('#pw-msg');
+    m.hidden = false; m.className = 'ad-msg';
+    if (password !== String(f.get('confirm') || '')) { m.className = 'ad-msg err'; m.textContent = 'The two do not match.'; return; }
+    if (password.length < 12) { m.className = 'ad-msg err'; m.textContent = 'Use at least 12 characters.'; return; }
+    m.textContent = 'Saving…';
+    const { error } = await sb.auth.updateUser({ password, data: { must_set_password: false } });
+    if (error) { m.className = 'ad-msg err'; m.textContent = passwordMessage(error.message); return; }
+    pfClose(); toast('Password changed');
+  };
+}
+
 async function boot() {
   if (webauthnOk) { $('#passkey-box').hidden = false; $('#passkey-go').onclick = passkeySignIn; }
+
+  $('#password-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const email = String(f.get('email') || '').trim().toLowerCase();
+    const password = String(f.get('password') || '');
+    const m = $('#login-msg'); m.hidden = false; m.className = 'ad-msg'; m.textContent = 'Signing in…';
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) { m.className = 'ad-msg err'; m.textContent = passwordMessage(error.message); return; }
+    try { localStorage.setItem('cg-email', email); } catch {}
+    m.hidden = true;                                   // onAuthStateChange draws the rest
+  });
+
+  // the link and the code are still here, one click away, for whoever has no password yet
+  $('#link-toggle').onclick = () => {
+    const f = $('#login-form'); f.hidden = !f.hidden;
+    if (!f.hidden) { f.querySelector('[name=email]').value = lastEmail(); f.querySelector('[name=email]').focus(); }
+  };
+
+  $('#newpass-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const password = String(f.get('password') || ''); const confirm = String(f.get('confirm') || '');
+    const m = $('#newpass-msg'); m.hidden = false; m.className = 'ad-msg';
+    if (password !== confirm) { m.className = 'ad-msg err'; m.textContent = 'The two do not match.'; return; }
+    if (password.length < 12) { m.className = 'ad-msg err'; m.textContent = 'Use at least 12 characters.'; return; }
+    m.textContent = 'Saving…';
+    // one call: the new password and the flag that lets the cockpit open, so a failure
+    // cannot leave an account with a chosen password still marked as temporary
+    const { error } = await sb.auth.updateUser({ password, data: { must_set_password: false } });
+    if (error) { m.className = 'ad-msg err'; m.textContent = passwordMessage(error.message); return; }
+    m.hidden = true; e.target.reset();
+    toast('Password saved');
+    const { data } = await sb.auth.getSession();
+    render(data.session);
+  });
+
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = new FormData(e.target).get('email').trim().toLowerCase();
@@ -324,6 +407,7 @@ async function boot() {
   });
   document.addEventListener('click', (e) => { if (e.target.closest('[data-signout]')) sb.auth.signOut().then(() => location.reload()); });
   document.addEventListener('click', (e) => { if (e.target.closest('[data-passkeys]')) openPasskeys(); });
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-password]')) openPassword(); });
   sb.auth.onAuthStateChange((_ev, session) => { render(session); });
 
   /* ---- coming back from a sign-in email -------------------------------------
@@ -414,9 +498,11 @@ let cur = { section: null, sub: null };
 
 async function render(session) {
   if (session && me && me.email === session.user.email && cur.section) { renderAccount(session); return; }
-  $('#login').hidden = !!session; $('#app').hidden = true; $('#noaccess').hidden = true;
+  $('#login').hidden = !!session; $('#app').hidden = true; $('#noaccess').hidden = true; $('#newpass').hidden = true;
   $('#sidebar').hidden = true; $('#topbar').hidden = true; $('#subnav').hidden = true;
   if (!session) { me = null; cur = { section: null, sub: null }; return; }
+  // a temporary password reaches this screen and nothing else — not even my_permissions
+  if (mustSetPassword(session)) { $('#newpass').hidden = false; $('#newpass-form [name=password]').focus(); return; }
   try {
     const { data, error } = await sb.rpc('my_permissions'); if (error) throw error;
     me = data;
@@ -455,7 +541,7 @@ function renderAccount(session) {
     e.stopPropagation();
     if ($('.ad-acct-menu')) { $('.ad-acct-menu').remove(); return; }
     const m = document.createElement('div'); m.className = 'ad-acct-menu';
-    m.innerHTML = `<div class="em">Signed in as<br><b>${esc(email)}</b></div>${webauthnOk ? '<button data-passkeys>Passkeys</button>' : ''}<button data-signout>Sign out</button>`;
+    m.innerHTML = `<div class="em">Signed in as<br><b>${esc(email)}</b></div>${webauthnOk ? '<button data-passkeys>Passkeys</button>' : ''}<button data-password>Change password</button><button data-signout>Sign out</button>`;
     $('#account').appendChild(m);
     setTimeout(() => document.addEventListener('click', function close() { m.remove(); document.removeEventListener('click', close); }), 0);
   };

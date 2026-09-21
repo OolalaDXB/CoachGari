@@ -73,6 +73,8 @@ await page.addInitScript(() => {
   Object.defineProperty(window, 'supabase', { writable: false, configurable: false, value: { createClient: (url, key, opts) => (window.__auth('createClient', opts), {
     auth: { getSession: async () => ({ data: { session: null } }), onAuthStateChange: () => {},
             signInWithOtp: async (a) => { window.__auth('signInWithOtp', a); return {}; },
+            signInWithPassword: async (a) => { window.__auth('signInWithPassword', a); return { error: a.password === 'right-password-here' ? null : { message: 'Invalid login credentials' } }; },
+            updateUser: async (a) => { window.__auth('updateUser', a); return { error: null }; },
             // a token_hash link is verified by the page; the stub refuses it so the failure path is exercised
             verifyOtp: async (a) => { window.__auth('verifyOtp', a); return a.token_hash ? { error: { message: 'Token has expired or is invalid' } } : { error: null }; }, signOut: async () => ({}),
             signInWithPasskey: async (a) => { window.__auth('signInWithPasskey', a ?? null); return { data: {}, error: null }; },
@@ -143,7 +145,37 @@ await page.reload();
   check('it signs in with signInWithPasskey — no email, no code', authCalls.some((c) => c.name === 'signInWithPasskey'));
   check('the email form is still there underneath', await page.evaluate(() => !!document.querySelector('#login-form [name=email]') && !!document.querySelector('#code-form')));
 }
-// sign-in: link + code
+
+/* ---- email + password ----------------------------------------------------------
+   The way in that depends on no inbox, no link and no device that remembers
+   anything. It is the default form on the card; the link is a click away. */
+{
+  check('the password form is the one offered by default', await page.evaluate(() => !document.querySelector('#password-form').hidden && document.querySelector('#login-form').hidden));
+  await page.fill('#password-form [name=email]', 'gari@example.com');
+  await page.fill('#password-form [name=password]', 'wrong');
+  await page.click('#password-form button[type=submit]');
+  await page.waitForFunction(() => document.querySelector('#login-msg').className.includes('err'));
+  const p = authCalls.find((c) => c.name === 'signInWithPassword');
+  check('it signs in with signInWithPassword(email, password)', p && p.args.email === 'gari@example.com' && p.args.password === 'wrong', JSON.stringify(p && p.args.email));
+  check('a wrong password says so, and points at the link for anyone with no password yet',
+    await page.evaluate(() => /do not match/i.test(document.querySelector('#login-msg').textContent) && /sign-in link/i.test(document.querySelector('#login-msg').textContent)));
+  check('the password never reaches the URL or storage', await page.evaluate(() => !location.href.includes('wrong') && !JSON.stringify(localStorage).includes('wrong')));
+  // the forced rotation screen: a temporary password opens nothing else
+  const gate = await page.evaluate(() => {
+    const el = document.querySelector('#newpass');
+    return { exists: !!el, hidden: el.hidden, hasForm: !!el.querySelector('#newpass-form [name=password]'), canSignOut: !!el.querySelector('[data-signout]') };
+  });
+  check('a "choose your password" screen exists for accounts issued a temporary one', gate.exists && gate.hasForm && gate.canSignOut);
+  check('it is hidden until a session says the password is temporary', gate.hidden);
+  const src0 = await readFile(join(ROOT, 'admin/admin.js'), 'utf8');
+  check('the temporary-password gate returns before my_permissions, so nothing else loads',
+    /mustSetPassword\(session\)\)\s*\{[^}]*#newpass[^}]*return;/.test(src0));
+  check('clearing the flag and setting the password happen in one updateUser call',
+    /updateUser\(\{ password, data: \{ must_set_password: false \} \}\)/.test(src0));
+}
+
+// sign-in: link + code, now one click behind the password form
+await page.click('#link-toggle');
 await page.fill('#login-form [name=email]', 'gari@example.com');
 await page.click('#login-form button[type=submit]');
 await page.waitForSelector('#code-form:not([hidden])');

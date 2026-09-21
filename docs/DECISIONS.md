@@ -3092,3 +3092,38 @@ that change is made deliberately rather than discovered.
 code should do instead of looking at what the system actually stored. One query
 against `auth.one_time_tokens` would have found this before the first wrong
 answer, let alone the second.
+
+---
+
+## CG-023f — Email and password
+
+The owner asked for it after a day of link-based sign-in failing, and he was
+right to. Every other route depends on something outside this codebase
+behaving: a mail client that does not pre-open URLs to build a preview, a
+browser that keeps the storage it wrote, an email template carrying the right
+variable, a dashboard reachable from the device in hand. On an iPad all four
+assumptions failed at once. A password depends on none of them.
+
+**It is now the default form on the sign-in card.** The passkey sits above it,
+the link and the code are one click below. That ordering is the honest one:
+fastest, most reliable, then the fallbacks.
+
+**A password issued by someone else is a password in a message.** The
+temporary one the owner is given travels over a channel that is not private,
+so the account carries `must_set_password` in its metadata and reaches exactly
+one screen until it is replaced — the gate returns before `my_permissions` is
+even called. The new password and the cleared flag go in a single `updateUser`,
+so a half-failure cannot leave a chosen password still marked temporary.
+
+**Minimum twelve characters**, checked in the page. Supabase's own floor is
+six, which is not a floor for the account that can read every client's file.
+
+**What this does not do**: no password reset by email (that would reintroduce
+the dependency this removes — the owner reissues a temporary one instead), no
+password on the sign-in screen for anyone without an account, and no lockout
+counter beyond GoTrue's own rate limiting. If that becomes necessary it belongs
+in GoTrue's settings, not in a page anyone can edit.
+
+**The passkey remains the destination.** Password to get in once, passkey
+enrolled on each device, and after that the password is what you use the day
+you lose the device.

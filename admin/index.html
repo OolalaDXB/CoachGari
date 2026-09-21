@@ -43,29 +43,51 @@
       <section id="login" class="ad-card ad-login" hidden>
         <p class="ad-eyebrow">Coach Gari · Back-office</p>
         <h1>Sign in</h1>
-        <p class="ad-muted">Enter the email the owner provisioned. You'll receive a one-time sign-in link. There is no self-registration.</p>
-        <!-- Passkey: Face ID / Touch ID / a security key, no email round-trip. Unhidden by
-             admin.js only where the browser actually supports WebAuthn; a passkey is
-             enrolled from the account menu once signed in, never from this screen. -->
+        <p class="ad-muted">Only accounts the owner provisioned can sign in. There is no self-registration.</p>
+        <!-- Passkey: Face ID / Touch ID / a security key. Unhidden by admin.js only where
+             the browser actually supports WebAuthn; a passkey is enrolled from the account
+             menu once signed in, never from this screen. -->
         <div id="passkey-box" class="ad-passkey" hidden>
           <button class="btn btn-dark" id="passkey-go" type="button">Sign in with a passkey</button>
           <p class="ad-muted">Face ID, Touch ID or a security key on this device. Set one up from the account menu once you're in.</p>
           <p class="ad-or"><span>or</span></p>
         </div>
-        <form id="login-form" class="ad-form">
-          <label>Email <input type="email" name="email" required autocomplete="email" placeholder="you@example.com"></label>
-          <button class="btn btn-accent" type="submit">Send me a sign-in link</button>
+        <!-- Email + password: the way in that needs no inbox, no link and no device that
+             remembers anything. After hours of magic links failing on an iPad, this is the
+             one that does not depend on how a mail client treats a URL. -->
+        <form id="password-form" class="ad-form">
+          <label>Email <input type="email" name="email" required autocomplete="username" placeholder="you@example.com"></label>
+          <label>Password <input type="password" name="password" required autocomplete="current-password" placeholder="••••••••"></label>
+          <button class="btn btn-accent" type="submit">Sign in</button>
         </form>
         <p id="login-msg" class="ad-msg" hidden></p>
-        <!-- The code from the same email. This is the device-independent way in: the
-             installed app cannot receive the link, and a magic link only opens a session
-             in the browser that asked for it — opening it from a mail app's own browser
-             loses the PKCE verifier and lands back here. The code has no such tie. -->
+        <p class="ad-alt"><button type="button" class="ad-link" id="link-toggle">Email me a sign-in link instead</button></p>
+        <form id="login-form" class="ad-form" hidden>
+          <label>Email <input type="email" name="email" required autocomplete="email" placeholder="you@example.com"></label>
+          <button class="btn btn-line" type="submit">Send me a sign-in link</button>
+        </form>
+        <!-- The code from the same email: no link to open, so no mail client in the way. -->
         <form id="code-form" class="ad-form" hidden>
           <label id="code-email" hidden>The email you asked the link for <input type="email" name="email" autocomplete="email" placeholder="you@example.com"></label>
           <label>Enter the 6-digit code from that email <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456"></label>
           <button class="btn btn-line" type="submit">Sign in with the code</button>
         </form>
+      </section>
+
+      <!-- Shown instead of the cockpit while the account still carries the temporary
+           password the owner was issued. Not a nag: the temporary one travelled over a
+           channel that is not private, so nothing else opens until it is replaced. -->
+      <section id="newpass" class="ad-card ad-login" hidden>
+        <p class="ad-eyebrow">Coach Gari · Back-office</p>
+        <h1>Choose your password</h1>
+        <p class="ad-muted">The password you were given is temporary. Pick your own now — it replaces it straight away, and nothing else opens until you do.</p>
+        <form id="newpass-form" class="ad-form">
+          <label>New password <input type="password" name="password" required minlength="12" autocomplete="new-password"></label>
+          <label>Repeat it <input type="password" name="confirm" required minlength="12" autocomplete="new-password"></label>
+          <button class="btn btn-accent" type="submit">Save and continue</button>
+        </form>
+        <p id="newpass-msg" class="ad-msg" hidden></p>
+        <button class="btn btn-line btn-sm" data-signout>Sign out</button>
       </section>
 
       <section id="noaccess" class="ad-card" hidden>
