@@ -26,7 +26,7 @@ jobs:
           node-version: 22
 
       - name: Lint HTML
-        run: npx --yes htmlhint "index.html" "routes/**/*.html"
+        run: npx --yes htmlhint "index.html" "routes/**/*.html" "*-dubai.html" "online-coaching.html"
 
       - name: Check internal links & assets
         run: node scripts/check-links.mjs

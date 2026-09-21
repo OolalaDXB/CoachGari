@@ -1,0 +1,60 @@
+/* Intent pages — /padel-coaching-dubai, /personal-training-dubai, /online-coaching,
+   /corporate-wellness-dubai.
+
+   One page per thing someone searches for, because the homepage cannot rank for four
+   unrelated intentions at once. They reuse coach-gari.css for everything structural
+   (wrap, band, hero, btn, pale-grid) and add only what a long text page needs that the
+   homepage never did: readable prose columns, a definition list of what a session covers,
+   and a question-and-answer block.
+
+   While these are drafts they carry <meta name="robots" content="noindex"> and a
+   cg-draft marker. Nothing here is styled to look unfinished: a draft that looks like a
+   draft never gets read properly, and the point of the review is the copy. */
+
+/* the ribbon that says this is not live yet — removed with the draft meta, see each page */
+.draft-note{background:#2a2118;color:#f5e6c8;font-size:13px;font-weight:600;padding:10px 18px;text-align:center;}
+.draft-note b{color:#fff;}
+
+.ip-hero{padding:104px 0 72px;}
+.ip-hero h1{font-size:clamp(2.3rem,5vw,3.6rem);line-height:1.04;letter-spacing:-.03em;margin:0 0 20px;max-width:16ch;}
+.ip-hero .sub{font-size:1.15rem;max-width:56ch;}
+.ip-hero .hero-cta{margin-top:34px;}
+@media(max-width:640px){.ip-hero{padding:56px 0 48px;}.ip-hero .hero-cta .btn{width:100%;}}
+
+/* long-form body: one measure, never full width, because 90 characters a line is unread */
+.prose{max-width:66ch;}
+.prose h2{font-size:clamp(1.7rem,3.2vw,2.3rem);letter-spacing:-.025em;line-height:1.1;margin:0 0 16px;}
+.prose h3{font-size:1.22rem;letter-spacing:-.02em;margin:34px 0 8px;}
+.prose p{font-size:16.5px;line-height:1.68;color:var(--grey-text);margin:0 0 18px;}
+.prose p strong{color:var(--black);font-weight:700;}
+.prose ul{margin:0 0 20px;padding-left:20px;}
+.prose li{font-size:16px;line-height:1.62;color:var(--grey-text);margin-bottom:9px;}
+.prose a{color:var(--accent);font-weight:600;}
+
+/* what a session covers: a list that reads as a list, not as cards pretending to be one */
+.covers{list-style:none;padding:0;margin:26px 0 0;max-width:66ch;}
+.covers li{border-top:1px solid var(--line);padding:16px 0;}
+.covers b{display:block;font-size:16px;letter-spacing:-.01em;margin-bottom:4px;}
+.covers span{font-size:15px;color:var(--grey-text);line-height:1.6;}
+
+.faq{max-width:66ch;margin-top:8px;}
+.faq details{border-top:1px solid var(--line);padding:2px 0;}
+.faq details:last-child{border-bottom:1px solid var(--line);}
+.faq summary{cursor:pointer;list-style:none;padding:17px 30px 17px 0;font-size:16.5px;font-weight:700;letter-spacing:-.01em;position:relative;}
+.faq summary::-webkit-details-marker{display:none;}
+.faq summary::after{content:"+";position:absolute;right:4px;top:15px;font-size:20px;font-weight:500;color:var(--accent);}
+.faq details[open] summary::after{content:"–";}
+.faq p{font-size:16px;line-height:1.65;color:var(--grey-text);margin:0 0 18px;}
+
+.ip-cta{background:var(--black);color:#fff;border-radius:24px;padding:46px 44px;margin-top:8px;}
+.ip-cta h2{color:#fff;font-size:clamp(1.6rem,3vw,2.1rem);letter-spacing:-.025em;margin:0 0 12px;}
+.ip-cta p{color:rgba(255,255,255,.72);font-size:16px;max-width:52ch;margin:0 0 26px;}
+@media(max-width:640px){.ip-cta{padding:32px 24px;}.ip-cta .btn{width:100%;}}
+
+/* the other intentions, linked from each page: internal links are how a crawler finds
+   these at all, and how a reader who landed on the wrong one gets to the right one */
+.siblings{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:30px;}
+.siblings a{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px 22px;text-decoration:none;display:block;}
+.siblings a b{display:block;font-size:15.5px;letter-spacing:-.01em;color:var(--black);margin-bottom:5px;}
+.siblings a span{font-size:14px;color:var(--grey-text);line-height:1.5;}
+.siblings a:hover{border-color:var(--black);}

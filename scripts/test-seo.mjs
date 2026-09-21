@@ -22,6 +22,18 @@ const read = (p) => readFile(join(ROOT, p), 'utf8');
 const INDEXED = [['index.html', '/'], ['legal.html', '/legal'], ['privacy.html', '/privacy']];
 const HIDDEN = ['routes/a/index.html', 'routes/b/index.html', 'collab.html', 'consent.html', 'r.html', 'c.html'];
 
+/* Intent pages: one per thing someone searches for, written as drafts. Each carries
+   <meta name="cg-draft"> and must be invisible while it does — noindex, out of the
+   sitemap, linked from nothing public. The checks below run in BOTH directions, which is
+   what makes publishing a single decision instead of four things to remember: drop the
+   draft marker and the page must be indexable and in the sitemap, or the suite fails. */
+const INTENT = [
+  ['padel-coaching-dubai.html', '/padel-coaching-dubai'],
+  ['personal-training-dubai.html', '/personal-training-dubai'],
+  ['online-coaching.html', '/online-coaching'],
+  ['corporate-wellness-dubai.html', '/corporate-wellness-dubai'],
+];
+
 /* ---- every indexable page carries the four things a result needs ---- */
 for (const [file, path] of INDEXED) {
   const h = await read(file);
@@ -52,6 +64,65 @@ for (const f of HIDDEN) {
   if (!existsSync(join(ROOT, f))) { check(`${f}: exists`, false); continue; }
   const h = await read(f);
   check(`${f}: sends noindex`, /name="robots"[^>]*noindex/.test(h) || /X-Robots-Tag/i.test(h), 'no robots meta');
+}
+
+/* ---- intent pages: complete now, invisible until published ---- */
+{
+  const sitemap = await read('sitemap.xml');
+  const publicPages = ['index.html', 'legal.html', 'privacy.html', 'routes/a/index.html', 'routes/b/index.html', 'collab.html'];
+  const publicHtml = (await Promise.all(publicPages.map((p) => read(p).catch(() => '')))).join('\n');
+
+  for (const [file, path] of INTENT) {
+    if (!existsSync(join(ROOT, file))) { check(`${path}: exists`, false); continue; }
+    const h = await read(file);
+    const draft = /name="cg-draft"/.test(h);
+    const noindex = /name="robots"[^>]*noindex/.test(h);
+    const inSitemap = sitemap.includes(`${SITE}${path}`);
+
+    // whichever state it is in, it has to be in that state completely
+    check(`${path}: draft marker and noindex agree`, draft === noindex, `draft=${draft} noindex=${noindex}`);
+    check(`${path}: ${draft ? 'a draft is out of the sitemap' : 'a published page is in the sitemap'}`, draft !== inSitemap, `draft=${draft} inSitemap=${inSitemap}`);
+    if (draft) {
+      // a link to the PAGE, not the homepage anchor of the same name: "#online-coaching"
+      // is a section on the home page and has nothing to do with /online-coaching
+      check(`${path}: nothing public links to it while it is a draft`,
+        !publicHtml.includes(`href="${path}"`), 'linked from a public page');
+      check(`${path}: carries the ribbon that says it is not live`, /class="draft-note"/.test(h));
+    } else {
+      check(`${path}: the draft ribbon is gone once published`, !/class="draft-note"/.test(h));
+    }
+
+    // the rest must be right from the start, so publishing is a deletion and nothing else
+    const title = (h.match(/<title>([^<]*)<\/title>/) || [])[1] || '';
+    const desc = (h.match(/<meta name="description" content="([^"]*)"/) || [])[1] || '';
+    check(`${path}: title of a usable length`, title.length >= 20 && title.length <= 70, `${title.length}: ${title}`);
+    check(`${path}: description of a usable length`, desc.length >= 70 && desc.length <= 185, String(desc.length));
+    check(`${path}: canonical is its own final URL`, h.includes(`<link rel="canonical" href="${SITE}${path}">`));
+    check(`${path}: exactly one h1`, (h.match(/<h1[\s>]/g) || []).length === 1);
+    check(`${path}: Open Graph is complete`, ['og:type', 'og:title', 'og:description', 'og:image', 'og:url'].every((t) => h.includes(`property="${t}"`)));
+
+    const block = (h.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/) || [])[1];
+    let data = null; try { data = JSON.parse(block); } catch {}
+    check(`${path}: structured data is valid JSON`, !!data, 'unparseable');
+    if (data) {
+      const types = (data['@graph'] || [data]).map((n) => n['@type']);
+      check(`${path}: describes a Service and a breadcrumb`, types.includes('Service') && types.includes('BreadcrumbList'), types.join(','));
+      // an FAQ block that markup claims but the page does not show is a rich result built on nothing
+      const faq = (data['@graph'] || []).find((n) => n['@type'] === 'FAQPage');
+      if (faq) {
+        const asked = faq.mainEntity.map((q) => q.name);
+        const shown = [...h.matchAll(/<summary>([\s\S]*?)<\/summary>/g)].map((m) => m[1].replace(/<[^>]*>/g, '').trim());
+        const missing = asked.filter((q) => !shown.some((s) => s.toLowerCase().startsWith(q.toLowerCase().slice(0, 18))));
+        check(`${path}: every question in the FAQ markup is actually on the page`, missing.length === 0, missing.join(' | '));
+      }
+    }
+    // real content, not a stub: an intent page that does not out-write the homepage section it replaces is pointless
+    const words = h.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, ' ').split(/\s+/).filter(Boolean).length;
+    check(`${path}: carries enough text to rank for anything`, words >= 450, `${words} words`);
+    // and links to its siblings, so a crawler can walk between them
+    const sibs = INTENT.filter(([, p]) => p !== path).filter(([, p]) => h.includes(`href="${p}"`)).length;
+    check(`${path}: links to the other intent pages`, sibs >= 2, String(sibs));
+  }
 }
 
 /* ---- robots.txt ---- */

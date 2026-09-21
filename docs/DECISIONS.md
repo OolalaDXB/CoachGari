@@ -3217,3 +3217,46 @@ named so the next person does not spend an hour on them.
 Both suites now run in CI — `test-anchors` next to the other Chromium-driven
 public-site tests, after the step that installs the browser. A suite nobody
 runs is a suite that drifts, which is how it got to six.
+
+---
+
+## CG-026 — One page per intention, written as drafts
+
+The homepage cannot rank for four unrelated intentions, so there are now four
+pages: `/padel-coaching-dubai`, `/personal-training-dubai`, `/online-coaching`
+and `/corporate-wellness-dubai`. Padel is the fullest of them, as asked.
+
+**They are invisible, and that is a real cost, not a formality.** A `noindex`
+page earns nothing. These exist so the copy can be read and corrected before it
+is published, which is the right order for text that speaks for someone else —
+but until the marker comes off, they are worth exactly zero in search. Nobody
+should mistake shipping them for having done the SEO.
+
+**Publishing is one decision, enforced from both sides.** Each page carries
+`<meta name="cg-draft">`, and `test-seo.mjs` asserts: while it is present the
+page must be noindex, out of the sitemap and linked from nothing public; the
+moment it is removed the page must be in the sitemap and indexable. A
+half-published page fails the suite. Everything else — canonical, Open Graph,
+Service and BreadcrumbList markup, the sibling links — is already final, so
+publishing is a deletion and one line of sitemap.
+
+**Nothing is claimed that this repo cannot back.** The certification, the ten
+years in Dubai, the sixty-minute sessions, the shape of the coaching: all of it
+is already stated on the site or in the services table. What is *not* known —
+which courts, whether he travels to clients, group sizes, whether rackets are
+lent, corporate session length — is marked `CONFIRM` in the source and written
+vaguely on purpose. The court question matters most: naming real venues is the
+strongest local signal either page could carry, and it is the one thing I
+refuse to guess.
+
+**The FAQ markup must match the visible questions**, and the suite checks it.
+A rich result built on questions the page does not actually ask is a
+manufactured snippet, and Google treats it as one. My first draft failed this
+on two pages — the markup said "How long is a padel session?" while the page
+said "How long is a session?" — and the visible text was corrected to the more
+specific wording rather than the markup dumbed down to match.
+
+**They link to each other.** Four orphan pages are four pages a crawler reaches
+only through the sitemap and a reader never reaches at all. When they publish,
+the homepage should link to them too — that is the last step and it belongs
+with the decision to publish.
