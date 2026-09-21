@@ -32,10 +32,27 @@ import { initFinance, financeTransactions, financeSubscriptions, financeCommissi
 import { initCollab, collabList } from '/admin/collab.js';
 import { csvToSnapshots } from '/admin/csv.js';
 
-// experimental.passkey is the library's own opt-in: without it every passkey call
-// throws. The email code below is kept as the permanent way in — the passkey API is
-// marked experimental upstream and this is the only door to the back-office.
-const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUBLISHABLE_KEY, { auth: { flowType: 'pkce', persistSession: true, experimental: { passkey: true } } });
+/* flowType 'implicit', deliberately, and this is the line that decides whether anyone
+   can sign in from a phone or an iPad.
+
+   Under PKCE, requesting a link makes GoTrue store the one-time token prefixed `pkce_`
+   and keep a verifier in THIS browser's storage. The token is then worthless anywhere
+   else — including the browser a mail app opens links in, which on iOS is a private
+   Safari tab with its own empty storage. That is not a misconfiguration to work around:
+   binding the link to one browser is what PKCE is for. It is simply the wrong property
+   for a link delivered by email and opened wherever the reader happens to read.
+
+   What we give up: someone who obtains the email can use the link from any browser, and
+   the session tokens appear for an instant in the URL fragment — never sent to a server,
+   and stripped from the address bar as soon as they are read. What we get back: the
+   owner can actually get in, from the device he has.
+
+   The passkey is the real door and is unaffected by any of this. Once one is enrolled on
+   each device, the email link is a fallback that is rarely used, and this can go back to
+   PKCE — a one-line change, and the reason that reasoning is written down here.
+
+   experimental.passkey is the library's own opt-in: without it every passkey call throws. */
+const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUBLISHABLE_KEY, { auth: { flowType: 'implicit', persistSession: true, experimental: { passkey: true } } });
 
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
@@ -318,11 +335,14 @@ async function boot() {
        it works from the mail app's own browser, a private window, another
        device. This is the shape the template should use.
 
-     ?code=… — GoTrue's own {{ .ConfirmationURL }}, which redirects here after
-       consuming the token. supabase-js exchanges the code for a session using a
-       verifier PKCE stored when the link was REQUESTED, so it only ever works in
-       that one browser. A link opened from a mail app arrives with a valid code
-       and no verifier and opens nothing.
+     #access_token=… — GoTrue's own {{ .ConfirmationURL }} under the implicit
+       flow. supabase-js reads the fragment and stores the session. Portable, and
+       the shape the default email template produces today.
+
+     ?code=… — the same link under PKCE, which this client no longer requests.
+       Kept handled because a link sent before that change still arrives this way:
+       supabase-js needs a verifier stored when the link was REQUESTED, so it only
+       ever works in that one browser and opens nothing anywhere else.
 
      Either way, a failure used to be silent: getSession() returned null, the
      sign-in card was redrawn, and nothing said whether the click had even

@@ -3054,3 +3054,41 @@ saying out loud — it is the likeliest cause of a link that fails on first clic
 The order of trust for getting in is now: passkey, then the 6-digit code, then
 the link. The link is last on purpose — it is the one with a moving part we do
 not control.
+
+---
+
+## CG-023e — PKCE was the reason nobody could sign in
+
+I said the problem was the email template, then that `{{ .TokenHash }}` would
+make the link portable. Both were wrong about the cause, and the database says
+so plainly: the stored one-time token is `pkce_` + 56 hex characters.
+
+**Under PKCE, GoTrue prefixes the token and keeps a verifier in the storage of
+the browser that requested the link.** Every shape of that link — the
+`ConfirmationURL`, a `TokenHash` link, anything — is then worthless in any
+other browser. On iOS that is the ordinary case, not an edge case: a mail app
+opens links in a private Safari tab with its own empty storage. So the link
+could never have worked from Spark, and no template change would have fixed it.
+
+**The client now uses `flowType: 'implicit'`.** The trade, stated plainly:
+someone who obtains the email can use the link from any browser, and the
+session tokens appear for an instant in the URL fragment — never sent to a
+server, stripped from the address bar as soon as they are read (asserted by a
+test, because a token left in history is a token in a screenshot). In exchange,
+the owner can sign in from the device he owns.
+
+**Binding a link to one browser is what PKCE is for.** It is simply the wrong
+property for a credential delivered by email and opened wherever the reader
+happens to be. PKCE earns its keep in a server-side code exchange; this is a
+static page with no OAuth provider, where its only observable effect was
+locking the owner out.
+
+**This is reversible and should be revisited.** Once a passkey is enrolled on
+each device the email link becomes a rarely-used fallback, and going back to
+PKCE costs one word. The reasoning is written at the `createClient` call so
+that change is made deliberately rather than discovered.
+
+**The lesson, again, is the same one as CG-023b**: I reasoned about what the
+code should do instead of looking at what the system actually stored. One query
+against `auth.one_time_tokens` would have found this before the first wrong
+answer, let alone the second.

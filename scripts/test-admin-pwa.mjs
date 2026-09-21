@@ -134,6 +134,9 @@ await page.reload();
 {
   const created = authCalls.find((c) => c.name === 'createClient');
   check('the client opts in to the experimental passkey API', created?.args?.auth?.experimental?.passkey === true, JSON.stringify(created?.args));
+  // PKCE binds an emailed link to the browser that asked for it, which is exactly wrong
+  // for a link read in a mail app. See the comment on createClient in admin.js.
+  check('email links use the portable flow, not PKCE', created?.args?.auth?.flowType === 'implicit', String(created?.args?.auth?.flowType));
   check('the passkey button is offered where the browser supports WebAuthn', await page.evaluate(() => !document.querySelector('#passkey-box').hidden));
   await page.click('#passkey-go');
   await page.waitForFunction(() => document.querySelector('#login-msg').hidden);
@@ -192,6 +195,13 @@ check('the link is still requested with the /admin/ redirect', authCalls.some((c
   await page.waitForFunction(() => !document.querySelector('#login-msg').hidden, null, { timeout: 5000 }).catch(() => {});
   check('an unknown type in the URL is not passed through to verifyOtp',
     authCalls.find((c) => c.name === 'verifyOtp')?.args.type === 'magiclink');
+  /* The implicit flow hands the session back in the fragment. It must not be left in the
+     address bar, where it would sit in history and in a screenshot. */
+  await page.goto('about:blank');                    // a fragment-only change would not reload the document
+  await page.goto(`${base}/admin#access_token=tok&refresh_token=ref&type=magiclink`);
+  await page.waitForFunction(() => !document.querySelector('#login-msg').hidden, null, { timeout: 5000 }).catch(() => {});
+  check('session tokens from the fragment are stripped from the URL',
+    await page.evaluate(() => location.hash === '' && location.search === ''), await page.evaluate(() => location.href));
   await page.goto(`${base}/admin`);
 }
 
