@@ -3896,3 +3896,34 @@ without one costs a round trip before it can be answered at all. The client can
 demand more than the server does; what it must never do is demand *less*, or
 demand something different. The city stays optional: the country carries the
 information, the city only refines it.
+
+---
+
+## CG-041 — The free intro call, considered and not built
+
+The feedback that produced CG-040 also suggested making the paid one-hour
+conversation free, as the hook. We countered with a separate free 15-minute
+intro call, scoped it, and then dropped it. Recording why, so it is not
+rebuilt from the same feedback in six months.
+
+It was expensive where it matters. A booking only reaches `confirmed` through a
+payment settling an order; a free service needs a second path from `hold` to
+`confirmed` in the booking engine — the most sensitive code here — with guards
+so it fires on `price_amount = 0` and never on `null` (which means "on
+request", not "free"), plus the tests that keep it honest. Against that: a few
+no-shows in ten, and the risk of taking bookings away from the one service
+someone can pay for unassisted.
+
+And the free channel already exists. The WhatsApp button sits under the enquiry
+form, costs nothing and is asynchronous, so it does not consume a slot in a day
+that is already spent travelling between clients. A 15-minute call does the same
+job worse, in real time.
+
+The deciding argument was neither of those. **There is no measured problem yet.**
+The site has just opened, `client_rates` is empty, the client history is not
+imported, and nobody knows how many enquiries arrive or how many convert. If
+enquiries turn out to arrive and not convert, the reason will be knowable, and
+the answer may well not be a free call.
+
+The lesson: a proposal that survives its own feasibility review can still fail
+the only question that matters — what evidence says it is needed.
