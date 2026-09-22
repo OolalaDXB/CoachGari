@@ -61,6 +61,9 @@ const FIXTURES = {
       capabilities: [{ capability: 'manual_instructions', readiness: 'available', confirmation: 'operator', handoff: false }] },
     method: { id: 'm1', provider: 'aani', enabled: true, listed: true, currency: 'AED', countries: ['AE'], currencies: ['AED'], intents: null, capabilities: null, limits: {}, instructions: { proxy_type: 'mobile', proxy_value: '+971500005065', display_value: '+971 50 000 5065' }, settings: {}, settlement: {}, updated_by: 'x', updated_at: '2026-09-09T00:00:00Z' },
     destinations: [], intents: ['service', 'package', 'support', 'other'] },
+  // one UAE number stored the way the database now keeps them: international, so the
+  // WhatsApp and Call buttons on the row dial something that exists
+  crm_list_contacts: [{ id: 'c1', display_name: 'Amanda', email: null, phone: '+971563497457', city: 'Dubai', country: 'United Arab Emirates', main_interest: null, enquiry_count: 1, booking_count: 0, last_activity_at: '2026-09-01T00:00:00Z', status: 'lead', needs_review: false }],
   payment_method_set: { provider: 'aani', enabled: true },
   payment_method_remove: { provider: 'aani', removed: 'unlisted', history: 1 },
   beau_ph_fx: { base_currency: 'EUR', settings: { enabled: false, reporting_currency: 'AED', adjustment_bps: 0, quote_ttl_minutes: 15, max_age_hours: 72 }, health: { last_refresh_at: '2026-09-09T09:10:13Z', last_refresh_status: 'success', last_rate_date: '2026-09-08', in_progress: false, fresh: 4, acceptable: 0, stale: 0, missing: 0, rejected: [], source_errors: {} },
@@ -215,6 +218,33 @@ await page.click('#nav a[data-section="finance"]');
 await page.waitForFunction(() => /Transactions/.test(document.querySelector('#view').innerText));
 check('Returning to Transactions reuses the cached list (no refetch in the same session)', count('finance_transactions') === txBefore);
 check('No RPC ever asked for a secret or a provider credential', !calls.some((c) => /secret|key|credential/i.test(JSON.stringify(c.args))));
+
+/* Contacts › search. It was bound to `onchange`, so it only ran on blur or Enter and
+   typing a name left the list sitting there — which reads as broken, not as waiting.
+   What is asserted here is the whole behaviour of a search field: it runs while you
+   type, it does not run once per letter, and the caret survives the redraw. */
+await page.click('#nav a[data-section="crm"]');
+await page.waitForSelector('#subnav a[data-sub="contacts"]');
+await page.click('#subnav a[data-sub="contacts"]');
+await page.waitForSelector('#c-search');
+const listBefore = count('crm_list_contacts');
+await page.focus('#c-search');
+await page.type('#c-search', 'Ama', { delay: 30 });     // fast, like a person typing one word
+await page.waitForTimeout(500);
+const typed = count('crm_list_contacts') - listBefore;
+check('Search runs while you type — no blur, no Enter', typed >= 1, `${typed} calls`);
+check('Typing a word is one query, not one per letter', typed <= 2, `${typed} calls for 3 keystrokes`);
+check('The search term reaches the server', (calls.filter((c) => c.name === 'crm_list_contacts').pop().args || {}).p_search === 'Ama');
+/* crmContacts() rebuilds the whole view, so without putting it back the caret is gone
+   and the next letter lands nowhere. This is the assertion that catches that. */
+check('The caret stays in the box across the redraw', await page.evaluate(() => {
+  const el = document.querySelector('#c-search');
+  return document.activeElement === el && el.value === 'Ama' && el.selectionStart === 3;
+}), await page.evaluate(() => { const el = document.querySelector('#c-search'); return `${document.activeElement?.id} "${el?.value}" @${el?.selectionStart}`; }));
+// and typing continues from there rather than from the start
+await page.keyboard.type('nda', { delay: 30 });
+await page.waitForTimeout(500);
+check('Typing continues where it left off', await page.evaluate(() => document.querySelector('#c-search').value) === 'Amanda');
 
 await browser.close(); server.close();
 console.log(`\nADMIN_WORKSPACE_TESTS ok=${ok} fail=${fail}${log.length ? '\n' + log.join('\n') : ''}`);

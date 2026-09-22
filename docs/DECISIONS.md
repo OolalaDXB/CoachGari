@@ -3364,3 +3364,54 @@ what most of these are.
 as off. That mattered little when the only way in was a one-time link; it
 matters now that email and password is the main door, and it is one toggle in
 Authentication → Password settings.
+
+## CG-029 — Phone numbers in one shape, and a search field that searches
+
+Two small complaints, one of them not small underneath.
+
+**The number.** 54 of 67 contacts held a UAE mobile written the way a resident
+writes it — `0563497457`. `crm_normalize_phone` only stripped punctuation, so
+that and `+971563497457` were two different keys for one phone. Three things
+were broken by it, not one:
+
+1. **Deduplication.** Two people who wrote their number differently on two
+   enquiries became two records. The matcher compares `phone_norm`; a leading
+   zero never matches a country code.
+2. **WhatsApp.** `session_reminders_run` passes `phone_norm` straight to
+   `whatsapp_queue`, which addresses in E.164. A local `05…` number reaches
+   nobody — silently, since there is no bounce.
+3. **Reading it.** `wa.me/0563497457` opens on nothing, and a number with no
+   country code cannot be dialled from outside the country.
+
+**Converted by pattern, never by the contact's country.** `country` says where
+the *person* is, not where their *number* is: this table holds numbers filed
+under Portugal and the United Kingdom that carry UAE mobile prefixes, because
+that is what a resident of Dubai has. Prefixing by country would have corrupted
+real records. So only what is unambiguously a UAE mobile in local form is
+touched — ten digits matching `0(50|52|54|55|56|58)` + seven, the six UAE
+mobile prefixes — and every local-format number in the table matched one. 52
+rows converted, 1 was already E.164, 10 were genuinely foreign (+39, +91, +31,
++380, +44) and were left exactly as they were. Duplicate groups fell 18 → 16.
+
+**The invariant lives in a trigger, not in each writer.** Three functions write
+this column today — `crm_link_contact`, `crm_save_contact`, `crm_merge_contacts`
+— and the fourth will be the client import. Patching them one at a time gives
+an invariant that holds until someone adds a writer, which is not an invariant.
+`crm_contacts_phone_display` states it once: whenever `phone_norm` is plainly a
+full number (10–15 digits, E.164's own range), `phone` is the same number with a
+plus in front. Anything the normaliser cannot vouch for keeps the digits the
+person actually typed, because a number we cannot read is worth more on the
+screen than a number we guessed.
+
+**Two rows stayed local on purpose.** Veronica's duplicate pair both read
+`05o6548633` — a letter **o** where a zero belongs. That is a typo, not a
+format, and guessing at it would have invented a phone number. It needs a human.
+
+**The search field.** It was bound to `onchange`, which fires on blur or Enter,
+so typing a name and watching the list sit there unfiltered was the box working
+exactly as written and looking broken. It searches as you type now, 220ms after
+the last keystroke. Two things make that feel like a search field rather than a
+stutter: `crmContacts()` rebuilds the whole view, so the caret is put back where
+it was or the next letter lands nowhere; and each run carries a sequence number,
+so a slow query for "Am" cannot arrive after — and overwrite — the answer for
+"Amanda".

@@ -721,18 +721,35 @@ async function crmDashboard() {
 
 /* =============================== CRM · CONTACTS =============================== */
 // Canonical people (crm_contacts) with enquiry/booking counts. client_profile:view.
-async function crmContacts() {
-  const search = (view.dataset.cSearch || '').trim();
+/* The search box types, it does not submit.
+
+   It was bound to `onchange`, which only fires on blur or Enter, so typing a name and
+   watching the list sit there unfiltered was the box working exactly as written — and
+   looking broken. It searches as you type now, a short pause after the last keystroke so
+   one query goes out per word rather than per letter.
+
+   Two things have to be held together for that to feel like a search field. crmContacts()
+   rebuilds the whole view, which throws the caret away, so it is put back where it was
+   or the next letter lands nowhere. And each run carries a number: a slow query for "Am"
+   must not arrive after, and overwrite, the answer for "Amanda". */
+let crmRun = 0;
+let crmTypeTimer = null;
+
+async function crmContacts(focus) {
+  const mine = ++crmRun;
+  const raw = view.dataset.cSearch || '';           // untrimmed: a trailing space is a word boundary being typed
+  const search = raw.trim();
   const status = view.dataset.cStatus || '';
   const reviewOnly = view.dataset.cReview === '1';
   const { data, error } = await sb.rpc('crm_list_contacts', { p_search: search || null, p_review_only: reviewOnly }); if (error) throw error;
+  if (mine !== crmRun) return;                      // a later keystroke already asked a better question
   const rows = (data || []).filter((c) => !status || c.status === status);
   const reviewCount = (data || []).filter((c) => c.needs_review).length;
   const opts = ['lead', 'active', 'past', 'archived'];
   view.innerHTML = `
     <div class="ad-head"><div><h1>Contacts</h1><p class="ad-muted">Every person who has enquired or booked. Click to open the profile.</p></div>
       <div class="ad-filters">
-        <input id="c-search" placeholder="Search name, email, phone, city…" value="${esc(search)}">
+        <input id="c-search" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search name, email, phone, city…" value="${esc(raw)}">
         <select id="c-status"><option value="">All statuses</option>${opts.map((o) => `<option ${o === status ? 'selected' : ''}>${o}</option>`).join('')}</select>
         <button class="btn btn-sm ${reviewOnly ? 'btn-accent' : 'btn-line'}" id="c-review">${reviewOnly ? 'Showing needs-review' : 'Needs review'}${!reviewOnly && reviewCount ? ` (${reviewCount})` : ''}</button>
         ${has('client_profile:manage') ? '<button class="btn btn-accent btn-sm" id="c-new">New contact</button>' : ''}
@@ -750,7 +767,17 @@ async function crmContacts() {
       <td class="acts">${has('client_profile:manage') ? `${c.needs_review ? `<button class="btn btn-accent btn-xs" data-c-merge="${c.id}">Merge…</button><button class="btn btn-line btn-xs" data-c-del="${c.id}" data-c-name="${esc(c.display_name || '')}">Delete this one</button><button class="btn btn-line btn-xs" data-c-keep="${c.id}">Not a duplicate</button>` : ''}${c.status === 'lead' ? `<button class="btn btn-accent btn-xs" data-c-status="${c.id}" data-to="active">Make client</button>` : ''}${c.status === 'archived' ? `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="active">Restore</button>` : `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="archived">Archive</button>`}${c.needs_review ? '' : `<button class="btn btn-line btn-xs" data-c-del="${c.id}" data-c-name="${esc(c.display_name || '')}">Delete</button>`}` : ''}</td>
     </tr>`), reviewOnly ? 'Nothing needs review.' : 'No contacts match.')}</div>`;
   $('#c-status').onchange = (e) => { view.dataset.cStatus = e.target.value; crmContacts().catch(fail); };
-  $('#c-search').onchange = (e) => { view.dataset.cSearch = e.target.value.trim(); crmContacts().catch(fail); };
+  const si = $('#c-search');
+  const searchNow = () => { clearTimeout(crmTypeTimer); crmContacts({ caret: si.selectionStart }).catch(fail); };
+  si.oninput = (e) => {
+    view.dataset.cSearch = e.target.value;
+    clearTimeout(crmTypeTimer);
+    crmTypeTimer = setTimeout(searchNow, 220);
+  };
+  // Enter and the clear cross are answers, not typing: they do not wait out the pause
+  si.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); searchNow(); } };
+  si.onsearch = searchNow;
+  if (focus && focus.caret != null) { si.focus(); try { si.setSelectionRange(focus.caret, focus.caret); } catch {} }
   $('#c-review').onclick = () => { view.dataset.cReview = reviewOnly ? '' : '1'; crmContacts().catch(fail); };
   const nb = $('#c-new'); if (nb) nb.onclick = () => openContactEditor(null);
   view.querySelectorAll('tr.clik').forEach((tr) => tr.onclick = () => openProfile(tr.dataset.crm, null, 'overview'));
@@ -2180,7 +2207,19 @@ function pfPrimary() {
   const ph = pf.contact?.phone || (pf.enquiry && !pf.enquiry.contact?.includes('@') ? pf.enquiry.contact : null);
   return { em, ph };
 }
-const waHref = (p) => 'https://wa.me/' + String(p || '').replace(/\D/g, '');
+/* wa.me wants E.164 with no punctuation, and it does not complain about a number that
+   cannot exist — it just opens on nobody. CRM numbers arrive international now, but a
+   raw enquiry still carries whatever the person typed into the contact form, so the same
+   rule the database uses is applied here: 0 + one of the six UAE mobile prefixes + seven
+   digits is a Dubai mobile; 00 in front is the international prefix written out. Anything
+   else is passed through as digits, exactly as before. */
+const e164 = (p) => {
+  const d = String(p || '').replace(/\D/g, '');
+  if (/^00[0-9]{8,}$/.test(d)) return d.slice(2);
+  if (/^0(50|52|54|55|56|58)[0-9]{7}$/.test(d)) return '971' + d.slice(1);
+  return d;
+};
+const waHref = (p) => 'https://wa.me/' + e164(p);
 const initials = (n) => (n || '?').trim().split(/\s+/).slice(0, 2).map((x) => x[0]?.toUpperCase() || '').join('') || '?';
 
 async function openProfile(crmId, enquiryId, section = 'overview') {

@@ -10,7 +10,7 @@
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
-  c1 uuid; c2 uuid; cid uuid; cid2 uuid; nrid uuid; j jsonb; n int; q text; m1 uuid; got numeric;
+  c1 uuid; c2 uuid; c3 uuid; cid uuid; cid2 uuid; nrid uuid; j jsonb; n int; q text; m1 uuid; got numeric;
 begin
   /* ---- seed personas ---- */
   insert into public.app_users (email, display_name, party) values
@@ -46,6 +46,43 @@ begin
     values (gen_random_uuid(), 'Phone P', '263771234567', 'coaching', 'phone two');
   if (select crm_contact_id from public.contacts where message = 'phone two') = c2
      and (select count(*) from public.crm_contacts where phone_norm = '263771234567') = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [exact phone match]'; end if;
+
+  /* A UAE mobile written the way a resident writes it — 0561234567 — and the way it
+     has to be sent — +971561234567 — are one number, and the matcher used to make two
+     people out of them because it only stripped punctuation. */
+  insert into public.contacts (submission_id, name, contact, interest, message)
+    values (gen_random_uuid(), 'Dubai Local', '056 123 4567', 'coaching', 'uae local');
+  select crm_contact_id into c3 from public.contacts where message = 'uae local';
+  if (select phone_norm from public.crm_contacts where id = c3) = '971561234567'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [uae local normalised]'; end if;
+  insert into public.contacts (submission_id, name, contact, interest, message)
+    values (gen_random_uuid(), 'Dubai Intl', '+971 56 123 4567', 'coaching', 'uae intl');
+  if (select crm_contact_id from public.contacts where message = 'uae intl') = c3
+     and (select count(*) from public.crm_contacts where phone_norm = '971561234567') = 1
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [local and intl are one person]'; end if;
+  -- 00 is the international prefix spelled out; it reaches the same person
+  insert into public.contacts (submission_id, name, contact, interest, message)
+    values (gen_random_uuid(), 'Dubai 00', '00971561234567', 'coaching', 'uae zerozero');
+  if (select crm_contact_id from public.contacts where message = 'uae zerozero') = c3
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [00 prefix matches]'; end if;
+
+  /* Only the six UAE mobile prefixes are converted. A landline (04) and a foreign number
+     keep their own shape rather than being guessed at and given the wrong country. */
+  if public.crm_normalize_phone('04 123 4567') = '041234567'
+     and public.crm_normalize_phone('+39 333 111 1111') = '393331111111'
+     and public.crm_normalize_phone('051 123 4567') = '0511234567'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [non-mobile left alone]'; end if;
+  -- too short to be a number at all is still nothing, not a fragment
+  if public.crm_normalize_phone('12345') is null and public.crm_normalize_phone('') is null
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [short phone not stored]'; end if;
+
+  /* What is on the screen is what gets dialled: the WhatsApp and Call buttons are built
+     from `phone`, so it has to carry the country code too, whoever wrote the row. The
+     enquiry above typed it locally; the stored number is international. */
+  if (select phone from public.crm_contacts where id = c3) = '+971561234567'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [enquiry phone shown in e164]'; end if;
+  -- the form is a different writer; it goes through the same invariant (checked below,
+  -- where there is a signed-in user to run it as)
 
   -- two different people with the same NAME are never merged (different emails)
   insert into public.contacts (submission_id, name, contact, interest) values (gen_random_uuid(), 'John Smith', 'john1@example.com', 'coaching');
@@ -103,6 +140,17 @@ begin
   j := public.crm_edit_note((j ->> 'id')::uuid, 'Warm lead — called, no answer');
   if j ->> 'body' = 'Warm lead — called, no answer' then ok := ok + 1; else fail := fail + 1; log := log || ' [note edit]'; end if;
   if exists (select 1 from public.admin_audit where area = 'crm_note' and action = 'update' and changed_by = 'full@test.local') then ok := ok + 1; else fail := fail + 1; log := log || ' [note edit audited]'; end if;
+
+  /* The form writes phone the same way the enquiry does: what is on the screen is what
+     the WhatsApp and Call buttons dial, so it carries the country code. */
+  perform public.crm_save_contact(jsonb_build_object('display_name','Form Typed','phone','052 987 6543'));
+  if (select phone from public.crm_contacts where display_name = 'Form Typed') = '+971529876543'
+     and (select phone_norm from public.crm_contacts where display_name = 'Form Typed') = '971529876543'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [form phone shown in e164]'; end if;
+  -- a number the normaliser cannot vouch for keeps the digits the person actually typed
+  perform public.crm_save_contact(jsonb_build_object('display_name','Odd Number','phone','04 123 4567'));
+  if (select phone from public.crm_contacts where display_name = 'Odd Number') = '04 123 4567'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [unrecognised phone left as typed]'; end if;
   execute 'reset role';
 
   -- coach-only: no CRM at all
