@@ -33,16 +33,16 @@ export async function collabList() {
         <input id="cl-search" placeholder="Name, company, reference" value="${esc(search)}">
         <select id="cl-status">${STATUSES.map((s) => `<option value="${s}" ${s === status ? 'selected' : ''}>${s ? s[0].toUpperCase() + s.slice(1) : 'All statuses'}</option>`).join('')}</select>
       </div></div>
-    <div class="ad-panel">${C.table(['Reference', 'Who', 'Type', 'Subject', 'Status', 'Waiting on', 'Latest', 'Updated'],
+    <div class="ad-panel">${C.table(['<span class="col-wide">Reference</span>', 'Who', '<span class="col-wide">Type</span>', 'Subject', 'Status', '<span class="col-wide">Waiting on</span>', 'Latest', '<span class="col-wide">Updated</span>'],
       rows.map((r) => `<tr class="clik" data-id="${r.id}">
-        <td><b>${esc(r.public_ref)}</b></td>
+        <td class="col-wide"><b>${esc(r.public_ref)}</b></td>
         <td>${esc(r.contact_name || r.company || '—')}${r.company && r.contact_name ? `<br><span class="ad-muted" style="font-size:12px">${esc(r.company)}</span>` : ''}</td>
-        <td>${esc(TYPE[r.collaboration_type] || r.collaboration_type)}</td>
+        <td class="col-wide">${esc(TYPE[r.collaboration_type] || r.collaboration_type)}</td>
         <td>${esc(r.title || '—')}</td>
         <td>${st(r.status)}</td>
-        <td>${wait(r)}</td>
+        <td class="col-wide">${wait(r)}</td>
         <td class="num">${r.latest_amount != null ? money(r.latest_amount, r.latest_currency) : '—'}</td>
-        <td>${C.fmt(r.updated_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td>
+        <td class="col-wide">${C.fmt(r.updated_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td>
       </tr>`), 'No collaborations yet.')}</div>`;
   C.$('#cl-status').onchange = (e) => { view.dataset.clStatus = e.target.value; collabList().catch(C.fail); };
   C.$('#cl-search').onchange = (e) => { view.dataset.clSearch = e.target.value.trim(); collabList().catch(C.fail); };

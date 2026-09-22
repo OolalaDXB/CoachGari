@@ -136,12 +136,12 @@ export async function financeTransactions() {
         <select id="tx-method"><option value="">All methods</option>${methods.map((m) => `<option value="${esc(m)}" ${txFilters.method === m ? 'selected' : ''}>${esc((rows.find((r) => r.method === m) || {}).method_label || m)}</option>`).join('')}</select>
         <select id="tx-status"><option value="">All statuses</option>${Object.entries(STATUS_LABEL).map(([k, l]) => `<option value="${k}" ${txFilters.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
       </div>
-      ${C.table(['Date', 'Reference', 'Customer', 'Type', 'Payment method', 'Amount', 'Status', 'Action'], filtered.map((r) => `<tr class="clik" data-tx="${esc(r.reference)}">
+      ${C.table(['Date', 'Reference', '<span class="col-wide">Customer</span>', '<span class="col-wide">Type</span>', '<span class="col-wide">Payment method</span>', 'Amount', 'Status', 'Action'], filtered.map((r) => `<tr class="clik" data-tx="${esc(r.reference)}">
         <td>${when(r.created_at)}</td>
-        <td><b>${esc(r.public_reference)}</b><div class="msg" style="font-size:12px">${esc(r.reference)}</div></td>
-        <td class="ad-muted" style="font-size:12.5px">${esc(r.customer_hint || '—')}</td>
-        <td>${esc(TYPE_LABEL[r.type] || r.type)}${r.item ? `<div class="msg" style="font-size:12px">${esc(r.item)}</div>` : ''}</td>
-        <td>${esc(r.method_label || '—')}</td>
+        <td><b>${esc(r.public_reference)}</b><div class="msg col-wide" style="font-size:12px">${esc(r.reference)}</div></td>
+        <td class="ad-muted col-wide" style="font-size:12.5px">${esc(r.customer_hint || '—')}</td>
+        <td class="col-wide">${esc(TYPE_LABEL[r.type] || r.type)}${r.item ? `<div class="msg" style="font-size:12px">${esc(r.item)}</div>` : ''}</td>
+        <td class="col-wide">${esc(r.method_label || '—')}</td>
         <td class="num">${money(r.amount, r.currency)}${r.fx ? `<div class="msg" style="font-size:12px">priced ${money(r.pricing_amount, r.pricing_currency)}</div>` : ''}</td>
         <td>${st(r.status)}${r.refund_amount ? `<div class="msg" style="font-size:12px">refunded ${money(r.refund_amount, r.currency)}</div>` : ''}</td>
         <td class="acts">${actionCell(r)}</td></tr>`), rows.length ? 'No transaction matches these filters.' : 'No transactions yet.')}

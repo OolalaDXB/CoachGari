@@ -68,7 +68,7 @@ table.ad-table{width:100%;border-collapse:collapse;font-size:14px;}
 .ad-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;}
 .ad-kpi{background:#fff;border-radius:14px;padding:16px 18px;}
 .ad-kpi b{display:block;font-size:24px;letter-spacing:-.02em;}
-.ad-kpi span{font-size:12.5px;color:var(--grey-text);}
+.ad-kpi span{display:block;font-size:12.5px;color:var(--grey-text);}   /* block: a KPI can carry a label AND a comparison, and inline ran them together */
 .ad-grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;}
 .ad-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--black);color:#fff;padding:12px 18px;border-radius:12px;font-size:14px;font-weight:600;z-index:50;max-width:90vw;}
 .ad-toast.err{background:#b3261e;}
@@ -466,7 +466,7 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
 .an-card > span{font-size:12.5px;color:var(--grey-text);}
 .an-plat{font-size:12px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);display:flex;align-items:center;gap:6px;}
 .an-src{font-size:9.5px;font-weight:700;letter-spacing:.04em;color:var(--grey-text);background:var(--grey-bg);border-radius:999px;padding:1px 6px;}
-.an-sub{font-size:12px;color:var(--grey-text);margin-top:2px;}
+.an-sub{display:block;font-size:12px;color:var(--grey-text);margin-top:2px;}
 .an-d{font-weight:700;} .an-d.up{color:#1b7a3d;} .an-d.down{color:#b3261e;}
 .an-fun{position:relative;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;margin-bottom:6px;overflow:hidden;}
 .an-fun-bar{position:absolute;inset:0 auto 0 0;background:var(--accent-tint);border-radius:10px;}
@@ -594,4 +594,35 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
 @media(max-width:559px){
   .ad-table .acts{display:flex;flex-wrap:wrap;gap:6px;}
   .ad-table .acts .btn{margin:0;min-height:36px;}
+}
+
+/* Not every table can drop columns. A settlement has eleven of them and each is part of
+   the arithmetic; hiding one would make the row stop adding up. Those still scroll
+   sideways, which is fine — but a table that is cut off at the edge with no sign that
+   there is more looks broken rather than scrollable. A fade on the right says "keep
+   going", and it disappears once the table fits or the reader reaches the end. */
+.ad-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;
+  background:linear-gradient(to right,#fff 30%,rgba(255,255,255,0)),
+             linear-gradient(to right,rgba(255,255,255,0),#fff 70%) 100% 0,
+             radial-gradient(farthest-side at 0 50%,rgba(0,0,0,.10),transparent),
+             radial-gradient(farthest-side at 100% 50%,rgba(0,0,0,.10),transparent) 100% 0;
+  background-repeat:no-repeat;background-size:36px 100%,36px 100%,14px 100%,14px 100%;
+  background-attachment:local,local,scroll,scroll;}
+
+/* A grid track is auto-sized to its content unless told otherwise, so one long option in
+   a <select> pushes the whole row wider than the screen. min-width:0 lets the track
+   shrink and the control ellipsise instead. */
+.ad-form .row > *{min-width:0;}
+.ad-form label{min-width:0;}
+.ad-form label > *{min-width:0;}          /* the label is itself a grid: its control has to be allowed to shrink too */
+.ad-form input,.ad-form select,.ad-form textarea{width:100%;max-width:100%;box-sizing:border-box;}
+
+/* The workspace title was clipped mid-word ("Collaboratio") because it had no ellipsis
+   and the account chip beside it never gave ground. On a phone the chip drops the email
+   and keeps the initials — the address is one tap away in the menu it opens, and the
+   screen you are on matters more than the account you already know you are signed into. */
+.ad-top-ctx h2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+@media(max-width:559px){
+  .ad-account .acct{padding:5px;gap:0;}
+  .ad-account .acct .who{display:none;}
 }

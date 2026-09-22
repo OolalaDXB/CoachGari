@@ -3700,3 +3700,45 @@ this business, the word stays.
 `.cg-acts-thin` exists for the rows with no primary among them: on a phone they
 are icons like everything else, but above 560px they fit their own content
 instead of claiming the two columns a decision row wants.
+
+## CG-037 — Finance, Collaborations and Audience, measured rather than assumed
+
+I said in CG-036 that these three were "mostly tables, so less exposed". Driving
+them at 390, 430, 744 and 1024 found four real faults, two of which had nothing
+to do with screen size.
+
+**The first measurement was worthless and I nearly reported it.** The probe said
+"no overflow anywhere" on all four screens — because none of them had rendered:
+the Supabase stub was missing `.gte`, the Audience route key is `analytics` not
+`audience`, and the series field is `day` not `d`. A green result from a screen
+that never drew is the most expensive kind of pass. The screenshots caught it.
+
+**Audience: two labels ran together.** `.ad-kpi span` was inline and `.an-sub`
+set `margin-top`, which does nothing on an inline box — so the card read
+"Website visitors**no period to compare yet**". Wrong at every width; only
+*obvious* once the card was narrow enough to wrap. Both are blocks now.
+
+**Audience: a grid blowout.** A `<select>` is as wide as its longest option, and
+a grid track is sized to its content, so "YouTube channel (ID or @handle)"
+pushed the form 441px wide inside a 370px column. `min-width:0` on the row's
+children *and* on the label's own children — the label is itself a grid — lets
+the control shrink and ellipsise.
+
+**Collaborations: the decisions were off-screen.** Eight columns with no
+`col-wide` discipline meant a phone showed Reference, Who, Type, Subject and
+hid Status, Waiting on and the amount — you had to scroll a table sideways to
+learn where a deal stood. Reference, Type, Waiting on and Updated now step
+aside; Who, Subject, Status and Latest stay.
+
+**The title was clipped mid-word.** "Collaboratio" — no ellipsis on the
+workspace title, and an account chip that never gave ground. The title
+ellipsises now, and below 560px the chip drops the email and keeps the initials:
+the address is one tap away in the menu it opens, and the screen you are on
+matters more than the account you know you are signed into.
+
+**Where columns could not be dropped, the scroll was made visible instead.** A
+settlement row has eleven columns and each is part of the arithmetic — hiding
+one makes the row stop adding up. Those still scroll sideways, but
+`.ad-table-wrap` now carries a shadow at the edge that appears only while there
+is more to see. A table cut off with no sign of it looks broken; the same table
+with a fade looks scrollable.
