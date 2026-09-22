@@ -3927,3 +3927,35 @@ the answer may well not be a free call.
 
 The lesson: a proposal that survives its own feasibility review can still fail
 the only question that matters — what evidence says it is needed.
+
+---
+
+## CG-042 — The interest menu answered for the visitor
+
+Her last point was that a warm visitor should meet one easy action, because
+every extra choice is a chance to give up. Half of it was moot — it proposed a
+free call, which CG-041 dropped — and half was already done: the final section
+has one accented button and two muted alternatives.
+
+Following the mechanism rather than the prescription led somewhere better. The
+extra choice in that section is the eight-option "What you're after" menu, and
+it had no empty state: it opened on "Online coaching" and sent it. Anyone who
+scrolled to the form without touching the menu was filed as an online-coaching
+lead.
+
+That is not friction, it is invented data — on the exact field Coach Gari will
+read his demand from in six months. **A select without a neutral first option
+does not record a choice, it manufactures one**, and it does so silently, which
+is why it survives review.
+
+A neutral option now sits first, selected by default, sent empty. Deliberately
+not `required`: this is the warmest point of the page and no new obligation
+belongs here. An honest blank beats a confident wrong answer. Checked before
+shipping: the email templates already treat an absent interest as a case —
+`p.interest ? … : ""` in the acknowledgement, `"—"` and `"General"` in the
+notification — so nothing downstream prints an empty phrase.
+
+Production carried zero enquiries when this was found, so nothing is polluted.
+The cost of this fix was nil today and would have risen with every lead.
+
+Also in this change: "Start this week" became "Start now" on the final section.

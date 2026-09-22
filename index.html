@@ -389,7 +389,7 @@
 
 <section class="close" id="contact">
   <div class="wrap center">
-    <h2 class="reveal">Start this week</h2>
+    <h2 class="reveal">Start now</h2>
     <p class="sub sub-wide reveal" style="margin-top:18px;">Tell me where you are, the equipment at your disposal, and what you are trying to achieve. Get an immediate response on what would work for you.</p>
 
     <div class="enquiry reveal">
@@ -429,7 +429,16 @@
         <div class="two one">
           <div class="field">
             <label for="f-what">What you're after</label>
+            <!-- A neutral first choice, selected by default and sent empty. Without it the
+                 select opened on "Online coaching" and sent it, so anyone who scrolled to the
+                 form without touching the menu was recorded as an online-coaching lead — not
+                 friction, invented data, on the very field Coach Gari will read his demand
+                 from. Not required either: this is the warmest point of the page and no new
+                 obligation belongs here. An honest blank beats a confident wrong answer, and
+                 the email templates already print "—" rather than an empty phrase. Visitors
+                 arriving from a catalogue card still land here preselected. -->
             <select id="f-what" name="interest">
+              <option value="">Not sure yet — tell Coach Gari below</option>
               <option>Online coaching</option>
               <option>The 12-week programme</option>
               <option>Live group sessions</option>
