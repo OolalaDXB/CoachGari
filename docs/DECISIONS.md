@@ -3886,3 +3886,13 @@ removed is a refusal that protected nothing.
 One matching change in `site.js`: the country is validated against the ISO list
 only when something was typed. Empty is now a valid answer; half-typed is still
 not, because a fragment stored as a country is worse than no country.
+
+**Correction (same day, owner's call): the country is required again.** The
+reasoning above held that `required` should mirror the server, and the server
+accepts an enquiry with no country. Coach Gari overruled it, and he is right
+about his own business: the country is what the answer turns on — timezone, what
+is in the shops, whether an in-person session is even possible — and an enquiry
+without one costs a round trip before it can be answered at all. The client can
+demand more than the server does; what it must never do is demand *less*, or
+demand something different. The city stays optional: the country carries the
+information, the city only refines it.
