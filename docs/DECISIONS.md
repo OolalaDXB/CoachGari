@@ -3862,3 +3862,27 @@ page. A padel page is planned; the trips stay.
 The general lesson: an outside reader who cannot see the code will be right
 about the symptom and wrong about the cause. Both halves are useful, and they
 have to be separated before either is acted on.
+
+### CG-040b — The form asked for the wrong things to be mandatory
+
+Simplifying the enquiry form turned out not to mean removing fields. It meant
+making `required` mean what the server means.
+
+The contact function has always refused an enquiry without a name or without a
+reachable contact, and has always accepted one without a city or a country
+(`splitLocation` returns nulls and the insert carries them). The markup said the
+opposite: `f-city` and `f-country` carried `required`, `f-name` and `f-email`
+did not. So the browser blocked on the two fields the backend does not need, let
+through the two it does, and the visitor learned the real rule only after a
+failed round trip.
+
+`required` now sits on name and contact. City and country stay in the form,
+stay stored, and are marked optional — with the reason written next to them,
+because where someone lives decides which live sessions are reachable and what
+meal planning can assume. **Asking with the reason attached collects more than
+asking with a star.** No field was removed and no depth was lost; what was
+removed is a refusal that protected nothing.
+
+One matching change in `site.js`: the country is validated against the ISO list
+only when something was typed. Empty is now a valid answer; half-typed is still
+not, because a fragment stored as a country is worse than no country.

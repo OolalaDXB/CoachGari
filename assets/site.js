@@ -608,7 +608,10 @@ function uploadOne(uploadToken, file){
     var fields = Object.fromEntries(new FormData(form).entries());
     delete fields.media;
     var countryEl = form.querySelector('[data-country-input]');
-    if (countryEl && COUNTRY_NAMES.length) {
+    /* The country is optional. Left empty it is simply not sent; typed, it still has to
+       resolve to a real country, because a half-typed name stored as-is is worse than no
+       country at all. */
+    if (countryEl && COUNTRY_NAMES.length && countryEl.value.trim()) {
       var matched = matchCountry(countryEl.value);
       if (!matched) {
         say('Pick your country from the list as you type.', 'err');
