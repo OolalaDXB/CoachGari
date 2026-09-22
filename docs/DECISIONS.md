@@ -3626,3 +3626,42 @@ sheet does prefill `HH:00` (the calendar grid is hourly), so opening from a
 15:00 row and expecting 15:15 needs the field edited — but nothing in our code
 moves a time the operator typed. If it persists, the next useful evidence is
 the browser and whether the time was typed or picked from the native control.
+
+## CG-035 — Schedule says what the profile says, and the sheet fits the device
+
+**Schedule did not reflect the new facts.** The session number and the price were
+added to the client profile's Sessions tab and nowhere else, so Schedule →
+Sessions still showed a session with no position and no amount while the same
+session in a profile showed both. One fact, two screens, two answers. Schedule
+now carries `#` and `Price` — the price behind `finance:view`, like everywhere
+else — and the columns that are context rather than decision are marked
+`col-wide` so a phone keeps the ones that matter.
+
+**The session sheet was written for one width.** Nine full-width labelled
+buttons in a single column pushed the session itself off the top of an iPhone,
+and wasted two thirds of an iPad Pro. The actions are now icon-and-label
+buttons in a grid whose column count follows the viewport:
+
+| Device | Width | Actions |
+| --- | --- | --- |
+| iPhone | 390 px | 4 icon columns, 46 px targets |
+| iPhone Pro Max | 430 px | 5 icon columns |
+| iPad mini / portrait | 744 px | 2 labelled columns |
+| iPad Pro | 1024 px | 3 labelled columns |
+| Desktop | 1180 px+ | 4 labelled columns |
+
+Measured in a real browser at each width, with no horizontal overflow at any of
+them.
+
+**Two rules the icons follow.** The label is hidden, never deleted — it stays in
+the DOM as the button's accessible name, so a screen reader still says
+"No-show" where the phone shows a crossed-out person; an icon with no name is a
+guess. And **the primary action keeps its words**: the first screenshot had a
+full-width blue button carrying only a tick, which is a question, not an
+instruction.
+
+**One bug found on the way.** The status chip read "schedul…" because
+`.pf-close` is absolutely positioned — written for the profile panel, where
+nothing sits beside it — and landed on top of the chip. In the sheet header it
+now takes its own place in the row, and the *name* is what shortens when space
+runs out: a truncated status is a lie, a truncated name is still a name.

@@ -300,7 +300,13 @@ button.ad-kpi{border:0;font:inherit;text-align:left;width:100%;color:inherit;}
 .cg-scrim{position:absolute;inset:0;background:rgba(15,18,22,.42);}
 .cg-sheet{position:relative;background:#fff;width:min(520px,100%);max-height:90vh;overflow:auto;border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.28);}
 .cg-sheet-h{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:2;}
-.cg-sheet-h b{font-size:17px;letter-spacing:-.01em;flex:1;}
+.cg-sheet-h b{font-size:17px;letter-spacing:-.01em;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* The status read "schedul…" because the close button is absolutely positioned — written
+   for the profile panel, where nothing sits beside it — and landed on top of the chip. In
+   this header it takes its own place in the row, and the NAME is what gets shortened when
+   space runs out, because a truncated status is a lie and a truncated name is still a name. */
+.cg-sheet-h .st{flex:none;}
+.cg-sheet-h .pf-close{position:static;flex:none;margin-left:2px;}
 .cg-sheet-b{padding:16px 18px 22px;}
 .cg-sec{padding:12px 0;border-top:1px solid var(--line);} .cg-sec:first-child{border-top:0;padding-top:0;}
 .cg-sec-t{font-size:11.5px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--grey-text);margin-bottom:6px;}
@@ -523,3 +529,47 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
 .cg-raterow .cg-rate-v { font-size:16px; }
 .cg-raterow button { margin-left:auto; }
 @media (max-width:560px) { .cg-raterow button { margin-left:0; } }
+
+/* Session actions — the same nine things, sized to the screen they are read on.
+
+   The stack of full-width labelled buttons was written for one width and looked it: on an
+   iPhone it pushed the session itself off the top, and on an iPad Pro it wasted two thirds
+   of the sheet. So the actions are icon-and-label buttons in a grid whose column count
+   follows the viewport, and on a phone everything except the one action the coach came for
+   — marking the session done — collapses to a row of icon-only targets.
+
+   The label is never deleted, only hidden: it stays in the DOM as the button's accessible
+   name, so a screen reader and a long-press tooltip still say "No-show" when the phone
+   shows a crossed-out person. An icon with no name is a guess. */
+.cg-acts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:14px;}
+.cg-act{display:flex;align-items:center;justify-content:center;gap:8px;min-height:44px;   /* 44px: the Apple touch target */
+  padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--card,#fff);
+  color:inherit;font:inherit;font-size:14px;font-weight:600;text-decoration:none;cursor:pointer;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cg-act:hover{border-color:var(--accent);}
+.cg-act svg{flex:none;}
+.cg-act-go{grid-column:1 / -1;background:var(--accent);border-color:var(--accent);color:#fff;}
+.cg-act-danger{color:var(--danger,#a12a2a);}
+
+/* Phone: one primary, then icons. 4 per row on the narrowest, 5 once there is room. */
+@media(max-width:559px){
+  .cg-acts{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;}
+  .cg-act{padding:10px 6px;min-height:46px;}
+  /* The primary action keeps its words: a big blue button carrying only a tick is a
+     question, not an instruction. Only the secondary ones become icons. */
+  .cg-act:not(.cg-act-go) span{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+    overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0;}
+  .cg-act svg{width:19px;height:19px;}
+}
+@media(min-width:420px) and (max-width:559px){ .cg-acts{grid-template-columns:repeat(5,minmax(0,1fr));} }
+
+/* iPad portrait and mini: two labelled columns. iPad landscape and Pro: three. */
+@media(min-width:834px){ .cg-acts{grid-template-columns:repeat(3,minmax(0,1fr));} }
+@media(min-width:1180px){ .cg-acts{grid-template-columns:repeat(4,minmax(0,1fr));} .cg-act-go{grid-column:span 2;} }
+
+/* Filters wrap instead of scrolling off the edge on a narrow screen */
+@media(max-width:760px){
+  .ad-filters{display:flex;flex-wrap:wrap;gap:8px;width:100%;}
+  .ad-filters input,.ad-filters select{flex:1 1 140px;min-width:0;}
+  .ad-filters .btn{flex:1 1 auto;}
+}

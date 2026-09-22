@@ -1357,16 +1357,16 @@ async function openSession(id) {
              <div class="ov-noteline"><input class="ad-input" data-note maxlength="500" placeholder="One line — it goes to the client's history" value="${esc(s.note || '')}" aria-label="Session note">
                <button class="btn btn-line btn-sm" data-savenote>Save</button></div></div>`
         : (s.note ? `<div class="cg-sec"><div class="cg-sec-t">Note</div><p style="margin:0;white-space:pre-wrap">${esc(s.note)}</p></div>` : '')}
-      <div class="cg-actions cg-actions-grid">
-        ${has('client_profile:view') ? '<button class="btn btn-line" data-open>Open client</button>' : ''}
-        ${ph ? `<a class="btn btn-line" href="${waHref(ph)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}
-        ${s.status !== 'completed' ? '<button class="btn btn-accent" data-complete>Mark completed</button>' : ''}
-        ${(pack && pack.payment_status && pack.payment_status !== 'paid' && has('finance:manage')) ? '<button class="btn btn-line" data-collect>Collect payment</button>' : ''}
-        ${s.status === 'scheduled' ? '<button class="btn btn-line" data-noshow>No-show</button>' : ''}
-        <button class="btn btn-line" data-pack>Link / change package</button>
-        <button class="btn btn-line" data-edit>Edit / reschedule</button>
-        ${s.status !== 'cancelled' ? '<button class="btn btn-line" data-cancel>Cancel</button>' : ''}
-        ${(!s.booking_id && s.status !== 'completed') ? '<button class="btn btn-line" data-del style="color:var(--danger,#a12a2a)">Delete</button>' : ''}
+      <div class="cg-acts">
+        ${s.status !== 'completed' ? `<button class="cg-act cg-act-go" data-complete>${ICO.check}<span>Mark completed</span></button>` : ''}
+        ${has('client_profile:view') ? `<button class="cg-act" data-open>${ICO.person}<span>Open client</span></button>` : ''}
+        ${ph ? `<a class="cg-act" href="${waHref(ph)}" target="_blank" rel="noopener">${ICO.wa}<span>WhatsApp</span></a>` : ''}
+        ${(pack && pack.payment_status && pack.payment_status !== 'paid' && has('finance:manage')) ? `<button class="cg-act" data-collect>${ICO.money}<span>Collect payment</span></button>` : ''}
+        ${s.status === 'scheduled' ? `<button class="cg-act" data-noshow>${ICO.noshow}<span>No-show</span></button>` : ''}
+        <button class="cg-act" data-pack>${ICO.pack}<span>Package</span></button>
+        <button class="cg-act" data-edit>${ICO.edit}<span>Reschedule</span></button>
+        ${s.status !== 'cancelled' ? `<button class="cg-act" data-cancel>${ICO.cancel}<span>Cancel</span></button>` : ''}
+        ${(!s.booking_id && s.status !== 'completed') ? `<button class="cg-act cg-act-danger" data-del>${ICO.trash}<span>Delete</span></button>` : ''}
       </div>
       ${s.booking_id ? '<p class="ad-muted" style="font-size:12px;margin-top:10px">This session came from a website booking.</p>' : ''}
     </div>`;
@@ -1585,12 +1585,15 @@ async function sessionsList() {
         <select id="sl-mode"><option value="">All modes</option><option value="in_person" ${mode==='in_person'?'selected':''}>In person</option><option value="online" ${mode==='online'?'selected':''}>Online</option></select></div></div>
     ${pending.length ? `<div class="ad-panel"><div class="ov-lbl">Site bookings not confirmed yet (${pending.length})</div><p class="ad-muted" style="font-size:13px;margin:0 0 8px">A hold or an unpaid booking. It becomes a session once confirmed.</p>
       ${table(['Time', 'Session', 'Client', 'Ref · status', 'Price', ''], pending.map((b) => bookingRow(b, tz)), '')}</div>` : ''}
-    <div class="ad-panel">${table(['Date', 'Time', 'Client', 'Type', 'Origin', 'Package', 'Payment', 'Status'], rows.map((s) => {
+    <div class="ad-panel">${table(['Date', 'Time', '#', 'Client', '<span class="col-wide">Type</span>', '<span class="col-wide">Origin</span>', '<span class="col-wide">Package</span>', ...(has('finance:view') ? ['Price'] : []), '<span class="col-wide">Payment</span>', 'Status'], rows.map((s) => {
       const t = lp(s.start_at), e = lp(s.end_at); const b = s.booking;
       return `<tr class="clik" data-sess="${s.id}"><td>${prettyDay(t.date)}</td><td>${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}–${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')}</td>
-        <td><b>${esc(s.client_name || '—')}</b></td><td>${esc(s.title || '—')} · ${s.delivery_mode === 'online' ? 'online' : 'in person'}</td>
-        <td>${b ? `Site<br><span class="ad-muted" style="font-size:12px">${esc(b.reference)}</span>` : '<span class="ad-muted">Coach</span>'}</td>
-        <td>${s.pack ? `${s.pack.used}/${s.pack.total_sessions}` : '—'}</td><td>${payChip(b)}</td><td>${st(s.status)}</td></tr>`;
+        <td class="ad-muted" style="font-size:12.5px">${seqLine(s.seq) || '—'}</td>
+        <td><b>${esc(s.client_name || '—')}</b></td><td class="col-wide">${esc(s.title || '—')} · ${s.delivery_mode === 'online' ? 'online' : 'in person'}</td>
+        <td class="col-wide">${b ? `Site<br><span class="ad-muted" style="font-size:12px">${esc(b.reference)}</span>` : '<span class="ad-muted">Coach</span>'}</td>
+        <td class="col-wide">${s.pack ? `${s.pack.used}/${s.pack.total_sessions}` : '—'}</td>
+        ${has('finance:view') ? `<td style="font-size:12.5px">${priceLine(s.price)}</td>` : ''}
+        <td class="col-wide">${payChip(b)}</td><td>${st(s.status)}</td></tr>`;
     }), 'No sessions match.')}</div>`;
   $('#sl-q').onchange = (e) => { view.dataset.slQ = e.target.value.trim(); sessionsList().catch(fail); };
   $('#sl-origin').onchange = (e) => { view.dataset.slOrigin = e.target.value; sessionsList().catch(fail); };
@@ -2557,6 +2560,14 @@ function renderProfileBody(key) {
 
 /* ---- profile sections ---- */
 const ICO = {
+  check: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
+  noshow: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-2.8 2.4-5 5.5-5 1 0 1.9.2 2.7.6"/><path d="m16 15 5 5M21 15l-5 5"/></svg>',
+  person: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/></svg>',
+  pack: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="m14.5 6.5 3 3"/></svg>',
+  cancel: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8.5 8.5 7 7"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 7V5h4v2M6 7l1 13h10l1-13"/></svg>',
+  money: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.6"/></svg>',
   call: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 3.5 9 4l1 3.5-1.8 1.4a12 12 0 0 0 5.4 5.4L15 12.5 18.5 14l.5 2.5c0 1-.9 1.9-2 1.8A15 15 0 0 1 4.7 5C4.6 3.9 5.5 3 6.5 3.5Z"/></svg>',
   wa: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2Zm5.5 14.2c-.2.6-1.2 1.2-1.7 1.2-.5.1-1 .2-3.2-.7-2.7-1.1-4.4-3.9-4.5-4-.1-.2-1.1-1.4-1.1-2.7 0-1.3.7-1.9.9-2.2.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.5l.8 2c.1.2.1.4 0 .5l-.4.6c-.2.2-.3.4-.1.7.2.3.9 1.4 1.9 2 .9.6 1.3.7 1.5.6.2-.1.5-.6.7-.9.2-.2.3-.2.6-.1l1.9.9c.2.1.4.2.5.3.1.3.1.7-.1 1.1Z"/></svg>',
   mail: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7 8.5 6 8.5-6"/></svg>',
