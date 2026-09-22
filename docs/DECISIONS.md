@@ -3594,3 +3594,35 @@ ordinary and easy to forget: dedupe the parent before the child, or the child's
 survivors go with the parent you delete.
 
 Production after: 7 sessions → 4, 3 notes → 1, 44 contacts, 0 flagged.
+
+## CG-034 — The twin guard had to be a window, not a rule
+
+CG-033 answered any create for an existing (client, start, end) with the
+session already there. It killed the twins and, with them, legitimate work:
+recreating a session at the same slot after deleting it, or simply trying
+again, silently returned the old row. From the coach's side that reads as
+**"I can no longer create a session"**, which is exactly what came back.
+
+The fault was never "two sessions exist at the same minute". It was "one
+gesture produced two requests", and the evidence said how far apart: 1.5 ms,
+1.0 ms, 0.23 ms. Ten seconds covers all of those by four orders of magnitude
+and cannot reach a person who comes back to the same slot a minute later. The
+guard now asks the narrower question — was an identical session created *just
+now?* — and a minute later the coach means it.
+
+**A guard written as a permanent rule forbids a legitimate action forever in
+order to stop an accident that lasts milliseconds.** Bound the guard to the
+accident.
+
+**The refusal on `price_amount` had the same shape.** It rejected the key even
+when empty, so a browser still running yesterday's bundle — which a service
+worker guarantees for at least one load after every deploy — would have been
+refused on every save. Only a real amount is refused now.
+
+**On the reported time shift: I could not reproduce it.** Driving the real
+form in Chromium, 15:15 Dubai produced `2026-09-25T11:15:00.000Z`, which is
+correct for UTC+4, and the submit fired `session_write` exactly once. The slot
+sheet does prefill `HH:00` (the calendar grid is hourly), so opening from a
+15:00 row and expecting 15:15 needs the field edited — but nothing in our code
+moves a time the operator typed. If it persists, the next useful evidence is
+the browser and whether the time was typed or picked from the native control.

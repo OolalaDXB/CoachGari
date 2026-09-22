@@ -266,6 +266,31 @@ begin
      and (select count(*) from public.coaching_sessions
            where crm_contact_id = cB and start_at = (d::text||' 11:00')::timestamp at time zone 'Asia/Dubai') = 1
     then ok:=ok+1; else fail:=fail+1; log:=log||' [second create made a twin]'; end if;
+  /* The guard is a WINDOW, not a rule. Written as a rule it answered every later create
+     with the old row, so recreating a slot silently did nothing — which is how it was
+     reported: "impossible to create a session". Ten seconds covers the 0.23 ms that
+     started this and never reaches a coach coming back a minute later. */
+  execute 'reset role';   -- ageing the row is a fixture chore, not something the coach can do
+  update public.coaching_sessions set created_at = created_at - interval '1 minute' where id = sess;
+  execute 'set local role authenticated';
+  j := public.session_write(jsonb_build_object('crm_contact_id', cB::text, 'title','Deliberate second',
+        'start_at', (d::text||' 11:00')::timestamp at time zone 'Asia/Dubai', 'end_at', (d::text||' 12:00')::timestamp at time zone 'Asia/Dubai'));
+  if (j->>'id')::uuid <> sess and (j ? 'existing') = false
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [a minute later was still called a twin]'; end if;
+  perform public.session_delete((j->>'id')::uuid);
+
+  -- an empty price is an older client sending a field it no longer fills, not an attempt to price
+  j := public.session_write(jsonb_build_object('crm_contact_id', cB::text, 'title','Stale client',
+        'start_at', (d::text||' 20:00')::timestamp at time zone 'Asia/Dubai', 'end_at', (d::text||' 21:00')::timestamp at time zone 'Asia/Dubai',
+        'price_amount', '', 'price_currency', ''));
+  if (j->>'id') is not null then ok:=ok+1; else fail:=fail+1; log:=log||' [empty price refused]'; end if;
+  begin
+    perform public.session_write(jsonb_build_object('crm_contact_id', cB::text,
+      'start_at', (d::text||' 21:00')::timestamp at time zone 'Asia/Dubai', 'end_at', (d::text||' 22:00')::timestamp at time zone 'Asia/Dubai',
+      'price_amount', '5000'));
+    fail:=fail+1; log:=log||' [a real price was accepted on a session]';
+  exception when sqlstate '22023' then ok:=ok+1; end;
+
   -- a cancelled session does not block booking that slot again: it is not a twin, it is gone
   perform public.session_set_status(sess, 'cancelled', false, 'client asked');
   j := public.session_write(jsonb_build_object('crm_contact_id', cB::text, 'title','Rebooked',
