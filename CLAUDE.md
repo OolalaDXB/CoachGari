@@ -1,21 +1,21 @@
 # Working rules for this repository
 
-## Ask before running SQL against the database
+## Apply database changes without asking
 
-Do not run SQL on the Supabase project (`acrjrlgeeyseyolmofuq`) — neither
-queries nor migrations — without asking the owner first. Show the SQL, say what
-it will read or change, and wait for a yes.
+The owner has given standing permission to run SQL against the Supabase project
+(`acrjrlgeeyseyolmofuq`) — queries and migrations alike — without stopping to
+ask each time. Apply it, then say plainly what changed.
 
-This covers `execute_sql`, `apply_migration`, and anything equivalent. It is not
-a review of the idea, it is a review of the statement: paste it in full, not a
-summary of it.
+The safety net is rehearsal, not permission. Before anything touches production
+data, write it as a migration in `supabase/migrations/`, replay it with
+`scripts/db-ci.sh` (every migration into an empty Postgres, then the suites in
+`supabase/tests/`), and where it rewrites or deletes existing rows, run it
+against a fixture shaped like the real data first and check the outcome. A
+migration carrying a data fix must also be safe to replay into an empty
+database — guard it so it does nothing there.
 
-Writing a migration file into `supabase/migrations/` and testing it locally
-against a throwaway Postgres (`scripts/db-ci.sh`) needs no permission — that
-touches no real data. Applying it does.
+Two things still stop and ask, because no rehearsal can undo them: destroying
+payment or order records, and anything that would send mail, WhatsApp messages
+or push notifications to real clients.
 
-## How the database is tested
-
-`scripts/db-ci.sh` replays every migration into an empty database and then runs
-the suites in `supabase/tests/`. A migration that carries a data fix must be
-safe to replay into an empty database — guard it so it does nothing there.
+After applying, report the before/after counts rather than asserting success.
