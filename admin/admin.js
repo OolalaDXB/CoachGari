@@ -57,7 +57,22 @@ const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUB
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const CG_CCY = 'AED';   // Coach Gari bills in dirhams; the pack editor already defaults to it
 const money = (n, cur = 'USD') => n == null ? '—' : (n / 100).toLocaleString('en-US', { style: 'currency', currency: cur });
+
+/* What a session costs can come from three places — the session itself, its package, or
+   the client's rate — so the amount is shown with where it came from. A number whose
+   origin is invisible is one nobody can correct, and "AED 850 · from the package" is the
+   difference between reading a figure and trusting it. */
+const PRICE_FROM = { session: 'set on this session', pack: 'from the package', client: 'client rate' };
+const priceLine = (p) => !p || p.amount == null
+  ? '<span class="ad-muted">Not priced</span>'
+  : `${money(p.amount, p.currency)} <span class="ad-muted">· ${PRICE_FROM[p.source] || p.source}</span>`;
+
+// "3 of 10" inside a package; outside one there is no denominator to invent, only the count
+const ORD = (n) => n + (['th','st','nd','rd'][(n % 100 - 20) % 10] || ['th','st','nd','rd'][n % 100] || 'th');
+const seqLine = (q) => !q || q.n == null ? ''
+  : q.of ? `${q.n} of ${q.of}` : `${ORD(q.n)} session`;
 const st = (s) => `<span class="st st-${esc(s)}">${esc(String(s ?? '').replace('_', ' '))}</span>`;
 const BOOKING_COLS = 'id,reference,service_id,contact_id,crm_contact_id,customer_name,customer_contact,start_at,end_at,session_timezone,tour_stop_id,delivery_mode,participant_count,status,hold_expires_at,price_amount,currency,notes,cancel_reason,cancelled_at,cancelled_by,created_at,service_title,service_duration_minutes,services(title,slug),tour_stops(city,country)';
 const SERVICE_COLS = 'id,slug,title,category,tagline,description,long_description,duration_minutes,price_amount,currency,price_unit,delivery_mode,default_capacity,booking_mode,features,featured,cta_label,active,listed,sort_order,updated_at,updated_by';
@@ -1288,6 +1303,14 @@ async function openSession(id) {
   if (has('client_profile:view')) { const { data } = await sb.from('crm_contacts').select('display_name,phone,email').eq('id', s.crm_contact_id).maybeSingle(); contact = data; }
   let pack = summary.pack || null;
   if (!pack && s.session_pack_id) { const { data } = await sb.rpc('packs_for_contact', { p_contact_id: s.crm_contact_id }); pack = (data || []).find((p) => p.id === s.session_pack_id) || null; }
+  /* Both are derived — which session this is depends on its neighbours, and what it
+     costs depends on the package and the client's rate — so the server answers rather
+     than the card computing it from a row that cannot see either. */
+  const [pr, sq] = await Promise.all([
+    has('finance:view') ? sb.rpc('session_price_json', { p_id: id }) : Promise.resolve({ data: null }),
+    sb.rpc('session_seq_json', { p_id: id }),
+  ]);
+  const price = pr.data, seq = sq.data;
   const t = lp(s.start_at), e = lp(s.end_at); const dur = Math.round((new Date(s.end_at) - new Date(s.start_at)) / 60000);
   const name = contact?.display_name || summary.client_name || 'Client';
   const ph = contact?.phone;
@@ -1300,7 +1323,9 @@ async function openSession(id) {
       <div class="cg-sec"><div class="cg-sec-t">Session</div>
         <dl class="cg-kv"><dt>Date</dt><dd>${prettyDay(t.date)}</dd>
           <dt>Time</dt><dd>${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')} – ${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')} (${dur} min)</dd>
-          <dt>Type</dt><dd>${esc(s.title || summary.title || 'Session')} · ${online ? 'Online' : 'In person'}</dd></dl></div>
+          <dt>Type</dt><dd>${esc(s.title || summary.title || 'Session')} · ${online ? 'Online' : 'In person'}</dd>
+          ${seqLine(seq) ? `<dt>Session</dt><dd>${seqLine(seq)}</dd>` : ''}
+          ${has('finance:view') ? `<dt>Price</dt><dd>${priceLine(price)}</dd>` : ''}</dl></div>
       ${pack ? `<div class="cg-sec"><div class="cg-sec-t">Package</div>
         <div class="cg-pack"><div class="cg-pack-x">${pack.used} / ${pack.total_sessions}</div><div class="cg-pack-r">${pack.remaining} remaining</div></div>
         <dl class="cg-kv">${'price_amount' in pack ? `<dt>Price</dt><dd>${money(pack.price_amount, pack.currency)} ${pay}</dd><dt>Paid</dt><dd>${pack.paid_at ? fmt(pack.paid_at, CAL_TZ, { dateStyle: 'medium' }) : '—'}</dd>` : ''}<dt>Pack</dt><dd>${esc(pack.title || '')}</dd></dl></div>` : ''}
@@ -1426,6 +1451,8 @@ async function sessionForm(prefill) {
         <label>Mode <select name="delivery_mode"><option value="in_person" ${editing && prefill.delivery_mode==='in_person'?'selected':''}>In person</option><option value="online" ${editing && prefill.delivery_mode==='online'?'selected':''}>Online</option></select></label></div>
       <label>Title / label <input name="title" value="${editing ? esc(prefill.title || '') : ''}" placeholder="e.g. Private coaching"></label>
       ${cid ? `<label>Package <select name="session_pack_id">${packOpts}</select></label>` : ''}
+      ${has('finance:manage') ? `<label>Price for this session <input name="price_amount" type="number" min="0" step="1" value="${editing && prefill.price_amount != null ? prefill.price_amount / 100 : ''}" placeholder="Leave empty to follow the package or the client rate">
+        <span class="ad-muted" style="font-size:12px">In ${esc(CG_CCY)}. Only fill this in when this one session costs something different.</span></label>` : ''}
       <div id="loc-fields" ${editing && prefill.delivery_mode==='online' ? 'hidden' : ''}>
         <label>Location name <input name="location_name" value="${editing ? esc(prefill.location_name || '') : ''}" placeholder="e.g. Dubai Padel Academy"></label>
         <label>Address <input name="location_address" value="${editing ? esc(prefill.location_address || '') : ''}"></label>
@@ -1455,6 +1482,11 @@ async function sessionForm(prefill) {
       location_name: f.get('location_name') || null, location_address: f.get('location_address') || null,
       location_lat: f.get('location_lat') || null, location_lng: f.get('location_lng') || null, meeting_url: f.get('meeting_url') || null };
     if (form.querySelector('[name=session_pack_id]')) p.session_pack_id = f.get('session_pack_id') || null;
+    if (form.querySelector('[name=price_amount]')) {
+      const v = String(f.get('price_amount') || '').trim();
+      p.price_amount = v === '' ? '' : Math.round(Number(v) * 100);   // '' clears it on the server
+      if (v !== '') p.price_currency = CG_CCY;
+    }
     if (editing) p.id = prefill.id; else p.crm_contact_id = contactId;
     const { error } = await sb.rpc('session_write', { p }); if (error) return fail(error);
     toast(editing ? 'Session saved' : 'Session created'); closeSheet(); calRender().catch(fail);
@@ -2247,9 +2279,10 @@ function pfSections() {
 
 // Client profile → Sessions & packages (operational; the shareable recap/report is CG-012)
 async function pfSessions() {
-  const [{ data: packs, error: pe }, { data: sess, error: se }] = await Promise.all([
+  const [{ data: packs, error: pe }, { data: sess, error: se }, { data: rate }] = await Promise.all([
     sb.rpc('packs_for_contact', { p_contact_id: pf.crmId }),
     sb.rpc('sessions_list', { p: { crm_contact_id: pf.crmId } }),
+    has('finance:view') ? sb.rpc('client_rate_get', { p_contact_id: pf.crmId }) : Promise.resolve({ data: null }),
   ]);
   if (pe) throw pe; if (se) throw se;
   const pk = packs || [], ss = sess || [];
@@ -2258,19 +2291,64 @@ async function pfSessions() {
     <div class="cg-pack"><div class="cg-pack-x">${p.used} / ${p.total_sessions}</div><div class="cg-pack-r">${p.remaining} remaining</div></div>
     ${'price_amount' in p ? `<div class="ad-muted" style="font-size:12.5px">${money(p.price_amount, p.currency)}${p.paid_at ? ' · paid ' + fmt(p.paid_at, CAL_TZ, { dateStyle: 'medium' }) : ''}</div>` : ''}
     <div class="cg-actions" style="margin-top:10px"><button class="btn btn-line btn-xs" data-packact="${p.id}">Recap &amp; payment…</button></div></div>`;
+  /* What Gari charges THIS client. It sits above the packages because it is the thing
+     everything else falls back to: a session with no price of its own and no package
+     takes this one. Empty means no special rate, which is not the same as free. */
+  const rateRow = !has('finance:view') ? '' : `
+    <div class="cg-raterow">
+      <div><span class="cg-rate-k">Rate for ${esc(cname)}</span>
+        <b class="cg-rate-v">${rate ? money(rate.amount, rate.currency) : '<span class="ad-muted">No special rate</span>'}</b>
+        <span class="ad-muted" style="font-size:12px">per session, unless a package or the session itself says otherwise</span></div>
+      ${has('finance:manage') ? `<button class="btn btn-line btn-xs" id="pf-rate">${rate ? 'Change' : 'Set rate'}</button>` : ''}
+    </div>`;
   $('#pf-body').innerHTML = `
+    ${rateRow}
     <div class="ad-actions" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
       <button class="btn btn-accent btn-sm" id="pf-new-sess">+ Session</button>
       <button class="btn btn-line btn-sm" id="pf-new-pack">+ Package</button></div>
     ${pk.length ? `<div class="cg-packgrid">${pk.map(packCard).join('')}</div>` : '<p class="pf-sec-empty">No packages yet.</p>'}
     <h2 style="font-size:14px;text-transform:uppercase;letter-spacing:.06em;color:var(--grey-text);margin:18px 0 8px">Sessions</h2>
-    ${ss.length ? `<div class="ad-panel" style="padding:0"><div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>Date</th><th>Time</th><th>Type</th><th>Package</th><th>Status</th></tr></thead><tbody>
-      ${ss.map((s) => { const t = lp(s.start_at), e = lp(s.end_at); return `<tr class="clik" data-sess="${s.id}"><td>${prettyDay(t.date)}</td><td>${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}–${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')}</td><td>${esc(s.title || '—')}</td><td>${s.pack ? `${s.pack.used}/${s.pack.total_sessions}` : '—'}</td><td>${st(s.status)}</td></tr>`; }).join('')}
+    ${ss.length ? `<div class="ad-panel" style="padding:0"><div class="ad-table-wrap"><table class="ad-table"><thead><tr><th>Date</th><th>Time</th><th>#</th><th>Type</th><th>Package</th>${has('finance:view') ? '<th>Price</th>' : ''}<th>Status</th></tr></thead><tbody>
+      ${ss.map((s) => { const t = lp(s.start_at), e = lp(s.end_at); return `<tr class="clik" data-sess="${s.id}"><td>${prettyDay(t.date)}</td><td>${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')}–${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')}</td><td class="ad-muted">${seqLine(s.seq) || '—'}</td><td>${esc(s.title || '—')}</td><td>${s.pack ? `${s.pack.used}/${s.pack.total_sessions}` : '—'}</td>${has('finance:view') ? `<td style="font-size:12.5px">${priceLine(s.price)}</td>` : ''}<td>${st(s.status)}</td></tr>`; }).join('')}
       </tbody></table></div></div>` : '<p class="pf-sec-empty">No sessions yet.</p>'}`;
   $('#pf-new-sess').onclick = () => sessionForm({ crm_contact_id: pf.crmId, crm_name: cname });
   $('#pf-new-pack').onclick = () => packForm(pf.crmId, () => pfSessions().catch(fail));
+  const rb = $('#pf-rate'); if (rb) rb.onclick = () => clientRateForm(pf.crmId, cname, rate, () => pfSessions().catch(fail));
   $('#pf-body').querySelectorAll('tr.clik').forEach((tr) => tr.onclick = () => { calData = { sessions: ss, blocks: [] }; openSession(tr.dataset.sess); });
   $('#pf-body').querySelectorAll('[data-packact]').forEach((b) => b.onclick = () => pfPackActions(pk.find((x) => x.id === b.dataset.packact)));
+}
+
+/* Set or clear what Gari charges one client.
+
+   An empty field clears the rate rather than storing zero, and the form says so out
+   loud: "no special rate" and "free" are different answers, and a back-office that
+   quietly turns one into the other bills the wrong amount for years. */
+function clientRateForm(contactId, cname, rate, after) {
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>Rate for ${esc(cname)}</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b"><form id="rate-form" class="cg-form">
+      <label>Price per session <input name="amount" type="number" min="0" step="1" value="${rate ? rate.amount / 100 : ''}" placeholder="e.g. 350" autofocus>
+        <span class="ad-muted" style="font-size:12px">In ${esc(CG_CCY)}. Leave empty for no special rate — this client then follows whatever their package says.</span></label>
+      <label>Why this rate <input name="note" value="${rate ? esc(rate.note || '') : ''}" placeholder="Optional — e.g. long-standing client, group of two"></label>
+      <p class="ad-muted" style="font-size:12px">A session with its own price, or one inside a package, is not changed by this. It only applies where nothing else has said a price.</p>
+      <div class="cg-actions"><button class="btn btn-accent" type="submit">Save</button>
+        ${rate ? '<button class="btn btn-line" type="button" data-clear>Remove the rate</button>' : ''}
+        <button class="btn btn-line" type="button" data-x2>Cancel</button></div>
+    </form></div>`;
+  const close = () => closeSheet();
+  sheet.querySelector('[data-x]').onclick = close; sheet.querySelector('[data-x2]').onclick = close;
+  const save = async (amount, note) => {
+    const { error } = await sb.rpc('client_rate_set', {
+      p_contact_id: contactId, p_amount: amount, p_currency: CG_CCY, p_note: note || null });
+    if (error) return fail(error);
+    toast(amount == null ? 'Rate removed' : 'Rate saved'); close(); after();
+  };
+  const cb = sheet.querySelector('[data-clear]'); if (cb) cb.onclick = () => save(null, null);
+  sheet.querySelector('#rate-form').onsubmit = (e) => {
+    e.preventDefault(); const f = new FormData(e.target);
+    const v = String(f.get('amount') || '').trim();
+    save(v === '' ? null : Math.round(Number(v) * 100), f.get('note'));
+  };
 }
 
 /* ---- pack: recap, share, payment, renewal, history (CG-012) + collect in person (BEAU PH softpos handoff) ---- */

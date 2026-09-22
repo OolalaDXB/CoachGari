@@ -182,6 +182,72 @@ begin
   if n = 1 and (select status from public.coaching_sessions where booking_id=(select id from public.bookings where reference='CG-CAL01'))='completed'
     then ok:=ok+1; else fail:=fail+1; log:=log||' [booking dup/complete '||n||']'; end if;
 
+  /* ========== 6b. what a session costs, and which session it is ========== */
+  perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-0000000c0002","email":"coachfin@test.local"}',true);
+  execute 'set local role authenticated';
+
+  -- nothing priced anywhere yet: the card gets null, not a confident zero
+  j := public.session_write(jsonb_build_object('crm_contact_id', cB::text,
+        'start_at', (d::text||' 06:00')::timestamp at time zone 'Asia/Dubai', 'end_at', (d::text||' 07:00')::timestamp at time zone 'Asia/Dubai'));
+  sess := (j->>'id')::uuid;
+  if public.session_price_json(sess) is null then ok:=ok+1; else fail:=fail+1; log:=log||' [unpriced session invented a price]'; end if;
+
+  -- the client's rate is the floor: set it once, every unpriced session follows
+  perform public.client_rate_set(cB, 35000, 'AED');
+  j := public.session_price_json(sess);
+  if (j->>'amount')::int = 35000 and j->>'currency' = 'AED' and j->>'source' = 'client'
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [client rate not applied '||coalesce(j::text,'null')||']'; end if;
+
+  -- a package overrides the client rate: 85000 over 10 sessions is 8500 each
+  j := public.session_price_json((select id from public.coaching_sessions
+        where session_pack_id = packA order by start_at limit 1));
+  if (j->>'amount')::int = 8500 and j->>'currency' = 'USD' and j->>'source' = 'pack'
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [pack share wrong '||coalesce(j::text,'null')||']'; end if;
+
+  -- and the session itself overrides both
+  perform public.session_write(jsonb_build_object('id', sess::text, 'price_amount','50000','price_currency','AED'));
+  j := public.session_price_json(sess);
+  if (j->>'amount')::int = 50000 and j->>'source' = 'session'
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [session price not honoured]'; end if;
+  -- clearing it falls back rather than becoming free
+  perform public.session_write(jsonb_build_object('id', sess::text, 'price_amount',''));
+  if (public.session_price_json(sess)->>'source') = 'client' then ok:=ok+1; else fail:=fail+1; log:=log||' [cleared price did not fall back]'; end if;
+  -- and clearing the client rate is "no special rate", not "free"
+  perform public.client_rate_set(cB, null);
+  if public.session_price_json(sess) is null then ok:=ok+1; else fail:=fail+1; log:=log||' [cleared rate left a price]'; end if;
+  perform public.client_rate_set(cB, 35000, 'AED');
+
+  /* Which session this is. packA has four non-cancelled sessions in time order and one
+     cancelled one, which is not counted because it is not one of the ten. */
+  j := public.session_seq_json((select id from public.coaching_sessions where session_pack_id = packA order by start_at limit 1));
+  if (j->>'n')::int = 1 and (j->>'of')::int = 10 then ok:=ok+1; else fail:=fail+1; log:=log||' [first of pack '||coalesce(j::text,'null')||']'; end if;
+  j := public.session_seq_json((select id from public.coaching_sessions where session_pack_id = packA and status <> 'cancelled' order by start_at desc limit 1));
+  if (j->>'n')::int = 3 and (j->>'of')::int = 10 then ok:=ok+1; else fail:=fail+1; log:=log||' [last of pack '||coalesce(j::text,'null')||']'; end if;
+  if public.session_seq_json((select id from public.coaching_sessions where session_pack_id = packA and status = 'cancelled' limit 1)) is null
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [a cancelled session got a number]'; end if;
+  -- outside a package there is no denominator to give, only the count
+  j := public.session_seq_json(sess);
+  if (j->>'n')::int >= 1 and j->>'of' is null then ok:=ok+1; else fail:=fail+1; log:=log||' [standalone seq '||coalesce(j::text,'null')||']'; end if;
+
+  -- the read paths carry both
+  j := public.calendar_range((d::text||' 00:00')::timestamp at time zone 'Asia/Dubai', (d::text||' 23:59')::timestamp at time zone 'Asia/Dubai');
+  if exists (select 1 from jsonb_array_elements(j->'sessions') x where x ? 'price' and x ? 'seq')
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [calendar_range has no price/seq]'; end if;
+  execute 'reset role';
+
+  /* Money stays behind finance:view. A coach without it still sees the session and its
+     number — refusing there would hide the whole card — but never an amount. */
+  perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-0000000c0001","email":"coachonly@test.local"}',true);
+  execute 'set local role authenticated';
+  if public.session_price_json(sess) is null and public.session_seq_json(sess) is not null
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [coach-only saw a price]'; end if;
+  begin perform public.client_rate_set(cB, 1); fail:=fail+1; log:=log||' [coach-only set a rate]'; exception when insufficient_privilege then ok:=ok+1; end;
+  begin perform public.client_rate_get(cB); fail:=fail+1; log:=log||' [coach-only read a rate]'; exception when insufficient_privilege then ok:=ok+1; end;
+  begin perform public.session_write(jsonb_build_object('id', sess::text, 'price_amount','1')); fail:=fail+1; log:=log||' [coach-only priced a session]'; exception when insufficient_privilege then ok:=ok+1; end;
+  select count(*) into n from public.client_rates;
+  if n = 0 then ok:=ok+1; else fail:=fail+1; log:=log||' [coach-only read client_rates through RLS]'; end if;
+  execute 'reset role';
+
   /* ========== 7. anon refused ========== */
   perform set_config('request.jwt.claims','{"role":"anon"}',true);
   execute 'set local role anon';

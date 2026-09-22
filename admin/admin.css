@@ -514,3 +514,12 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
 .ad-dups li{padding:6px 0;font-size:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;}
 .ad-dups .ad-muted{font-size:13px;}
 .ad-dups p{margin:0 0 12px;}
+
+/* Client rate — the fallback price, shown above the packages because that is what it is */
+.cg-raterow { display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:12px 14px; margin-bottom:14px; border:1px solid var(--line); border-radius:12px; background:var(--card, #fff); }
+.cg-raterow > div { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; min-width:0; }
+.cg-raterow .cg-rate-k { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--grey-text); }
+.cg-raterow .cg-rate-v { font-size:16px; }
+.cg-raterow button { margin-left:auto; }
+@media (max-width:560px) { .cg-raterow button { margin-left:0; } }

@@ -3462,3 +3462,55 @@ Darya still herself. Only then did it touch production.
 **Production after: 67 → 44 contacts, 0 flagged, 0 numbers with a letter in
 them**, and the history totals unchanged — 7 sessions, 2 packs, 2 bookings, 5
 orders, 1 payment, 1 collaboration, no orphans.
+
+## CG-031 — A price per client, a price per session, and which session this is
+
+Gari asked for different prices per client, and for the session card to carry
+the price and the session number. The card in the screenshot showed neither,
+and the reason was not that they were missing from the design: both lines only
+exist inside the **Package** section, and that session had no package. A
+session on its own had no money on it at all.
+
+**Three places a price can come from, in this order.** The session itself,
+then the package it belongs to (`price_amount / total_sessions` — what one
+session of that package is worth), then the client's rate. Each level
+overrides the one below only when it has something to say, so setting a
+client's rate changes every future session without touching any of them, and a
+single session can still disagree — a longer one, a favour, a court at the far
+end of town.
+
+**The answer carries where it came from.** `session_price_json` returns
+`{amount, currency, source}` and the card prints "AED 850 · from the package".
+A derived figure presented as if someone had typed it is one nobody thinks to
+correct.
+
+**The client rate is its own table, not a column on `crm_contacts`.** The
+profile popup reads that table with a plain `select *` under a policy that only
+asks for `client_profile:view`, so a rate stored there would be visible to
+everyone who can open a profile. What Gari charges a particular client is a
+commercial fact and belongs behind `finance:view` like every other amount in
+this schema; `client_rates` says so in its own policy. Setting one needs
+`finance:manage`, and so does pricing a single session — even when that price
+rides along with a reschedule.
+
+**Clearing a rate is not setting it to zero.** `client_rate_set(id, null)`
+deletes the row, and the form says out loud that empty means "no special rate",
+because a back-office that quietly turns "no rate" into "free" bills the wrong
+amount for years.
+
+**Which session this is.** Inside a package: position in time out of
+`total_sessions` — "3 of 10" — with cancelled ones not counted, since a
+cancelled session is not one of the ten. Outside a package there is no
+denominator to invent, so it is the plain count with that client, "3rd
+session".
+
+**One gate was missing and the advisors made it visible.** `session_seq_json`
+returned a position to any authenticated account. It is not money, but it is
+still someone's schedule, so it now asks for `coach:operations` like every
+other RPC that returns a session at all.
+
+cg011 goes 31 → 47: the fallback order in both directions, the package share
+(85000 over 10 is 8500), clearing a session price falling back rather than
+becoming free, a cancelled session having no number, and a coach without
+`finance:view` seeing the session and its number and no amount — including
+through RLS on `client_rates` directly.
