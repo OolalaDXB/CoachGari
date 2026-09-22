@@ -1546,7 +1546,11 @@ async function packForm(contactId, onCreated) {
   const canFin = has('finance:manage');
   sheet.innerHTML = `<div class="cg-sheet-h"><b>New package</b><button class="pf-close" data-x>×</button></div>
     <div class="cg-sheet-b"><form id="pack-form" class="cg-form">
-      <label>Title <input name="title" value="10-session coaching pack" required></label>
+      <!-- The default title no longer names a count. "10-session coaching pack" sat next to a
+           Total sessions field that could say anything, so a pack of six was routinely created
+           carrying the word ten in its title — and that title is the snapshot the client sees
+           on the receipt and the report. A neutral default cannot contradict the field below. -->
+      <label>Title <input name="title" value="Training Session package" required></label>
       <div class="cg-row"><label>Total sessions <input type="number" name="total_sessions" min="1" max="100" value="10" required></label>
         <label>Agreement date <input type="date" name="agreement_date" value="${anchorISO()}"></label></div>
       ${canFin ? `<div class="cg-sec"><div class="cg-sec-t">Payment (finance)</div>
