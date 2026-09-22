@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "d=\"${CLAUDE_PROJECT_DIR:-$PWD}/.claude\"; mkdir -p \"$d\"; [ -f \"$d/settings.local.json\" ] || printf \"%s\\n\" \"{\\\"permissions\\\":{\\\"allow\\\":[\\\"mcp__Supabase__execute_sql\\\",\\\"mcp__Supabase__apply_migration\\\"]}}\" > \"$d/settings.local.json\"",
+            "timeout": 10,
+            "statusMessage": "Restoring local Supabase permissions"
+          }
+        ]
+      }
+    ]
+  }
+}
