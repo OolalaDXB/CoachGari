@@ -3471,8 +3471,9 @@ and the reason was not that they were missing from the design: both lines only
 exist inside the **Package** section, and that session had no package. A
 session on its own had no money on it at all.
 
-**Three places a price can come from, in this order.** The session itself,
-then the package it belongs to (`price_amount / total_sessions` — what one
+**Three places a price can come from, in this order** — *superseded by
+CG-032, which removed the first of them.* The session itself, then the package
+it belongs to (`price_amount / total_sessions` — what one
 session of that package is worth), then the client's rate. Each level
 overrides the one below only when it has something to say, so setting a
 client's rate changes every future session without touching any of them, and a
@@ -3514,3 +3515,29 @@ cg011 goes 31 → 47: the fallback order in both directions, the package share
 becoming free, a cancelled session having no number, and a coach without
 `finance:view` seeing the session and its number and no amount — including
 through RLS on `client_rates` directly.
+
+## CG-032 — Two places a price lives, not three
+
+CG-031 put a third level under the package and the client rate: an amount on
+the session itself, for the longer one or the favour. Gari does not want it,
+and the reason is better than the feature was.
+
+**A price that can be typed anywhere is a price nobody can quote back.** "What
+do I charge Amanda?" stops having one answer as soon as thirty sessions may
+each disagree with it. Showing the origin on the card softens that; it does not
+fix it. The cascade is now two steps, and both are a decision someone made once
+and can look up: the package it belongs to, then the client's rate for anything
+outside a package. A session that needs a different price gets its own package,
+or the client's rate changes — and both of those leave a record of the
+decision, which an amount typed into one session's form did not.
+
+**The columns go rather than being left to rot.** They were an hour old and no
+session in production carried one, so there was nothing to preserve, and a dead
+column the writer no longer fills is a trap for whoever reads this table next.
+
+**`session_write` refuses a price rather than ignoring it.** A caller still
+sending `price_amount` is running against an older idea of this schema;
+dropping the field on the floor would let it believe the session was priced.
+
+cg011 stays at 46: the two remaining levels in both directions, the refusal,
+and an assertion that the column is really gone rather than merely unused.

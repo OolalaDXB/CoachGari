@@ -204,15 +204,18 @@ begin
   if (j->>'amount')::int = 8500 and j->>'currency' = 'USD' and j->>'source' = 'pack'
     then ok:=ok+1; else fail:=fail+1; log:=log||' [pack share wrong '||coalesce(j::text,'null')||']'; end if;
 
-  -- and the session itself overrides both
-  perform public.session_write(jsonb_build_object('id', sess::text, 'price_amount','50000','price_currency','AED'));
-  j := public.session_price_json(sess);
-  if (j->>'amount')::int = 50000 and j->>'source' = 'session'
-    then ok:=ok+1; else fail:=fail+1; log:=log||' [session price not honoured]'; end if;
-  -- clearing it falls back rather than becoming free
-  perform public.session_write(jsonb_build_object('id', sess::text, 'price_amount',''));
-  if (public.session_price_json(sess)->>'source') = 'client' then ok:=ok+1; else fail:=fail+1; log:=log||' [cleared price did not fall back]'; end if;
-  -- and clearing the client rate is "no special rate", not "free"
+  /* There is no third level. A session cannot carry its own amount: a price that can be
+     typed anywhere is one nobody can quote back, so the writer refuses rather than
+     ignoring the field and letting the caller believe the session was priced. */
+  begin
+    perform public.session_write(jsonb_build_object('id', sess::text, 'price_amount','50000'));
+    fail:=fail+1; log:=log||' [session accepted its own price]';
+  exception when sqlstate '22023' then ok:=ok+1; end;
+  if not exists (select 1 from information_schema.columns
+                  where table_schema='public' and table_name='coaching_sessions' and column_name='price_amount')
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [dead price column left on coaching_sessions]'; end if;
+
+  -- clearing the client rate is "no special rate", not "free"
   perform public.client_rate_set(cB, null);
   if public.session_price_json(sess) is null then ok:=ok+1; else fail:=fail+1; log:=log||' [cleared rate left a price]'; end if;
   perform public.client_rate_set(cB, 35000, 'AED');
@@ -243,7 +246,6 @@ begin
     then ok:=ok+1; else fail:=fail+1; log:=log||' [coach-only saw a price]'; end if;
   begin perform public.client_rate_set(cB, 1); fail:=fail+1; log:=log||' [coach-only set a rate]'; exception when insufficient_privilege then ok:=ok+1; end;
   begin perform public.client_rate_get(cB); fail:=fail+1; log:=log||' [coach-only read a rate]'; exception when insufficient_privilege then ok:=ok+1; end;
-  begin perform public.session_write(jsonb_build_object('id', sess::text, 'price_amount','1')); fail:=fail+1; log:=log||' [coach-only priced a session]'; exception when insufficient_privilege then ok:=ok+1; end;
   select count(*) into n from public.client_rates;
   if n = 0 then ok:=ok+1; else fail:=fail+1; log:=log||' [coach-only read client_rates through RLS]'; end if;
   execute 'reset role';

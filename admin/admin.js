@@ -60,11 +60,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const CG_CCY = 'AED';   // Coach Gari bills in dirhams; the pack editor already defaults to it
 const money = (n, cur = 'USD') => n == null ? '—' : (n / 100).toLocaleString('en-US', { style: 'currency', currency: cur });
 
-/* What a session costs can come from three places — the session itself, its package, or
-   the client's rate — so the amount is shown with where it came from. A number whose
-   origin is invisible is one nobody can correct, and "AED 850 · from the package" is the
-   difference between reading a figure and trusting it. */
-const PRICE_FROM = { session: 'set on this session', pack: 'from the package', client: 'client rate' };
+/* What a session costs comes from its package, or from the client's rate when it has no
+   package — never from the session itself, so that "what do I charge Amanda?" keeps one
+   answer. The amount is shown with where it came from: a number whose origin is
+   invisible is one nobody thinks to correct. */
+const PRICE_FROM = { pack: 'from the package', client: 'client rate' };
 const priceLine = (p) => !p || p.amount == null
   ? '<span class="ad-muted">Not priced</span>'
   : `${money(p.amount, p.currency)} <span class="ad-muted">· ${PRICE_FROM[p.source] || p.source}</span>`;
@@ -1451,8 +1451,7 @@ async function sessionForm(prefill) {
         <label>Mode <select name="delivery_mode"><option value="in_person" ${editing && prefill.delivery_mode==='in_person'?'selected':''}>In person</option><option value="online" ${editing && prefill.delivery_mode==='online'?'selected':''}>Online</option></select></label></div>
       <label>Title / label <input name="title" value="${editing ? esc(prefill.title || '') : ''}" placeholder="e.g. Private coaching"></label>
       ${cid ? `<label>Package <select name="session_pack_id">${packOpts}</select></label>` : ''}
-      ${has('finance:manage') ? `<label>Price for this session <input name="price_amount" type="number" min="0" step="1" value="${editing && prefill.price_amount != null ? prefill.price_amount / 100 : ''}" placeholder="Leave empty to follow the package or the client rate">
-        <span class="ad-muted" style="font-size:12px">In ${esc(CG_CCY)}. Only fill this in when this one session costs something different.</span></label>` : ''}
+      ${has('finance:view') ? `<p class="ad-muted" style="font-size:12px;margin:2px 0 0">Priced by the package above, or by the client's rate when there is no package. A session has no price of its own.</p>` : ''}
       <div id="loc-fields" ${editing && prefill.delivery_mode==='online' ? 'hidden' : ''}>
         <label>Location name <input name="location_name" value="${editing ? esc(prefill.location_name || '') : ''}" placeholder="e.g. Dubai Padel Academy"></label>
         <label>Address <input name="location_address" value="${editing ? esc(prefill.location_address || '') : ''}"></label>
@@ -1482,11 +1481,6 @@ async function sessionForm(prefill) {
       location_name: f.get('location_name') || null, location_address: f.get('location_address') || null,
       location_lat: f.get('location_lat') || null, location_lng: f.get('location_lng') || null, meeting_url: f.get('meeting_url') || null };
     if (form.querySelector('[name=session_pack_id]')) p.session_pack_id = f.get('session_pack_id') || null;
-    if (form.querySelector('[name=price_amount]')) {
-      const v = String(f.get('price_amount') || '').trim();
-      p.price_amount = v === '' ? '' : Math.round(Number(v) * 100);   // '' clears it on the server
-      if (v !== '') p.price_currency = CG_CCY;
-    }
     if (editing) p.id = prefill.id; else p.crm_contact_id = contactId;
     const { error } = await sb.rpc('session_write', { p }); if (error) return fail(error);
     toast(editing ? 'Session saved' : 'Session created'); closeSheet(); calRender().catch(fail);
@@ -2328,9 +2322,9 @@ function clientRateForm(contactId, cname, rate, after) {
   sheet.innerHTML = `<div class="cg-sheet-h"><b>Rate for ${esc(cname)}</b><button class="pf-close" data-x>×</button></div>
     <div class="cg-sheet-b"><form id="rate-form" class="cg-form">
       <label>Price per session <input name="amount" type="number" min="0" step="1" value="${rate ? rate.amount / 100 : ''}" placeholder="e.g. 350" autofocus>
-        <span class="ad-muted" style="font-size:12px">In ${esc(CG_CCY)}. Leave empty for no special rate — this client then follows whatever their package says.</span></label>
+        <span class="ad-muted" style="font-size:12px">In ${esc(CG_CCY)}. Leave empty for no special rate — this client is then priced only by their packages.</span></label>
       <label>Why this rate <input name="note" value="${rate ? esc(rate.note || '') : ''}" placeholder="Optional — e.g. long-standing client, group of two"></label>
-      <p class="ad-muted" style="font-size:12px">A session with its own price, or one inside a package, is not changed by this. It only applies where nothing else has said a price.</p>
+      <p class="ad-muted" style="font-size:12px">Sessions inside a package keep the package's price. This applies to everything else.</p>
       <div class="cg-actions"><button class="btn btn-accent" type="submit">Save</button>
         ${rate ? '<button class="btn btn-line" type="button" data-clear>Remove the rate</button>' : ''}
         <button class="btn btn-line" type="button" data-x2>Cancel</button></div>
