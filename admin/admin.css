@@ -573,3 +573,25 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
   .ad-filters input,.ad-filters select{flex:1 1 140px;min-width:0;}
   .ad-filters .btn{flex:1 1 auto;}
 }
+
+/* A thin action row — two or three secondary verbs with no primary among them (the
+   location links, the meeting link, a block's edit/unblock). Same icons on a phone, but
+   it fits its own content instead of claiming the two columns a decision row wants. */
+@media(min-width:560px){ .cg-acts-thin{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));} }
+@media(min-width:834px){ .cg-acts-thin{grid-template-columns:repeat(auto-fit,minmax(160px,1fr));} }
+
+/* Form footers (Save / Cancel / Create). These keep their words at every size — a form's
+   confirm button is the one control a person must never have to guess at — but on a phone
+   they stop sitting side by side at 40% width each and take the full line. */
+@media(max-width:559px){
+  .cg-form .cg-actions{display:grid;grid-template-columns:1fr;gap:8px;}
+  .cg-form .cg-actions .btn{width:100%;justify-content:center;min-height:44px;}
+}
+
+/* Row actions inside a table keep their words — "Not a duplicate" and "Make client" have
+   no icon anyone would read the same way — but they wrap onto their own lines on a narrow
+   screen instead of pushing the row off the right edge. */
+@media(max-width:559px){
+  .ad-table .acts{display:flex;flex-wrap:wrap;gap:6px;}
+  .ad-table .acts .btn{margin:0;min-height:36px;}
+}

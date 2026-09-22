@@ -1283,9 +1283,9 @@ function bindCalBody() {
 function slotSheet(dateStr, hour) {
   const host = ensureSheet();
   host.querySelector('.cg-sheet').innerHTML = `<div class="cg-sheet-h"><b>${prettyDay(dateStr)} · ${String(hour).padStart(2, '0')}:00</b><button class="pf-close" data-x>×</button></div>
-    <div class="cg-sheet-b"><div class="cg-actions">
-      <button class="btn btn-accent" data-a="sess">Add session</button>
-      <button class="btn btn-line" data-a="block">Block time</button></div></div>`;
+    <div class="cg-sheet-b"><div class="cg-acts">
+      <button class="cg-act cg-act-go" data-a="sess">${ICO.plus}<span>Add session</span></button>
+      <button class="cg-act" data-a="block">${ICO.clock}<span>Block time</span></button></div></div>`;
   host.querySelector('[data-x]').onclick = closeSheet;
   host.querySelector('[data-a="sess"]').onclick = () => { closeSheet(); sessionForm({ date: dateStr, hour }); };
   host.querySelector('[data-a="block"]').onclick = () => { closeSheet(); blockForm({ date: dateStr, hour }); };
@@ -1346,12 +1346,12 @@ async function openSession(id) {
         <dl class="cg-kv">${'price_amount' in pack ? `<dt>Price</dt><dd>${money(pack.price_amount, pack.currency)} ${pay}</dd><dt>Paid</dt><dd>${pack.paid_at ? fmt(pack.paid_at, CAL_TZ, { dateStyle: 'medium' }) : '—'}</dd>` : ''}<dt>Pack</dt><dd>${esc(pack.title || '')}</dd></dl></div>` : ''}
       ${(!online && (s.location_name || s.location_address)) ? `<div class="cg-sec"><div class="cg-sec-t">Location</div>
         <div class="cg-loc"><b>${esc(s.location_name || '')}</b>${s.location_address ? `<div class="ad-muted">${esc(s.location_address)}</div>` : ''}</div>
-        <div class="cg-actions"><button class="btn btn-line btn-sm" data-copyaddr>Copy address</button>
-          <a class="btn btn-line btn-sm" href="${ml.gmaps}" target="_blank" rel="noopener">Google Maps</a>
-          <a class="btn btn-line btn-sm" href="${ml.waze}" target="_blank" rel="noopener">Waze</a></div></div>` : ''}
+        <div class="cg-acts cg-acts-thin"><button class="cg-act" data-copyaddr>${ICO.copy}<span>Copy address</span></button>
+          <a class="cg-act" href="${ml.gmaps}" target="_blank" rel="noopener">${ICO.map}<span>Google Maps</span></a>
+          <a class="cg-act" href="${ml.waze}" target="_blank" rel="noopener">${ICO.nav}<span>Waze</span></a></div></div>` : ''}
       ${(online && s.meeting_url) ? `<div class="cg-sec"><div class="cg-sec-t">Online</div>
-        <div class="cg-actions"><button class="btn btn-line btn-sm" data-copylink>Copy link</button>
-          <a class="btn btn-line btn-sm" href="${esc(s.meeting_url)}" target="_blank" rel="noopener">Open meeting</a></div></div>` : ''}
+        <div class="cg-acts cg-acts-thin"><button class="cg-act" data-copylink>${ICO.copy}<span>Copy link</span></button>
+          <a class="cg-act" href="${esc(s.meeting_url)}" target="_blank" rel="noopener">${ICO.link}<span>Open meeting</span></a></div></div>` : ''}
       ${has('client_profile:manage')
         ? `<div class="cg-sec"><div class="cg-sec-t">What we worked on</div>
              <div class="ov-noteline"><input class="ad-input" data-note maxlength="500" placeholder="One line — it goes to the client's history" value="${esc(s.note || '')}" aria-label="Session note">
@@ -1433,7 +1433,7 @@ async function openBlock(id) {
     <div class="cg-sheet-b"><dl class="cg-kv"><dt>When</dt><dd>${prettyDay(t.date)} · ${String(t.h).padStart(2,'0')}:${String(t.m).padStart(2,'0')} – ${String(e.h).padStart(2,'0')}:${String(e.m).padStart(2,'0')}</dd>
       <dt>Label</dt><dd>${esc(b.label || '—')}</dd>${b.private_note ? `<dt>Private note</dt><dd>${esc(b.private_note)}</dd>` : ''}</dl>
       <p class="ad-muted" style="font-size:12px">Blocked periods are removed from public booking availability.</p>
-      <div class="cg-actions">${b.source === 'calendar_block' ? '<button class="btn btn-line" data-edit>Edit</button><button class="btn btn-line" data-unblock style="color:var(--danger,#a12a2a)">Unblock</button>' : '<span class="ad-muted" style="font-size:12px">Managed under Exceptions.</span>'}</div></div>`;
+      <div class="cg-acts">${b.source === 'calendar_block' ? `<button class="cg-act" data-edit>${ICO.edit}<span>Edit</span></button><button class="cg-act cg-act-danger" data-unblock>${ICO.trash}<span>Unblock</span></button>` : '<span class="ad-muted" style="font-size:12px">Managed under Exceptions.</span>'}</div></div>`;
   sheet.querySelector('[data-x]').onclick = closeSheet;
   const eb = sheet.querySelector('[data-edit]'); if (eb) eb.onclick = () => { closeSheet(); blockForm(b); };
   const ub = sheet.querySelector('[data-unblock]'); if (ub) ub.onclick = async () => { if (!await confirmAct('Remove this block? The time becomes bookable again.')) return; const { error } = await sb.rpc('block_remove', { p_id: id }); if (error) return fail(error); toast('Unblocked'); closeSheet(); calRender().catch(fail); };
@@ -2381,12 +2381,12 @@ function pfPackActions(p, after) {
     <div class="cg-sheet-b">
       <div class="cg-pack"><div class="cg-pack-x">${p.used} / ${p.total_sessions}</div><div class="cg-pack-r">${p.remaining} remaining</div></div>
       ${'price_amount' in p ? `<p class="ad-muted" style="font-size:13px;margin:0 0 8px">${money2(p.price_amount, p.currency)} · ${esc(p.payment_status)}</p>` : ''}
-      <div class="cg-actions cg-actions-grid">
-        <button class="btn btn-accent" data-a="share">Recap &amp; share</button>
-        ${(has('finance:manage') && p.payment_status !== 'paid') ? '<button class="btn btn-line" data-a="collect">Collect in person</button>' : ''}
-        ${has('finance:manage') ? '<button class="btn btn-line" data-a="record">Record payment</button>' : ''}
-        <button class="btn btn-line" data-a="renew">Renew package</button>
-        <button class="btn btn-line" data-a="history">Payment history</button>
+      <div class="cg-acts">
+        <button class="cg-act cg-act-go" data-a="share">${ICO.share}<span>Recap &amp; share</span></button>
+        ${(has('finance:manage') && p.payment_status !== 'paid') ? `<button class="cg-act" data-a="collect">${ICO.tap}<span>Collect in person</span></button>` : ''}
+        ${has('finance:manage') ? `<button class="cg-act" data-a="record">${ICO.receipt}<span>Record payment</span></button>` : ''}
+        <button class="cg-act" data-a="renew">${ICO.renew}<span>Renew package</span></button>
+        <button class="cg-act" data-a="history">${ICO.history}<span>Payment history</span></button>
       </div>
       <div id="pf-pack-out" style="margin-top:12px"></div>
     </div>`;
@@ -2560,6 +2560,16 @@ function renderProfileBody(key) {
 
 /* ---- profile sections ---- */
 const ICO = {
+  share: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 13v6.5h14V13"/></svg>',
+  tap: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 10V5.5a1.6 1.6 0 0 1 3.2 0V12"/><path d="M13.2 11.4a1.5 1.5 0 0 1 3 0V13"/><path d="M16.2 12.4a1.5 1.5 0 0 1 3 0v3.2c0 2.8-2.2 5-5 5h-1.4c-1.4 0-2.7-.6-3.6-1.7L6 15.5a1.6 1.6 0 0 1 2.4-2.1l1.6 1.7"/></svg>',
+  receipt: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/></svg>',
+  renew: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/></svg>',
+  history: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.5l3.5 2"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>',
+  map: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>',
+  nav: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 18-8-8 18-2-8-8-2Z"/></svg>',
+  link: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2"/><path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   check: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>',
   noshow: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c0-2.8 2.4-5 5.5-5 1 0 1.9.2 2.7.6"/><path d="m16 15 5 5M21 15l-5 5"/></svg>',
   person: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.3 3.1-6 7-6s7 2.7 7 6"/></svg>',

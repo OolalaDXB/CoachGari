@@ -3665,3 +3665,38 @@ instruction.
 nothing sits beside it — and landed on top of the chip. In the sheet header it
 now takes its own place in the row, and the *name* is what shortens when space
 runs out: a truncated status is a lie, a truncated name is still a name.
+
+## CG-036 — The same treatment everywhere it was the same problem
+
+`.cg-acts` is now the one action pattern in the back-office, applied to every
+sheet that had a column of full-width labelled buttons:
+
+| Sheet | Was | Now |
+| --- | --- | --- |
+| Session | 9 stacked buttons | 1 labelled primary + 7 icons on a phone, 3 labelled columns on an iPad Pro |
+| Package | 5 stacked buttons | Recap & share primary, 4 icons |
+| Slot (tap an empty hour) | 2 stacked | Add session primary + Block time |
+| Block | Edit / Unblock | 2 icons |
+| Location | Copy address / Google Maps / Waze | 3 icons, a *thin* row with no primary |
+| Online | Copy link / Open meeting | 2 icons |
+
+**Where the treatment was deliberately NOT applied**, because the same change
+would have made those screens worse:
+
+- **Form footers** (Save, Cancel, Create package) keep their words at every
+  size. A form's confirm button is the one control a person must never have to
+  guess at. They only stop sitting side by side at 40% width on a phone and
+  take the full line instead.
+- **Table row actions** keep their words too. "Not a duplicate", "Make client"
+  and "Restore" have no icon that two people would read the same way; on a
+  phone they wrap onto their own lines rather than pushing the row off the
+  right edge.
+
+The distinction is worth stating because it is the whole rule: **an icon
+replaces a word only where the verb is common enough that the picture is already
+known** — a bin, a pencil, a map pin, a phone. Where the verb is specific to
+this business, the word stays.
+
+`.cg-acts-thin` exists for the rows with no primary among them: on a phone they
+are icons like everything else, but above 560px they fit their own content
+instead of claiming the two columns a decision row wants.
