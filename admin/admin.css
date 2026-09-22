@@ -283,9 +283,9 @@ details.pf-tech summary{cursor:pointer;font-size:12.5px;font-weight:700;color:va
 .ov-tip{position:absolute;pointer-events:none;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.08);white-space:nowrap;z-index:2;} .ov-tip b{display:block;margin-bottom:3px;}
 @media(max-width:820px){.ov-cols{grid-template-columns:1fr;}}
 .ov-panel{margin-bottom:0;}
-.ov-item{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--line);}
+.ov-item{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--line);}
 .ov-item:first-of-type{border-top:0;padding-top:2px;}
-.ov-item-main{min-width:0;} .ov-item-main .msg{margin-top:4px;white-space:pre-wrap;color:var(--grey-text);font-size:13px;}
+.ov-item-main{flex:1 1 220px;min-width:0;}   /* the buttons never shrank, so the name and the number were squeezed to 42px; below 220px the buttons drop to their own line instead */ .ov-item-main .msg{margin-top:4px;white-space:pre-wrap;color:var(--grey-text);font-size:13px;}
 .ov-item-acts{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;}
 button.ad-kpi{border:0;font:inherit;text-align:left;width:100%;color:inherit;}
 /* collaborations detail chips */

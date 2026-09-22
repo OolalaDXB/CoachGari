@@ -3742,3 +3742,35 @@ one makes the row stop adding up. Those still scroll sideways, but
 `.ad-table-wrap` now carries a shadow at the edge that appears only while there
 is more to see. A table cut off with no sign of it looks broken; the same table
 with a fade looks scrollable.
+
+## CG-038 — Overview, Clients and Settings: two faults, neither about width
+
+Seven screens driven at 390, 430, 744 and 1024 — Overview, Leads, Contacts,
+Clients dashboard, Services, Business, Access. This time the probe asserts the
+screen actually **rendered** (real text in `#view`, no error toast) before
+believing a green result, because CG-037 showed how convincingly an empty screen
+passes a layout check.
+
+Overview, Leads, Contacts, Services, Business and Access were clean at every
+width. The Clients dashboard had two faults, and neither was a width problem —
+both were simply *visible* at a particular width.
+
+**A KPI tile printed `NaN`.** `['Archived / spam', L.closed + L.spam]` — if
+either half is absent from the RPC's answer, JavaScript produces `NaN` and the
+tile shows it as though it were a figure. The neighbouring tiles would have
+printed `undefined` the same way. Fixed at the render site rather than at that
+one sum, so every tile on every screen is covered: a value that is not a finite
+number renders as an em dash. **A missing part of a sum dashes the whole tile
+rather than showing a partial figure** — a wrong number is worse than an absent
+one, because it gets believed.
+
+**The review item squeezed the name to 42 pixels.** `.ov-item-acts` was
+`flex-shrink:0` with `flex-wrap:wrap`, so the two buttons took their full width
+and left "+971563497457 · 1 enq / 0 bk" 42px to live in — *worse on an iPad Pro
+than on an iPhone*, which is the tell that it was never about screen size. The
+row wraps now and the main block has a 220px basis: below that the buttons drop
+to their own line instead of crushing the text.
+
+The lesson repeated from CG-037: driving screens at several widths finds
+rendering bugs that have nothing to do with width. Narrow layouts do not create
+these faults, they expose them.

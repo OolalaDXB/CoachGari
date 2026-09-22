@@ -72,6 +72,12 @@ async function once(btn, fn) {
   try { return await fn(); } finally { btn.disabled = false; btn.textContent = label; }
 }
 
+/* A KPI tile shows a number or says it has none. It must never print "NaN" or
+   "undefined": both are the screen admitting it does not know, in a way that looks like
+   data. A missing part of a sum dashes the whole tile rather than showing a partial
+   figure — a wrong number is worse than an absent one, because it gets believed. */
+const kpiVal = (v) => (typeof v === 'number' ? (Number.isFinite(v) ? v : '—') : (v == null || v === '' ? '—' : v));
+
 const CG_CCY = 'AED';   // Coach Gari bills in dirhams; the pack editor already defaults to it
 const money = (n, cur = 'USD') => n == null ? '—' : (n / 100).toLocaleString('en-US', { style: 'currency', currency: cur });
 
@@ -734,7 +740,7 @@ async function crmDashboard() {
 
   view.innerHTML = `
     <div class="ad-head"><div><h1>Clients</h1><p class="ad-muted">The funnel in numbers, then what to act on: new leads to convert, archive or delete, and possible duplicates to resolve.</p></div></div>
-    <div class="ad-kpis">${kpis.map(([l, v], i) => `<button class="ad-kpi ov-kpi-click" data-kpi="${i}"><b>${v ?? 0}</b><span>${esc(l)}</span></button>`).join('')}</div>
+    <div class="ad-kpis">${kpis.map(([l, v], i) => `<button class="ad-kpi ov-kpi-click" data-kpi="${i}"><b>${kpiVal(v)}</b><span>${esc(l)}</span></button>`).join('')}</div>
     ${stale}
     <div class="ov-cols">${L ? panel('New leads', newLeads, leadItem, 'No new leads. Inbox zero.') : ''}${K ? panel('To review — possible duplicates', review, reviewItem, 'Nothing flagged.') : ''}</div>`;
 
@@ -1030,7 +1036,7 @@ async function overview() {
       ${nextBookings.length ? table(['Time', 'Session', 'Client', 'Ref · status', 'Price'], nextBookings.map((b) => bookingRow(b, tz, false)), '') : '<p class="ad-empty">No booking ahead.</p>'}</div>` : ''}
     ${crmLine}
     ${revenueHtml || pipelineHtml ? `<div class="ad-grid2 ov-charts">${revenueHtml}${pipelineHtml}</div>` : ''}
-    <div class="ad-kpis">${kpis.map(([l, v], i) => `<button class="ad-kpi${kpis[i][2] ? ' ov-kpi-click' : ''}" data-kpi="${i}"><b>${v}</b><span>${esc(l)}</span></button>`).join('') || '<p class="ad-empty">Nothing to show yet.</p>'}</div>`;
+    <div class="ad-kpis">${kpis.map(([l, v], i) => `<button class="ad-kpi${kpis[i][2] ? ' ov-kpi-click' : ''}" data-kpi="${i}"><b>${kpiVal(v)}</b><span>${esc(l)}</span></button>`).join('') || '<p class="ad-empty">Nothing to show yet.</p>'}</div>`;
 
   // next-session cards
   calData = { sessions: upcoming, blocks: [] };
