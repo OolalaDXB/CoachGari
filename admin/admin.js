@@ -737,17 +737,17 @@ async function crmContacts() {
         <button class="btn btn-sm ${reviewOnly ? 'btn-accent' : 'btn-line'}" id="c-review">${reviewOnly ? 'Showing needs-review' : 'Needs review'}${!reviewOnly && reviewCount ? ` (${reviewCount})` : ''}</button>
         ${has('client_profile:manage') ? '<button class="btn btn-accent btn-sm" id="c-new">New contact</button>' : ''}
       </div></div>
-    ${reviewOnly ? '<p class="ad-note">These people were auto-created from an ambiguous match (a shared email or phone) and were never merged automatically. Open a profile to review, correct, or merge it into the right person.</p>' : ''}
-    <div class="ad-panel">${table(['Name', 'Where', 'Contact', 'Interest', 'Enquiries', 'Bookings', 'Last activity', 'Status', ''], rows.map((c) => `<tr class="clik" data-crm="${c.id}">
+    ${reviewOnly ? '<p class="ad-note">These people share an email or a phone with someone else, so the match was ambiguous. Nothing was merged automatically. Open a profile to review it, or merge it into the record you are keeping — merging moves the sessions, packs and subscriptions across.</p>' : ''}
+    <div class="ad-panel">${table(['Name', '<span class="col-wide">Where</span>', 'Contact', '<span class="col-wide">Interest</span>', '<span class="col-wide">Enquiries</span>', '<span class="col-wide">Bookings</span>', '<span class="col-wide">Last activity</span>', 'Status', ''], rows.map((c) => `<tr class="clik" data-crm="${c.id}">
       <td><b>${esc(c.display_name || '—')}</b>${c.needs_review ? ' <span class="ad-badge-rev">review</span>' : ''}</td>
-      <td>${esc([c.city, c.country].filter(Boolean).join(', ') || '—')}</td>
+      <td class="col-wide">${esc([c.city, c.country].filter(Boolean).join(', ') || '—')}</td>
       <td class="ad-muted" style="font-size:12px">${esc(c.email || c.phone || '—')}</td>
-      <td>${esc(c.main_interest || '—')}</td>
-      <td class="num">${c.enquiry_count}</td>
-      <td class="num">${c.booking_count}</td>
-      <td>${fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td>
+      <td class="col-wide">${esc(c.main_interest || '—')}</td>
+      <td class="num col-wide">${c.enquiry_count}</td>
+      <td class="num col-wide">${c.booking_count}</td>
+      <td class="col-wide">${fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td>
       <td>${st(c.status)}</td>
-      <td class="acts">${has('client_profile:manage') ? `${c.needs_review ? `<button class="btn btn-line btn-xs" data-c-merge="${c.id}">Merge</button><button class="btn btn-line btn-xs" data-c-keep="${c.id}">Not a duplicate</button>` : ''}${c.status === 'lead' ? `<button class="btn btn-accent btn-xs" data-c-status="${c.id}" data-to="active">Make client</button>` : ''}${c.status === 'archived' ? `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="active">Restore</button>` : `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="archived">Archive</button>`}` : ''}</td>
+      <td class="acts">${has('client_profile:manage') ? `${c.needs_review ? `<button class="btn btn-line btn-xs" data-c-merge="${c.id}">Merge</button><button class="btn btn-line btn-xs" data-c-keep="${c.id}">Not a duplicate</button>` : ''}${c.status === 'lead' ? `<button class="btn btn-accent btn-xs" data-c-status="${c.id}" data-to="active">Make client</button>` : ''}${c.status === 'archived' ? `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="active">Restore</button>` : `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="archived">Archive</button>`}<button class="btn btn-line btn-xs" data-c-del="${c.id}" data-c-name="${esc(c.display_name || '')}">Delete</button>` : ''}</td>
     </tr>`), reviewOnly ? 'Nothing needs review.' : 'No contacts match.')}</div>`;
   $('#c-status').onchange = (e) => { view.dataset.cStatus = e.target.value; crmContacts().catch(fail); };
   $('#c-search').onchange = (e) => { view.dataset.cSearch = e.target.value.trim(); crmContacts().catch(fail); };
@@ -758,6 +758,20 @@ async function crmContacts() {
   view.querySelectorAll('[data-c-status]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); const to = b.dataset.to; crmSetStatus(b.dataset.cStatus, to, to === 'active' ? 'Now a client' : to === 'archived' ? 'Archived' : 'Updated', reload); });
   view.querySelectorAll('[data-c-keep]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); crmClearReview(b.dataset.cKeep, reload); });
   view.querySelectorAll('[data-c-merge]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); openProfile(b.dataset.cMerge, null, 'overview'); });
+  view.querySelectorAll('[data-c-del]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); crmDelete(b.dataset.cDel, b.dataset.cName, reload); });
+}
+
+/* Delete a person for good. The database refuses anyone carrying sessions, packs,
+   bookings, a subscription, a collaboration or health measurements — all of those
+   cascade, so deleting would take the history with them, and archiving or merging is
+   what the operator actually wants. The refusal arrives as a foreign-key error with a
+   sentence written for a human; show that sentence rather than a code. */
+async function crmDelete(id, name, after) {
+  if (!await confirmAct(`Delete ${name || 'this contact'} for good?\n\nNotes and consents go with them. Enquiries are kept and simply unlinked.\n\nThis cannot be undone — archiving is reversible.`)) return;
+  const { error } = await sb.rpc('crm_delete_contact', { p_id: id });
+  if (error) return toast(error.message || 'Could not delete this contact', true);
+  toast('Contact deleted');
+  if (after) after();
 }
 
 /* =============================== OVERVIEW =============================== */

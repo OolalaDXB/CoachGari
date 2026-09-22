@@ -3260,3 +3260,65 @@ specific wording rather than the markup dumbed down to match.
 only through the sitemap and a reader never reaches at all. When they publish,
 the homepage should link to them too — that is the last step and it belongs
 with the decision to publish.
+
+---
+
+## CG-027 — The deduplicator was making the duplicates
+
+Four identical "AMAN" rows with the same phone number, in a system that has a
+duplicate check. Three faults, found by reading `crm_link_contact` rather than
+the data.
+
+**1. Ambiguity minted a new person.** The matcher looked for a contact with the
+same normalised email, then the same normalised phone. On exactly one match it
+linked. On *several* it set `review := true`, left `cid` null, and fell through
+to the insert — creating another row. So the first duplicate, however it arose,
+guaranteed an unbounded series: two matches produced a third, three produced a
+fourth, and every later enquiry from that person minted another record.
+
+This reverses a deliberate earlier decision, recorded in `cg009_crm.sql` as
+"must NOT pick one". That rule is defensible in principle — if two people
+genuinely share an address, attaching a third enquiry to one of them mixes
+their records. In practice the ambiguity is almost always one person already
+duplicated, and the rule made that unrecoverable. Linking to the oldest match
+and flagging it is recoverable: the operator merges or edits, and the enquiry
+row keeps its own name and contact either way, so nothing is lost by choosing.
+Unbounded duplication is not recoverable.
+
+**2. Merging a duplicate destroyed its history — the worse fault.**
+`crm_merge_contacts` moved five child tables to the target and deleted the
+source. Every other table referencing `crm_contacts` does so `on delete
+cascade` and was written *after* that function: coaching sessions, session
+packs, subscriptions, collaborations, commission exemptions, tokens. So the
+obvious way to fix the visible problem — click Merge on the duplicate —
+silently deleted the sessions, the paid packs and the live subscription
+attached to the row being merged away. Nobody had merged a contact carrying a
+subscription yet.
+
+The test is why this survived: its fixture built a source with exactly the five
+tables the function happened to move. A suite that asserts what the code does,
+using a fixture shaped like the code, passes for ever while the feature loses
+money. The fixture now carries a paid pack and a completed session.
+
+**3. Packs must move before sessions**, and the order is load-bearing:
+`coaching_sessions_pack_guard` refuses a session whose pack belongs to another
+client, so moving sessions first breaks the merge halfway through. That guard
+caught the mistake in my first version of the migration — a boundary someone
+wrote in CG-011 doing its job two years of features later.
+
+**Delete now exists** (`crm_delete_contact`), and refuses anyone with sessions,
+packs, bookings, a subscription, a collaboration or health measurements: for
+those, archive or merge, because deleting would take the history with it. An
+enquiry outlives the CRM record it was attached to and is simply detached —
+the mirror of `lead_delete`, which keeps the contact when the enquiry goes.
+
+**Archive already existed and was unreachable.** The Contacts table is nine
+columns; on a phone the actions sit far off the right edge, so from the device
+the owner actually uses there was no way to archive anything. Below 760px the
+columns that are context rather than decision are now hidden. Marked with a
+class, not `:nth-child`, so adding a column does not silently hide a different
+one.
+
+**The duplicates already in the database are flagged** `needs_review` by the
+migration, which is what puts the Merge button on a row. The matcher will not
+make more; the existing ones still need a human.

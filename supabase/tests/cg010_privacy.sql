@@ -8,7 +8,7 @@
 do $$
 declare
   ok int := 0; fail int := 0; log text := '';
-  cA uuid; cB uuid; cC uuid; dS uuid; dT uuid; svc uuid;
+  cA uuid; cB uuid; cC uuid; dS uuid; dT uuid; dD uuid; pk uuid; svc uuid;
   j jsonb; n int; tok text; nid uuid;
 begin
   /* ---- personas ---- */
@@ -153,6 +153,14 @@ begin
   insert into public.crm_notes (crm_contact_id,body,author,scope) values (dS,'src note','full@test.local','operational');
   insert into public.client_consents (crm_contact_id,consent_type,notice_version,status,source,consented_at) values (dS,'fitness_progress_tracking','fitness-progress-v1-2026-09','active','admin_recorded',now());
   insert into public.body_measurements (crm_contact_id,measured_at,height_cm_snapshot,weight_kg) values (dS, current_date, 178, 85);
+  /* A paid pack and a completed session on the SOURCE. Both cascade on delete and were
+     not moved by the merge, so before this was fixed the merge silently destroyed them.
+     The old fixture carried only the five tables the function happened to move, which is
+     exactly how a test can pass while the feature loses money. */
+  insert into public.session_packs (crm_contact_id,title,total_sessions,price_amount,currency,payment_status,created_by)
+    values (dS,'Merged pack',10,312000,'AED','paid','seed') returning id into pk;
+  insert into public.coaching_sessions (crm_contact_id,session_pack_id,title,start_at,end_at,status,created_by)
+    values (dS,pk,'Merged session',now()-interval '2 days',now()-interval '2 days'+interval '1 hour','completed','seed');
 
   -- health@ lacks client_profile:manage -> cannot merge
   perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000f004","email":"health@test.local"}',true);
@@ -172,7 +180,46 @@ begin
      and (select count(*) from public.body_measurements where crm_contact_id=dT)=1
      and (select count(*) from public.client_consents where crm_contact_id=dT)=1
      and (select needs_review from public.crm_contacts where id=dT)=false then ok:=ok+1; else fail:=fail+1; log:=log||' [merge moved rows]'; end if;
+  /* The money and the history came with it rather than cascading away. Named rather than
+     counted: the confirmed booking in this fixture also produces a session, so a total
+     asserts the fixture rather than the merge. */
+  if (select crm_contact_id from public.session_packs where id=pk)=dT
+     and (select count(*) from public.session_packs where crm_contact_id=dT)=1
+     and (select crm_contact_id from public.coaching_sessions where title='Merged session')=dT
+     and (select count(*) from public.coaching_sessions where crm_contact_id=dS)=0 then ok:=ok+1; else fail:=fail+1; log:=log||' [merge kept sessions and packs]'; end if;
   if exists (select 1 from public.admin_audit where area='merge' and action='merge') then ok:=ok+1; else fail:=fail+1; log:=log||' [merge audited]'; end if;
+
+  /* ========== 8b. deleting a contact ========== */
+  perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000f001","email":"full@test.local"}',true);
+  execute 'set local role authenticated';
+  -- dT now carries the merged pack and session: deleting it would cascade them away
+  begin perform public.crm_delete_contact(dT); fail:=fail+1; log:=log||' [delete ignored history]'; exception when foreign_key_violation then ok:=ok+1; end;
+  execute 'reset role';
+
+  -- a clean contact with nothing but an enquiry can go; the enquiry survives, detached
+  insert into public.crm_contacts (display_name,email,email_norm) values ('Throwaway','bin@ex.com','bin@ex.com') returning id into dD;
+  insert into public.contacts (submission_id,name,contact,interest,message,crm_contact_id) values (gen_random_uuid(),'T','bin@ex.com','coaching','orphan me',dD);
+  insert into public.crm_notes (crm_contact_id,body,author,scope) values (dD,'throwaway note','full@test.local','operational');
+
+  perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000f004","email":"health@test.local"}',true);
+  execute 'set local role authenticated';
+  begin perform public.crm_delete_contact(dD); fail:=fail+1; log:=log||' [health deletes]'; exception when insufficient_privilege then ok:=ok+1; end;
+  execute 'reset role';
+
+  perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000f001","email":"full@test.local"}',true);
+  execute 'set local role authenticated';
+  perform public.crm_delete_contact(dD);
+  execute 'reset role';
+  if (select count(*) from public.crm_contacts where id=dD)=0
+     and (select count(*) from public.crm_notes where crm_contact_id=dD)=0
+     and (select crm_contact_id from public.contacts where message='orphan me') is null
+     and (select count(*) from public.contacts where message='orphan me')=1 then ok:=ok+1; else fail:=fail+1; log:=log||' [delete detaches the enquiry and keeps it]'; end if;
+  if exists (select 1 from public.admin_audit where area='crm_contact' and action='delete' and entity_id=dD::text) then ok:=ok+1; else fail:=fail+1; log:=log||' [delete audited]'; end if;
+
+  perform set_config('request.jwt.claims','{"role":"anon"}',true);
+  execute 'set local role anon';
+  begin perform public.crm_delete_contact(dT); fail:=fail+1; log:=log||' [anon deletes]'; exception when insufficient_privilege then ok:=ok+1; end;
+  execute 'reset role';
 
   /* ========== 9. anon ========== */
   perform set_config('request.jwt.claims','{"role":"anon"}',true);

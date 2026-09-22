@@ -494,3 +494,15 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
 /* the secondary way in, below the password form: a link that looks like prose */
 .ad-alt{margin:16px 0 0;font-size:13.5px;}
 .ad-link{border:0;background:none;padding:0;font:inherit;font-weight:600;color:var(--accent);cursor:pointer;text-decoration:underline;}
+/* A nine-column table on a phone puts the actions off the right edge, where the owner
+   cannot reach Archive or Delete at all — which is how the back-office ended up with no
+   way to tidy anything from a phone. Below 760px the columns that are context rather
+   than decision are dropped, keeping name, contact, status and the buttons.
+   Marked with a class rather than :nth-child, so adding a column does not silently hide
+   a different one. */
+@media(max-width:760px){
+  .ad-table .col-wide{display:none;}
+  .ad-table th:has(.col-wide){display:none;}
+  .ad-table .acts{white-space:normal;}
+  .ad-table .acts button{margin:0 6px 6px 0;}
+}

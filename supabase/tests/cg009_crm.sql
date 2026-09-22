@@ -52,14 +52,35 @@ begin
   insert into public.contacts (submission_id, name, contact, interest) values (gen_random_uuid(), 'John Smith', 'john2@example.com', 'coaching');
   if (select count(distinct crm_contact_id) from public.contacts where name = 'John Smith') = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [same name not merged]'; end if;
 
-  -- ambiguous: two canonical people already share an email; a new enquiry with it
-  -- must NOT pick one — it creates a fresh contact flagged for review.
-  insert into public.crm_contacts (display_name, email, email_norm) values ('Dup A','dup@example.com','dup@example.com');
-  insert into public.crm_contacts (display_name, email, email_norm) values ('Dup B','dup@example.com','dup@example.com');
+  /* Ambiguous: two canonical people already share an email, and a new enquiry arrives
+     with it. This assertion is the reverse of what it used to say, deliberately.
+
+     The original rule was "must NOT pick one — create a fresh contact flagged for
+     review", which is defensible in principle: if two different people really do share
+     an address, attaching a third enquiry to one of them mixes their records.
+
+     In practice the ambiguity is almost always one person already duplicated, and the
+     rule made that unrecoverable: two matches produced a third, three produced a fourth,
+     and every later enquiry from that person minted another row. Production reached four
+     identical records for one phone number that way.
+
+     So: link to the OLDEST match and flag it. That is recoverable — the operator merges,
+     or edits — whereas unbounded duplication is not, and the enquiry row keeps its own
+     name and contact either way, so nothing is lost by choosing. */
+  insert into public.crm_contacts (display_name, email, email_norm, first_seen_at)
+    values ('Dup A','dup@example.com','dup@example.com', now() - interval '2 days');
+  insert into public.crm_contacts (display_name, email, email_norm, first_seen_at)
+    values ('Dup B','dup@example.com','dup@example.com', now() - interval '1 day');
   insert into public.contacts (submission_id, name, contact, interest, message) values (gen_random_uuid(), 'Dup C', 'dup@example.com', 'coaching', 'ambiguous');
   select crm_contact_id into nrid from public.contacts where message = 'ambiguous';
-  if (select needs_review from public.crm_contacts where id = nrid)
-     and (select count(*) from public.crm_contacts where email_norm = 'dup@example.com') = 3 then ok := ok + 1; else fail := fail + 1; log := log || ' [ambiguous flagged not merged]'; end if;
+  if (select display_name from public.crm_contacts where id = nrid) = 'Dup A'
+     and (select needs_review from public.crm_contacts where id = nrid)
+     and (select count(*) from public.crm_contacts where email_norm = 'dup@example.com') = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [ambiguous links to the oldest and flags it]'; end if;
+
+  -- and it does not keep growing: a fourth enquiry with the same address adds no row
+  insert into public.contacts (submission_id, name, contact, interest, message) values (gen_random_uuid(), 'Dup D', 'dup@example.com', 'coaching', 'ambiguous again');
+  if (select count(*) from public.crm_contacts where email_norm = 'dup@example.com') = 2
+     and (select crm_contact_id from public.contacts where message = 'ambiguous again') = nrid then ok := ok + 1; else fail := fail + 1; log := log || ' [ambiguity does not compound]'; end if;
 
   /* ---- 2. direct booking (no prior enquiry) links a CRM contact ---- */
   insert into public.services (slug, title, category, duration_minutes, price_amount, currency, delivery_mode, default_capacity, active, listed)
