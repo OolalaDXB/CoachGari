@@ -3774,3 +3774,40 @@ to their own line instead of crushing the text.
 The lesson repeated from CG-037: driving screens at several widths finds
 rendering bugs that have nothing to do with width. Narrow layouts do not create
 these faults, they expose them.
+
+---
+
+## CG-039 — The name on the payer's card statement
+
+A real charge for a Coach Gari booking showed up on the payer's bank as
+**"Beau Capital"**. Nothing in the code chose that name: a grep across
+`supabase/functions` and `beau-ph` found no `statement_descriptor` at all, so
+Stripe fell back to the only thing it had — the *account's* descriptor, taken
+from the legal entity the Stripe account is registered to.
+
+That is the commonest reason a genuine charge gets disputed. The payer does not
+recognise the name, so they call it fraud. The chargeback costs more than the
+booking.
+
+Two halves, and only one of them lives in this repository.
+
+**The account descriptor** is the owner's: Stripe Dashboard → Settings →
+Business → Public details → Statement descriptor. Stripe reviews a change to
+it, so it is not instant.
+
+**The per-payment suffix** is the half we can set, and it is the half that
+survives whatever the account is called. `checkoutSessionParams` now sends
+`payment_intent_data[statement_descriptor_suffix]`, sourced from the caller or
+from `STRIPE_STATEMENT_SUFFIX`. We deliberately do *not* use the full
+`statement_descriptor` override — Stripe restricts it for most accounts, and a
+request carrying it fails outright rather than degrading.
+
+`statementSuffix()` sanitises rather than trusts: Stripe rejects `< > \ ' " *`
+and caps the suffix at 22 characters, and a request rejected at the payment
+step fails a booking that was otherwise fine. Anything under five characters is
+dropped instead of sent, because a four-letter fragment on a bank statement
+tells the payer no more than the wrong name did.
+
+The lesson worth keeping: **an unset default is still a decision** — it just
+gets made by whoever set the account up, months earlier, for a different
+purpose.

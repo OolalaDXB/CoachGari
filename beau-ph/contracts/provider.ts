@@ -107,6 +107,11 @@ export interface CreateRequestInput {
   /** 1-based attempt number (idempotency keys). */
   attempt: number;
   expiresInSeconds?: number;
+  /** What the payer should read on their bank statement, beside the account's own name
+      (e.g. "COACH GARI"). The account descriptor is the legal entity; this says which
+      brand the money went to, which is what stops a genuine charge being disputed.
+      A provider that cannot carry one ignores it. */
+  statementSuffix?: string | null;
   /** Which capability of the provider this request uses (default: the provider's primary online/manual one). */
   capability?: Capability;
   platform?: Platform | null;

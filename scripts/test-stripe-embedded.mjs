@@ -9,7 +9,7 @@
      - a still-open session is resumed, a closed one is not
    Exit code 1 on any failure.
      node --experimental-strip-types scripts/test-stripe-embedded.mjs                */
-import { stripe, checkoutSessionParams, paymentsMode } from '../beau-ph/providers/stripe/adapter.ts';
+import { stripe, checkoutSessionParams, paymentsMode, statementSuffix } from '../beau-ph/providers/stripe/adapter.ts';
 import { siteUrl, CANONICAL_SITE_URL } from '../beau-ph/host-adapters/coach-gari/adapter.ts';
 
 let ok = 0, fail = 0;
@@ -141,6 +141,25 @@ await t('enrich: only touches checkout.session.completed', async () => withFetch
 
 /* ---- 6. webhook mode symmetry is unchanged ---- */
 await t('verifyWebhook: mode unset refuses before any signature work', async () => (await stripe.verifyWebhook({ headers: new Headers(), rawBody: '{}' }, envOf({ STRIPE_WEBHOOK_SECRET: 'whsec_x' }))).ok === false);
+
+
+/* What the payer reads on their bank statement. The account's descriptor is the legal
+   entity, not the brand they bought from, and an unrecognised name on a card app is the
+   commonest reason a genuine charge is disputed. */
+await t('a statement suffix is sent when configured', async () => {
+  const q = checkoutSessionParams({ ...input(), statementSuffix: 'COACH GARI' }, 1);
+  return q.get('payment_intent_data[statement_descriptor_suffix]') === 'COACH GARI';
+});
+await t('no suffix configured leaves the parameter out entirely', async () => {
+  const q = checkoutSessionParams(input(), 1);
+  return !q.has('payment_intent_data[statement_descriptor_suffix]');
+});
+await t('the characters Stripe rejects are cleaned, not passed through', async () =>
+  statementSuffix('COACH*GARI <"x">') === 'COACH GARI x');
+await t('a suffix longer than 22 characters is cut, not rejected', async () =>
+  statementSuffix('COACH GARI PADEL AND FITNESS DUBAI').length <= 22);
+await t('something too short to mean anything is dropped', async () =>
+  statementSuffix('CG') === null && statementSuffix('   ') === null && statementSuffix(undefined) === null);
 
 console.log(`\nSTRIPE_EMBEDDED_TESTS ok=${ok} fail=${fail}`);
 process.exit(fail ? 1 : 0);

@@ -152,6 +152,25 @@ export async function feeEvidence(
   return out;                                                       // charge known, fee not yet: the host keeps fee_known false
 }
 
+/* What the payer sees on their bank statement.
+
+   Stripe puts the ACCOUNT's descriptor on every charge, and this account is registered to
+   the legal entity, not to the brand the client bought from. A coaching client who reads
+   an unrelated company name on their card app does not remember buying anything from it —
+   that is the most common reason a genuine charge gets disputed, and a dispute costs the
+   fee plus the amount whatever the outcome.
+
+   A suffix is appended to the account's own prefix ("BEAU CAPITAL* COACH GARI"), which is
+   the supported way to say who the money actually went to; a full override is restricted
+   on most card accounts. Stripe rejects `< > \ ' " *` and anything over 22 characters, so
+   the value is cleaned here rather than trusted: a rejected parameter would fail the whole
+   checkout, and a checkout that fails over a cosmetic field is a worse bug than the one
+   this fixes. Unset means unchanged — nothing breaks where it is not configured. */
+export function statementSuffix(raw: string | undefined | null): string | null {
+  const cleaned = String(raw ?? "").replace(/[<>\\'"*]/g, " ").replace(/\s+/g, " ").trim().slice(0, 22).trim();
+  return cleaned.length >= 5 ? cleaned : null;      // under five characters it tells the payer nothing
+}
+
 /** The exact form body sent to POST /v1/checkout/sessions (exported so tests can assert it without a network). */
 export function checkoutSessionParams(input: CreateRequestInput, expiresAt: number): URLSearchParams {
   const params = new URLSearchParams();
@@ -172,6 +191,8 @@ export function checkoutSessionParams(input: CreateRequestInput, expiresAt: numb
     params.set("cancel_url", input.returnUrls.cancel);
   }
   if (input.customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(input.customerEmail)) params.set("customer_email", input.customerEmail);
+  const suffix = statementSuffix(input.statementSuffix ?? (typeof Deno !== "undefined" ? Deno.env.get("STRIPE_STATEMENT_SUFFIX") : undefined));
+  if (suffix) params.set("payment_intent_data[statement_descriptor_suffix]", suffix);
   /* Keeping the card for next month. Stripe needs a customer to attach it to,
      and in `payment` mode it does not make one unless asked — so both of these
      go together or neither does. The consent is the payer's, given in Stripe's
