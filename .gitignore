@@ -4,3 +4,7 @@ node_modules/
 .vercel/
 .DS_Store
 *.log
+
+# Personal Claude Code settings. Kept out of the repository on purpose:
+# it pre-authorises apply_migration, which writes to the production database.
+.claude/settings.local.json
