@@ -3811,3 +3811,78 @@ tells the payer no more than the wrong name did.
 The lesson worth keeping: **an unset default is still a decision** — it just
 gets made by whoever set the account up, months earlier, for a different
 purpose.
+
+---
+
+## CG-040 — Four fixes from an outside read of the homepage
+
+A marketer went through the site and recorded her reactions. Four of her points
+were acted on. What follows is what the code actually said, which in two places
+was not what the feedback assumed.
+
+**The two bright buttons.** She was right that the hero's accented button and the
+header's accented button led to two different places — `#programme` and
+`#contact`. What made it worth recording is *why*: the convergence already
+existed in `site.js`, rewriting `#contact` to `#programme` — but behind
+`if (CONFIG.SHOW_PUBLIC_ENQUIRY_PRICES)`, a flag that is `false`. A behaviour
+the site was supposed to have, gated on an unrelated setting, silently absent
+for as long as that setting stayed off. It now lives in the markup, where it
+can be read by looking, and the runtime rewrite is gone.
+
+Both accented links point at the catalogue, and the catalogue routes on: a
+`slot` service to the booking picker, an `enquiry` service to the form with the
+interest preselected. **Her rule was about the brightness, not the destination** —
+"there can be other buttons, but it is better not to make them bright" — and
+that is the version we implemented. A visitor ready to pay is not sent to a
+form. The one accented button we deliberately left alone is "Book a
+conversation" inside the conversation section: it is below the fold, in
+context, and it is the only direct path to a paid booking on the page.
+
+**The attachments.** The claim was that a visitor could fill the server. That is
+not true: `reserve_contact_media` refuses past three files, past 50 MB in total,
+outside a type allowlist and outside a 64-hex token valid thirty minutes, and
+the contact function caps the request body at 16 KB. All server-side. The field
+was removed anyway, for a different reason: a photo of someone's body is
+sensitive, and asking for it in the same breath as their name asks too early.
+**A control being sound is not a reason to keep asking for the data it
+protects.** The upload path stays intact for the training review, where the
+request is expected and the person has already chosen to work with Coach Gari.
+
+**The chevrons.** A `›` in front of a static line reads as "there is more behind
+this". She spotted it in the About list; it was also in front of every feature of
+every catalogue card, rendered by `site.js`. Both are bullets now.
+
+**What we did not do.** Her strongest structural claim — one page sells one
+thing, put padel and the trips on separate sites — was not applied. It is
+landing-page doctrine applied to something that is not a landing page: this one
+carries a booking engine, payments, a CRM and a calendar, and splitting it
+would split the catalogue, the calendar and the back-office to gain a cleaner
+page. A padel page is planned; the trips stay.
+
+The general lesson: an outside reader who cannot see the code will be right
+about the symptom and wrong about the cause. Both halves are useful, and they
+have to be separated before either is acted on.
+
+### CG-040b — The form asked for the wrong things to be mandatory
+
+Simplifying the enquiry form turned out not to mean removing fields. It meant
+making `required` mean what the server means.
+
+The contact function has always refused an enquiry without a name or without a
+reachable contact, and has always accepted one without a city or a country
+(`splitLocation` returns nulls and the insert carries them). The markup said the
+opposite: `f-city` and `f-country` carried `required`, `f-name` and `f-email`
+did not. So the browser blocked on the two fields the backend does not need, let
+through the two it does, and the visitor learned the real rule only after a
+failed round trip.
+
+`required` now sits on name and contact. City and country stay in the form,
+stay stored, and are marked optional — with the reason written next to them,
+because where someone lives decides which live sessions are reachable and what
+meal planning can assume. **Asking with the reason attached collects more than
+asking with a star.** No field was removed and no depth was lost; what was
+removed is a refusal that protected nothing.
+
+One matching change in `site.js`: the country is validated against the ISO list
+only when something was typed. Empty is now a valid answer; half-typed is still
+not, because a fragment stored as a country is worse than no country.
