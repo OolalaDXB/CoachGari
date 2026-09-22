@@ -404,26 +404,28 @@
             <input id="f-email" name="contact" type="text" required>
           </div>
         </div>
-        <!-- Required matches what the server actually refuses: a name and a way to answer.
-             City and country were marked required here while the contact function has always
-             accepted an enquiry without them — so the browser blocked on the two optional
-             fields and let the two mandatory ones through, and the visitor discovered the
-             real rule only after a round trip. They are still asked, and still stored: the
-             timezone decides which live sessions are reachable and meal planning starts from
-             where someone lives. Asked with the reason attached, which gets better answers
-             than a bare label with a star on it. -->
+        <!-- Name and contact are required because the contact function refuses an enquiry
+             without them; they used to carry no `required` at all, so the visitor learned
+             that only after a failed round trip.
+
+             The country is required by Coach Gari's own decision, not by the server, which
+             accepts an enquiry without one. It is the field the answer actually turns on —
+             timezone, what is in the shops, whether an in-person session is even possible —
+             and an enquiry that arrives without it costs a round trip to ask. The city stays
+             optional: the country carries the information, the city only refines it. -->
+
         <div class="two">
           <div class="field">
             <label for="f-city">City <span class="opt">optional</span></label>
             <input id="f-city" name="city" type="text" autocomplete="address-level2" placeholder="Harare, Dubai, Paris…">
           </div>
           <div class="field">
-            <label for="f-country">Country <span class="opt">optional</span></label>
-            <input id="f-country" name="country" type="text" autocomplete="country-name" list="country-list" placeholder="Choose a country" data-country-input>
+            <label for="f-country">Country</label>
+            <input id="f-country" name="country" type="text" required autocomplete="country-name" list="country-list" placeholder="Choose a country" data-country-input>
             <datalist id="country-list" data-countries></datalist>
           </div>
         </div>
-        <p class="form-hint">Where you are shapes the answer — your timezone for live sessions, and what's actually in the shops for meal planning.</p>
+        <p class="form-hint">Where you are shapes the answer — your timezone for live sessions, and what's actually in the shops for meal planning. The city is optional.</p>
         <div class="two one">
           <div class="field">
             <label for="f-what">What you're after</label>

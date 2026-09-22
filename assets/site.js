@@ -608,10 +608,10 @@ function uploadOne(uploadToken, file){
     var fields = Object.fromEntries(new FormData(form).entries());
     delete fields.media;
     var countryEl = form.querySelector('[data-country-input]');
-    /* The country is optional. Left empty it is simply not sent; typed, it still has to
-       resolve to a real country, because a half-typed name stored as-is is worse than no
-       country at all. */
-    if (countryEl && COUNTRY_NAMES.length && countryEl.value.trim()) {
+    /* The country is required, and it has to resolve to a real one: a half-typed name
+       stored as-is is worse than no country at all. Validated here as well as by the
+       `required` attribute, so the rule survives the attribute being lost. */
+    if (countryEl && COUNTRY_NAMES.length) {
       var matched = matchCountry(countryEl.value);
       if (!matched) {
         say('Pick your country from the list as you type.', 'err');
