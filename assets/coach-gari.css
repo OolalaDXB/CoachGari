@@ -302,6 +302,11 @@ footer.f-slim .wordmark{margin-top:40px;}
 .cs-list li.cs-empty{color:var(--grey-text);cursor:default;}
 .field textarea{min-height:110px;resize:vertical;}
 .form-hint{margin:8px 0 0;font-size:13.5px;color:var(--grey-text);font-weight:500;line-height:1.5;}
+/* A hint that belongs to a field sits inside it and needs no space below. One that stands
+   between two rows — the note under City / Country — is a direct child of the form, and
+   without a bottom margin the next row's label lands on top of it. Same 20px as .field, so
+   the note keeps the form's rhythm instead of inventing its own. */
+.enquiry form > .form-hint{margin:0 0 20px;}
 .form-hint[hidden]{display:none;}
 .field label .opt{font-weight:600;letter-spacing:0;text-transform:none;color:var(--grey-text);margin-left:6px;}
 .field input[type=file]{padding:12px 14px;font-size:14.5px;cursor:pointer;}
