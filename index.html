@@ -173,7 +173,12 @@
     <div class="nav-right">
       <!-- no mark on this one: the compact header button overflows a 390 px screen with it -->
       <a class="btn btn-soft btn-sm nav-support" href="#support" data-support-open>Support</a>
-      <a class="btn btn-accent btn-sm" data-cta-main href="#contact">Get started<span class="nav-arrow" aria-hidden="true"> →</span></a>
+      <!-- Both accented buttons on this page lead to the catalogue. Two labels, one
+           destination: from there each card routes by its own booking_mode — a bookable
+           session to #book, an enquiry product to #contact with the interest preselected.
+           A visitor ready to pay is never sent to a form, and a visitor who does not know
+           what to pick is never asked to choose in the dark. -->
+      <a class="btn btn-accent btn-sm" data-cta-main href="#programme">Get started<span class="nav-arrow" aria-hidden="true"> →</span></a>
     </div>
   </div>
 </nav>
@@ -351,10 +356,10 @@
       <p class="sub">Proudly born and raised in Zimbabwe, with a short stint in Johannesburg for university and my early career, before relocating to Dubai.</p>
       <p class="sub">Ten years later I've had the privilege of working with individuals from all over the world, which has given me a deeper insight into health and wellness. Most of the people I coach now are nowhere near me, which suits both of us fine.</p>
       <ul class="facts">
-        <li><span>›</span> PadelMBA certified coach</li>
-        <li><span>›</span> Ten years coaching in Dubai</li>
-        <li><span>›</span> Athletic development and premium client engagement</li>
-        <li><span>›</span> Active padel and tennis player</li>
+        <li><span aria-hidden="true">•</span> PadelMBA certified coach</li>
+        <li><span aria-hidden="true">•</span> Ten years coaching in Dubai</li>
+        <li><span aria-hidden="true">•</span> Athletic development and premium client engagement</li>
+        <li><span aria-hidden="true">•</span> Active padel and tennis player</li>
       </ul>
     </div>
   </div>
@@ -430,12 +435,14 @@
           <label for="f-more">Anything useful to know</label>
           <textarea id="f-more" name="detail" placeholder="What you train with, how much time is realistic, what you've tried before."></textarea>
         </div>
-        <div class="field">
-          <label for="f-media">Photos or videos <span class="opt">optional</span></label>
-          <input id="f-media" name="media" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,image/gif,video/mp4,video/quicktime,video/webm,video/x-m4v,video/3gpp" multiple data-media>
-          <p class="form-hint">Optional context for your enquiry: up to 3 photos or videos, 50 MB in total.</p>
-          <ul class="media-list" data-media-list hidden></ul>
-        </div>
+        <!-- No attachment field at first contact. The limits behind it were real and
+             enforced server-side — three files, 50 MB, a strict type allowlist, a
+             one-off 30-minute token, a private bucket — so this is not a security
+             fix. It is a question of what to ask for, and when: a photo of someone's
+             body is sensitive, and asking for it in the same breath as their name is
+             asking too early. The upload path (token, bucket, RPCs, admin screen)
+             is left intact for the training review, where the request makes sense
+             and the person has already chosen to work with Coach Gari. -->
         <div class="hp" aria-hidden="true">
           <label for="f-website">Website</label>
           <input id="f-website" name="website" type="text" tabindex="-1" autocomplete="off">

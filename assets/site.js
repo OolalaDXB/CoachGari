@@ -185,7 +185,9 @@ import { CONFIG } from '/config.js';
     if (s.description) item.appendChild(node('p', '', s.description));
     if (s.features && s.features.length) {
       var ul = node('ul');
-      s.features.forEach(function(f){ var li = node('li'); li.appendChild(node('b', '', '›')); li.appendChild(document.createTextNode(' ' + f)); ul.appendChild(li); });
+      /* A bullet, not a chevron. A '›' in front of a line reads as "there is more behind
+         this" and invites a click that leads nowhere. These are facts, not disclosures. */
+      s.features.forEach(function(f){ var li = node('li'); var m = node('b', '', '•'); m.setAttribute('aria-hidden', 'true'); li.appendChild(m); li.appendChild(document.createTextNode(' ' + f)); ul.appendChild(li); });
       item.appendChild(ul);
     }
     var buy = node('div', 'buy');
@@ -210,11 +212,11 @@ import { CONFIG } from '/config.js';
     host.appendChild(node('p', 'catalogue-wait', 'The programmes are taking a moment to load. Use the form below or message Coach Gari on WhatsApp.'));
   });
 
-  if (CONFIG.SHOW_PUBLIC_ENQUIRY_PRICES) {
-    document.querySelectorAll('[data-cta-main]').forEach(function(a){
-      if (a.getAttribute('href') === '#contact') a.setAttribute('href', '#programme');
-    });
-  }
+  /* The convergence of the accented CTAs used to live here, conditioned on
+     SHOW_PUBLIC_ENQUIRY_PRICES — which is false, so it never ran and the two bright
+     buttons pointed at two different places. It belongs in the markup, not behind a
+     price flag: both [data-cta-main] links now carry href="#programme" directly, and
+     the catalogue routes onward by booking_mode. Nothing to rewrite at runtime. */
 })();
 
 /* ---- 3. WhatsApp links ------------------------------------ */
@@ -436,10 +438,10 @@ export function matchCountry(value){
 /* ---- form adapts to the category ---------------------------- */
 /* One enquiry form. The "What you're after" choice drives a short
    hint and the message placeholder; field labels never change.
-   Attachments (photos / videos) are available for every category;
-   `media` is kept as a per-category switch should one ever need to
-   hide the field. Nothing here changes what is sent to the contact
-   function.                                                     */
+   `media` is a per-category switch for the attachment field, which
+   the first-contact form no longer carries at all; it stays here
+   for the day the training review needs it. Nothing in this block
+   changes what is sent to the contact function.                  */
 var CATEGORIES = {
   'Online coaching':        { hint: '', detail: 'What you train with, how much time is realistic, what you\'ve tried before.', media: false },
   'The 12-week programme':  { hint: '', detail: 'Home or gym, and what equipment you have.', media: false },
