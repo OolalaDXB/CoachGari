@@ -3322,3 +3322,45 @@ one.
 **The duplicates already in the database are flagged** `needs_review` by the
 migration, which is what puts the Merge button on a row. The matcher will not
 make more; the existing ones still need a human.
+
+---
+
+## CG-028 — Deleting a client, and warning before a duplicate is made
+
+**The blanket refusal was safe and unusable.** CG-027 refused to delete anyone
+with history, which means every real client, and the test row the owner wanted
+gone carries a session pack. Deletion has to be possible; the only question is
+what it may take with it.
+
+**The schema already drew most of the line.** Deleting a `crm_contact` cascades
+to sessions, packs, subscriptions, notes, consents, measurements and tokens; it
+is blocked outright by bookings, collaborations and enquiries; and deleting a
+pack is blocked by `orders`, which carry payments, refunds, chargebacks and
+partner earnings. So the cascade now removes everything that records coaching,
+and **money refuses, cascade or not**.
+
+That last part is not timidity. A payment is the record an audit rests on, ours
+has to go on agreeing with Stripe's, and a back-office that can erase money
+behind a confirm dialog is one nobody can vouch for. Those people get archived.
+
+**`crm_delete_preview` exists so the confirmation can name numbers.** "Delete
+Ali and 12 coaching sessions, 2 session packs, 1 subscription?" is a question
+someone can answer. "This cannot be undone" is not.
+
+**The form was the other source of duplicates.** The matcher only ever ran on
+enquiries and bookings, so the New contact button and any edit that typed an
+existing address made a duplicate in one click, silently. `crm_save_contact`
+now refuses unless the caller passes `allow_duplicate`, and the editor turns
+that refusal into a panel listing who already has that email or phone, with a
+link to open them instead. A knowingly forced duplicate flags **both** records,
+so the pair is findable from either end.
+
+**Flagged rows now offer a choice rather than one verb**: Merge…, Delete this
+one, Not a duplicate. Merging keeps everything and is right when both sides
+have history; deleting is right when one side is an empty accident, which is
+what most of these are.
+
+**A note for whoever enables it**: the advisors flag leaked-password protection
+as off. That mattered little when the only way in was a one-time link; it
+matters now that email and password is the main door, and it is one toggle in
+Authentication → Password settings.

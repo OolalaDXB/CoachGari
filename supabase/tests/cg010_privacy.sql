@@ -221,6 +221,49 @@ begin
   begin perform public.crm_delete_contact(dT); fail:=fail+1; log:=log||' [anon deletes]'; exception when insufficient_privilege then ok:=ok+1; end;
   execute 'reset role';
 
+  /* ---- delete with the cascade the operator asked for ---- */
+  perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000f001","email":"full@test.local"}',true);
+  execute 'set local role authenticated';
+  -- the preview names what would go, so the confirmation is not a leap of faith
+  j := public.crm_delete_preview(dT);
+  if (j ->> 'packs')::int = 1 and (j ->> 'sessions')::int >= 1 and (j ->> 'orders')::int = 0 then ok:=ok+1; else fail:=fail+1; log:=log||' [preview counts]'; end if;
+  -- dT carries the merged pack and sessions: cascade takes them, and the enquiries survive
+  j := public.crm_delete_contact(dT, true);
+  execute 'reset role';
+  if (select count(*) from public.crm_contacts where id=dT)=0
+     and (select count(*) from public.session_packs where id=pk)=0
+     and (select count(*) from public.coaching_sessions where title='Merged session')=0
+     and (select count(*) from public.contacts where message='src enq')=1
+     and (select crm_contact_id from public.contacts where message='src enq') is null then ok:=ok+1; else fail:=fail+1; log:=log||' [cascade delete took the history and kept the enquiry]'; end if;
+  if exists (select 1 from public.admin_audit where area='crm_contact' and action='delete' and entity_id=dT::text
+               and (summary -> 'destroyed' ->> 'packs')::int = 1) then ok:=ok+1; else fail:=fail+1; log:=log||' [cascade delete records what it destroyed]'; end if;
+
+  /* ---- money always refuses, cascade or not ---- */
+  insert into public.crm_contacts (display_name,email,email_norm) values ('Paid Client','paid@ex.com','paid@ex.com') returning id into dD;
+  insert into public.session_packs (crm_contact_id,title,total_sessions,price_amount,currency,payment_status,created_by)
+    values (dD,'Paid pack',10,312000,'AED','paid','seed') returning id into pk;
+  insert into public.orders (reference, customer_name, customer_contact, currency, gross_amount, status, session_pack_id, order_reason)
+    values ('CG-ORD-DEL','Paid Client','paid@ex.com','AED',312000,'paid',pk,'session_pack');
+  perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000f001","email":"full@test.local"}',true);
+  execute 'set local role authenticated';
+  begin perform public.crm_delete_contact(dD, true); fail:=fail+1; log:=log||' [money deleted]'; exception when foreign_key_violation then ok:=ok+1; end;
+  execute 'reset role';
+  if (select count(*) from public.crm_contacts where id=dD)=1 and (select count(*) from public.orders where reference='CG-ORD-DEL')=1 then ok:=ok+1; else fail:=fail+1; log:=log||' [refused delete left everything alone]'; end if;
+
+  /* ---- the form warns before it makes a duplicate ---- */
+  perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-00000000f001","email":"full@test.local"}',true);
+  execute 'set local role authenticated';
+  if jsonb_array_length(public.crm_find_duplicates('paid@ex.com', null, null)) = 1 then ok:=ok+1; else fail:=fail+1; log:=log||' [find_duplicates]'; end if;
+  if jsonb_array_length(public.crm_find_duplicates('paid@ex.com', null, dD)) = 0 then ok:=ok+1; else fail:=fail+1; log:=log||' [find_duplicates excludes itself]'; end if;
+  begin
+    perform public.crm_save_contact(jsonb_build_object('display_name','Paid Again','email','paid@ex.com'));
+    fail:=fail+1; log:=log||' [save made a silent duplicate]';
+  exception when unique_violation then ok:=ok+1; end;
+  -- forced: allowed, and BOTH sides are flagged so the pair is findable from either
+  j := public.crm_save_contact(jsonb_build_object('display_name','Paid Again','email','paid@ex.com','allow_duplicate',true));
+  execute 'reset role';
+  if (j ->> 'needs_review')::boolean and (select needs_review from public.crm_contacts where id=dD) then ok:=ok+1; else fail:=fail+1; log:=log||' [forced duplicate flags both]'; end if;
+
   /* ========== 9. anon ========== */
   perform set_config('request.jwt.claims','{"role":"anon"}',true);
   execute 'set local role anon';

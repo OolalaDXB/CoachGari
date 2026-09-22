@@ -747,7 +747,7 @@ async function crmContacts() {
       <td class="num col-wide">${c.booking_count}</td>
       <td class="col-wide">${fmt(c.last_activity_at, 'Asia/Dubai', { dateStyle: 'medium' })}</td>
       <td>${st(c.status)}</td>
-      <td class="acts">${has('client_profile:manage') ? `${c.needs_review ? `<button class="btn btn-line btn-xs" data-c-merge="${c.id}">Merge</button><button class="btn btn-line btn-xs" data-c-keep="${c.id}">Not a duplicate</button>` : ''}${c.status === 'lead' ? `<button class="btn btn-accent btn-xs" data-c-status="${c.id}" data-to="active">Make client</button>` : ''}${c.status === 'archived' ? `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="active">Restore</button>` : `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="archived">Archive</button>`}<button class="btn btn-line btn-xs" data-c-del="${c.id}" data-c-name="${esc(c.display_name || '')}">Delete</button>` : ''}</td>
+      <td class="acts">${has('client_profile:manage') ? `${c.needs_review ? `<button class="btn btn-accent btn-xs" data-c-merge="${c.id}">Merge…</button><button class="btn btn-line btn-xs" data-c-del="${c.id}" data-c-name="${esc(c.display_name || '')}">Delete this one</button><button class="btn btn-line btn-xs" data-c-keep="${c.id}">Not a duplicate</button>` : ''}${c.status === 'lead' ? `<button class="btn btn-accent btn-xs" data-c-status="${c.id}" data-to="active">Make client</button>` : ''}${c.status === 'archived' ? `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="active">Restore</button>` : `<button class="btn btn-line btn-xs" data-c-status="${c.id}" data-to="archived">Archive</button>`}${c.needs_review ? '' : `<button class="btn btn-line btn-xs" data-c-del="${c.id}" data-c-name="${esc(c.display_name || '')}">Delete</button>`}` : ''}</td>
     </tr>`), reviewOnly ? 'Nothing needs review.' : 'No contacts match.')}</div>`;
   $('#c-status').onchange = (e) => { view.dataset.cStatus = e.target.value; crmContacts().catch(fail); };
   $('#c-search').onchange = (e) => { view.dataset.cSearch = e.target.value.trim(); crmContacts().catch(fail); };
@@ -761,14 +761,35 @@ async function crmContacts() {
   view.querySelectorAll('[data-c-del]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); crmDelete(b.dataset.cDel, b.dataset.cName, reload); });
 }
 
-/* Delete a person for good. The database refuses anyone carrying sessions, packs,
-   bookings, a subscription, a collaboration or health measurements — all of those
-   cascade, so deleting would take the history with them, and archiving or merging is
-   what the operator actually wants. The refusal arrives as a foreign-key error with a
-   sentence written for a human; show that sentence rather than a code. */
+/* Delete a person for good.
+
+   Two steps, because the first question is always "what am I about to destroy?".
+   crm_delete_preview answers it in numbers, the confirmation repeats them, and only
+   then does the delete run with p_cascade.
+
+   Money is the one thing that refuses outright, cascade or not: an order and its
+   payment have to go on agreeing with Stripe. That refusal arrives as a foreign-key
+   error carrying a sentence written for a human, so show the sentence. */
+const countLine = (c) => [
+  [c.sessions, 'coaching session'], [c.packs, 'session pack'], [c.bookings, 'booking'],
+  [c.subscriptions, 'subscription'], [c.collaborations, 'collaboration'],
+  [c.measurements, 'health measurement'], [c.notes, 'note'],
+].filter(([n]) => n > 0).map(([n, w]) => `${n} ${w}${n > 1 ? 's' : ''}`).join(', ');
+
 async function crmDelete(id, name, after) {
-  if (!await confirmAct(`Delete ${name || 'this contact'} for good?\n\nNotes and consents go with them. Enquiries are kept and simply unlinked.\n\nThis cannot be undone — archiving is reversible.`)) return;
-  const { error } = await sb.rpc('crm_delete_contact', { p_id: id });
+  const { data: c, error: e0 } = await sb.rpc('crm_delete_preview', { p_id: id });
+  if (e0) return fail(e0);
+  const who = name || 'this contact';
+  if (c.orders > 0 || c.payments > 0) {
+    return toast(`${who} has ${c.orders} order(s) and ${c.payments} payment(s) on file. Those records stay — archive instead.`, true);
+  }
+  const history = countLine(c);
+  const enq = c.enquiries > 0 ? `\n\n${c.enquiries} enquiry(ies) are kept and simply unlinked.` : '';
+  const msg = history
+    ? `Delete ${who} and ${history}?${enq}\n\nThis cannot be undone. Archiving is reversible and keeps everything.`
+    : `Delete ${who}?${enq}\n\nThis cannot be undone — archiving is reversible.`;
+  if (!await confirmAct(msg)) return;
+  const { error } = await sb.rpc('crm_delete_contact', { p_id: id, p_cascade: true });
   if (error) return toast(error.message || 'Could not delete this contact', true);
   toast('Contact deleted');
   if (after) after();
@@ -2835,9 +2856,13 @@ function openContactEditor(c) {
       <label>Height (cm) <input name="height_cm" type="number" step="0.1" min="50" max="260" value="${esc(v(c?.height_cm))}"></label></div>
       <label>Coaching goals <textarea name="goals">${esc(v(c?.goals))}</textarea></label>
       <div class="actions"><button class="btn btn-accent btn-sm" type="submit">${c ? 'Save' : 'Create'}</button>
-      <button class="btn btn-line btn-sm" type="button" id="ce-cancel">Cancel</button></div>
-    </form></div></div>`;
+      <button class="btn btn-line btn-sm" type="button" id="ce-cancel">Cancel</button>
+      ${c ? '<button class="btn btn-line btn-sm" type="button" id="ce-delete">Delete this contact</button>' : ''}</div>
+    </form>
+    <div id="ce-dups" class="ad-dups" hidden></div></div></div>`;
   countryPicker($('#ce-form').country);
+  const del = $('#ce-delete');
+  if (del) del.onclick = () => crmDelete(c.id, c.display_name, () => { pfClose(); if (cur.section === 'crm' && cur.sub === 'contacts') crmContacts().catch(() => {}); });
   $('#ce-x').onclick = () => c ? renderProfile('overview') : pfClose();
   $('#ce-cancel').onclick = () => c ? renderProfile('overview') : pfClose();
   $('#ce-form').onsubmit = async (e) => {
@@ -2846,12 +2871,31 @@ function openContactEditor(c) {
       city: f.get('city'), country: f.get('country'), preferred_timezone: f.get('preferred_timezone'),
       preferred_language: f.get('preferred_language'), height_cm: f.get('height_cm') || null, goals: f.get('goals') };
     if (c) p.id = c.id;
+    /* The database refuses a duplicate unless the caller says it knows. Ask here rather
+       than letting the refusal arrive as an error: the operator usually wants the person
+       who already exists, not a second copy of them. */
+    const { data: dups } = await sb.rpc('crm_find_duplicates', { p_email: p.email || null, p_phone: p.phone || null, p_exclude: c ? c.id : null });
+    if (dups && dups.length) {
+      const box = $('#ce-dups');
+      box.hidden = false;
+      box.innerHTML = `<b>${dups.length === 1 ? 'Someone already has this' : 'These people already have this'} ${esc(dups[0].matched_on)}</b>
+        <ul>${dups.map((d) => `<li><button type="button" class="ad-link" data-open-dup="${d.id}">${esc(d.display_name || 'Unnamed')}</button>
+          <span class="ad-muted">${esc(d.email || d.phone || '')} · ${esc(d.status)}</span></li>`).join('')}</ul>
+        <p class="ad-muted">Open that record instead, or save this one anyway — both will be flagged so you can merge them later.</p>
+        <div class="actions"><button type="button" class="btn btn-line btn-sm" id="ce-anyway">Save anyway</button></div>`;
+      box.querySelectorAll('[data-open-dup]').forEach((b) => b.onclick = () => openProfile(b.dataset.openDup, null, 'overview'));
+      $('#ce-anyway').onclick = async () => { p.allow_duplicate = true; await saveContact(p, c); };
+      return;
+    }
+    await saveContact(p, c);
+  };
+  async function saveContact(p, c) {
     const { data, error } = await sb.rpc('crm_save_contact', { p }); if (error) return fail(error);
     toast(c ? 'Profile saved' : 'Contact created');
     pf = { crmId: data.id, enquiryId: null, contact: data, enquiry: null, section: 'overview' };
     renderProfile('overview');
     if (cur.section === 'crm' && cur.sub === 'contacts') { /* refresh list underneath */ crmContacts().catch(() => {}); }
-  };
+  }
 }
 
 boot().catch(fail);

@@ -506,3 +506,11 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
   .ad-table .acts{white-space:normal;}
   .ad-table .acts button{margin:0 6px 6px 0;}
 }
+/* The duplicate warning in the contact editor. It is a panel rather than a toast: the
+   operator has to be able to read the names, click one, and change their mind. */
+.ad-dups{margin-top:18px;border:1px solid var(--accent);border-radius:14px;padding:16px 18px;background:var(--accent-tint,#f4f4ff);}
+.ad-dups b{display:block;font-size:14.5px;margin-bottom:8px;}
+.ad-dups ul{list-style:none;padding:0;margin:0 0 10px;}
+.ad-dups li{padding:6px 0;font-size:14px;display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;}
+.ad-dups .ad-muted{font-size:13px;}
+.ad-dups p{margin:0 0 12px;}
