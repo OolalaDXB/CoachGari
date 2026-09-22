@@ -3415,3 +3415,50 @@ stutter: `crmContacts()` rebuilds the whole view, so the caret is put back where
 it was or the next letter lands nowhere; and each run carries a sequence number,
 so a slow query for "Am" cannot arrive after — and overwrite — the answer for
 "Amanda".
+
+## CG-030 — Clearing the duplicate backlog, and the two places the rule is wrong
+
+CG-023 stopped the matcher breeding duplicates and CG-029 put the phone
+numbers into one shape, which made two more pairs comparable. Neither cleaned
+up what was already there: 43 of 67 records flagged, in 18 groups, almost all
+the same import run recorded twice — same name, same number, timestamps
+seconds apart.
+
+**Merged, not deleted.** Most pairs look empty on both sides, but "looks
+empty" is not a thing to bet a client's history on: AMAN's four records carry
+two coaching sessions on the **newest** of them, and Sami's pair the same.
+`crm_merge_contacts` moves sessions, packs, bookings, subscriptions, notes,
+measurements, consents and tokens across and then deletes the emptied row, so
+the list ends up the same length either way and nothing is lost by guessing
+wrong about which copy mattered. Into the oldest of each group, one pair at a
+time, until nothing shares a key — merging is transitive, so Walid's three and
+AMAN's four converged without special handling.
+
+**Two places the generic rule is wrong, and both are in one group.** Four
+records shared `mickael.thomas@pm.me`:
+
+* **DARYA THOMAS is a different person.** She used that address on the
+  collaboration form and carries her own deal. Merging her into Mickael on the
+  strength of a shared mailbox would have destroyed a real distinction, so she
+  is excluded and her flag cleared instead. Sharing an address with a partner
+  is not being the same person, and the two of them still share a key on
+  purpose — that is the one pair the list will not flag again.
+* **The record to keep was not the oldest.** The Paris enquiry is older; the
+  live one is the active Dubai record with the session, the pack and the phone.
+  That group was merged by hand, into the right target.
+
+**Veronica's typo.** Both her rows read `05o6548633` — a letter o where a zero
+belongs. CG-029 deliberately left it rather than invent a number; the owner
+confirmed it, so it became `0506548633`, a 050 mobile, and the pair then merged
+like the rest.
+
+**Rehearsed before it ran.** The migration was replayed into an empty database
+(it does nothing there, which is how CI sees it), then run against a fixture
+shaped like production — AMAN's four with the sessions on the newest copy,
+Veronica's typo pair, and all four Thomas records. Result: one AMAN keeping
+both sessions, one Veronica reading +971506548633, one Mickaël Thomas, and
+Darya still herself. Only then did it touch production.
+
+**Production after: 67 → 44 contacts, 0 flagged, 0 numbers with a letter in
+them**, and the history totals unchanged — 7 sessions, 2 packs, 2 bookings, 5
+orders, 1 payment, 1 collaboration, no orphans.
