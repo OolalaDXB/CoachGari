@@ -3541,3 +3541,56 @@ dropping the field on the floor would let it believe the session was priced.
 
 cg011 stays at 46: the two remaining levels in both directions, the refusal,
 and an assertion that the column is really gone rather than merely unused.
+
+## CG-033 — One action, one row: why the back-office kept making twins
+
+Three duplications with three different causes, and the audit ledger settled
+all three because `session_write` and `session_note_quick` write a line per
+call.
+
+**Sessions and contacts: one gesture, two requests.** The ledger shows two
+distinct `create` entries with two distinct ids:
+
+| Client | First | Second | Apart |
+| --- | --- | --- | --- |
+| AMAN | 19:57:57.436063 | 19:57:57.437537 | 1.5 ms |
+| Hrishi | 19:59:11.931845 | 19:59:11.932883 | 1.0 ms |
+| Sami | 20:00:45.995728 | 20:00:45.995957 | 0.23 ms |
+
+Nobody taps twice in 230 microseconds. The database did not duplicate
+anything — it was asked twice. **I could not isolate which line sends the
+second request**: there is one submit handler, one binding, the service worker
+explicitly ignores non-GET and Supabase requests, and the form calls the RPC
+once. A double-fired submit on one browser, a retried POST, and a touch
+registered twice all look identical from here.
+
+So the fix does not depend on knowing. A coach cannot have two sessions with
+the same client at the same minute, so `session_write` takes an advisory lock
+on (client, start), looks for that session, and **answers the second request
+with the first** rather than inserting a twin. Not an error — refusing would
+look broken after a tap that did work. `crm_save_contact` had the same race one
+level up: it looked for a duplicate and then inserted, so two calls in the same
+instant both looked, both found nothing, and both inserted. The check was never
+wrong; it was not atomic.
+
+**Notes: the button worked and looked as if it had not.** 14:13:40, 14:13:42,
+14:13:46 — three seconds apart, three deliberate presses. `session_note_quick`
+INSERTED a new note every call, and nothing on screen changed. A session has
+one note; saving it again is a correction. It now updates the one it already
+wrote, the field empties on save, and every write button disables itself while
+in flight.
+
+**Editing a session note did not reach the session.** `crm_edit_note` changed
+`crm_notes` and left `coaching_sessions.note` on the old sentence — two rows
+holding one fact, drifting apart. It now carries the correction back. Note the
+trap: the four-argument signature was dropped in CG-010 so calls could never be
+ambiguous, and my first patch recreated it. The replay caught it.
+
+**Cleaning up cost a mistake worth recording.** Deleting the twin sessions
+cascaded to `crm_notes.session_id`, taking AMAN's note out of the client's
+history even though the cleanup had already copied the sentence onto the
+surviving session. Rebuilt from `coaching_sessions.note`. The lesson is
+ordinary and easy to forget: dedupe the parent before the child, or the child's
+survivors go with the parent you delete.
+
+Production after: 7 sessions → 4, 3 notes → 1, 44 contacts, 0 flagged.

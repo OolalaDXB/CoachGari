@@ -122,6 +122,22 @@ begin
      and (select scope from public.crm_notes where id = nid) = 'operational'
     then ok := ok + 1; else fail := fail + 1; log := log || ' [note-not-linked]'; end if;
 
+  /* Saving the line again is a CORRECTION, not a second note. The back-office showed the
+     same sentence three times because this inserted every time: the button worked and
+     looked as if it had not, so it was pressed again. One session, one note. */
+  j := public.session_note_quick(s3, 'Worked the backhand, the serve return and the volley.');
+  if (j ->> 'note_id')::uuid = nid
+     and (select count(*) from public.crm_notes where session_id = s3 and scope = 'operational') = 1
+     and (select body from public.crm_notes where id = nid) = 'Worked the backhand, the serve return and the volley.'
+     and (select note from public.coaching_sessions where id = s3) = 'Worked the backhand, the serve return and the volley.'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [saving a note again made a second one]'; end if;
+
+  /* Correcting it from the client profile has to reach the session card too: two rows
+     holding one fact and drifting apart is how a back-office disagrees with itself. */
+  perform public.crm_edit_note(nid, 'Backhand, serve return, volley.');
+  if (select note from public.coaching_sessions where id = s3) = 'Backhand, serve return, volley.'
+    then ok := ok + 1; else fail := fail + 1; log := log || ' [edited note did not reach the session]'; end if;
+
   begin perform public.session_note_quick(s3, '   '); fail := fail + 1; log := log || ' [empty-note-accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
   begin perform public.session_note_quick(s3, repeat('x', 501)); fail := fail + 1; log := log || ' [essay-accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;
   begin perform public.session_note_quick(s3, 'ok', 'secret'); fail := fail + 1; log := log || ' [bad-scope-accepted]'; exception when sqlstate '22023' then ok := ok + 1; end;

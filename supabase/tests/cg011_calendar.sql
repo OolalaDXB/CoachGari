@@ -250,6 +250,34 @@ begin
   if n = 0 then ok:=ok+1; else fail:=fail+1; log:=log||' [coach-only read client_rates through RLS]'; end if;
   execute 'reset role';
 
+  /* ========== 6c. the same session asked for twice is one session ==========
+     The audit ledger showed two `create` entries 0.23 ms apart for the same client at the
+     same minute — one gesture, two requests. A coach cannot have two sessions with the
+     same client at the same minute, so the second request is answered with the first. */
+  perform set_config('request.jwt.claims','{"role":"authenticated","sub":"00000000-0000-4000-8000-0000000c0001","email":"coachonly@test.local"}',true);
+  execute 'set local role authenticated';
+  j := public.session_write(jsonb_build_object('crm_contact_id', cB::text, 'title','Twin test',
+        'start_at', (d::text||' 11:00')::timestamp at time zone 'Asia/Dubai', 'end_at', (d::text||' 12:00')::timestamp at time zone 'Asia/Dubai'));
+  sess := (j->>'id')::uuid;
+  if (j ? 'existing') = false then ok:=ok+1; else fail:=fail+1; log:=log||' [first create reported as existing]'; end if;
+  j := public.session_write(jsonb_build_object('crm_contact_id', cB::text, 'title','Twin test',
+        'start_at', (d::text||' 11:00')::timestamp at time zone 'Asia/Dubai', 'end_at', (d::text||' 12:00')::timestamp at time zone 'Asia/Dubai'));
+  if (j->>'id')::uuid = sess and (j->>'existing')::boolean
+     and (select count(*) from public.coaching_sessions
+           where crm_contact_id = cB and start_at = (d::text||' 11:00')::timestamp at time zone 'Asia/Dubai') = 1
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [second create made a twin]'; end if;
+  -- a cancelled session does not block booking that slot again: it is not a twin, it is gone
+  perform public.session_set_status(sess, 'cancelled', false, 'client asked');
+  j := public.session_write(jsonb_build_object('crm_contact_id', cB::text, 'title','Rebooked',
+        'start_at', (d::text||' 11:00')::timestamp at time zone 'Asia/Dubai', 'end_at', (d::text||' 12:00')::timestamp at time zone 'Asia/Dubai'));
+  if (j->>'id')::uuid <> sess and (j ? 'existing') = false
+    then ok:=ok+1; else fail:=fail+1; log:=log||' [cancelled session blocked a rebooking]'; end if;
+  -- a different time with the same client is a different session, not a twin
+  j := public.session_write(jsonb_build_object('crm_contact_id', cB::text, 'title','Later',
+        'start_at', (d::text||' 13:00')::timestamp at time zone 'Asia/Dubai', 'end_at', (d::text||' 14:00')::timestamp at time zone 'Asia/Dubai'));
+  if (j ? 'existing') = false then ok:=ok+1; else fail:=fail+1; log:=log||' [a different hour was called a twin]'; end if;
+  execute 'reset role';
+
   /* ========== 7. anon refused ========== */
   perform set_config('request.jwt.claims','{"role":"anon"}',true);
   execute 'set local role anon';

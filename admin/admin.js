@@ -57,6 +57,21 @@ const sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_PUB
 const $ = (s, r = document) => r.querySelector(s);
 const view = $('#view');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/* One press, one write.
+
+   The audit ledger showed two `create` calls 0.23 ms apart for the same session — one
+   gesture, two requests. The database now answers the second with the first, which is the
+   fix that holds whatever the cause; this is the other half: while a write is in flight
+   its button cannot be pressed again, so the second request is never sent. Cheap, and it
+   also tells the operator that something IS happening, which is why the note button was
+   pressed three times. */
+async function once(btn, fn) {
+  if (!btn || btn.disabled) return;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try { return await fn(); } finally { btn.disabled = false; btn.textContent = label; }
+}
+
 const CG_CCY = 'AED';   // Coach Gari bills in dirhams; the pack editor already defaults to it
 const money = (n, cur = 'USD') => n == null ? '—' : (n / 100).toLocaleString('en-US', { style: 'currency', currency: cur });
 
@@ -1362,13 +1377,13 @@ async function openSession(id) {
   on('[data-open]', () => { closeSheet(); openProfile(s.crm_contact_id, null, 'overview'); });
   // one line, written here, landing in the client's history against this session
   const noteEl = sheet.querySelector('[data-note]');
-  on('[data-savenote]', async () => {
+  on('[data-savenote]', (e) => once(e.currentTarget, async () => {
     const txt = (noteEl.value || '').trim();
     if (!txt) return toast('Nothing to save yet');
     const { error } = await sb.rpc('session_note_quick', { p_id: id, p_text: txt });
     if (error) return fail(error);
-    toast('Noted');
-  });
+    toast('Noted');                     // one session, one note: saving again corrects it
+  }));
   if (noteEl) noteEl.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); const b = sheet.querySelector('[data-savenote]'); if (b) b.click(); } };
   on('[data-complete]', () => sessStatus(id, 'completed'));
   // Session → Collect payment → (Tap to Pay in the PSP app) → paid → pack/ledger updated. Same BEAU PH capability as from the client profile.
@@ -1470,8 +1485,8 @@ async function sessionForm(prefill) {
     const box = form.querySelector('#cl-search'), res = form.querySelector('#cl-res');
     box.oninput = async () => { const q = box.value.trim(); if (q.length < 2) { res.innerHTML = ''; return; } const { data } = await sb.rpc('crm_list_contacts', { p_search: q, p_review_only: false }); res.innerHTML = (data || []).slice(0, 6).map((c) => `<button type="button" data-cid="${c.id}" data-name="${esc(c.display_name || '')}">${esc(c.display_name || '—')} · ${esc(c.email || c.phone || '')}</button>`).join(''); res.querySelectorAll('[data-cid]').forEach((b) => b.onclick = () => { cid = b.dataset.cid; form.crm_contact_id.value = cid; box.value = b.dataset.name; res.innerHTML = ''; }); };
   }
-  form.onsubmit = async (e) => {
-    e.preventDefault(); const f = new FormData(form);
+  form.onsubmit = (e) => { e.preventDefault(); return once(form.querySelector('[type=submit]'), async () => {
+    const f = new FormData(form);
     const contactId = lockClient ? cid : f.get('crm_contact_id');
     if (!contactId) return toast('Pick a client', true);
     const startISO = zonedToUtc(`${f.get('date')}T${f.get('time')}`, CAL_TZ);
@@ -1482,9 +1497,11 @@ async function sessionForm(prefill) {
       location_lat: f.get('location_lat') || null, location_lng: f.get('location_lng') || null, meeting_url: f.get('meeting_url') || null };
     if (form.querySelector('[name=session_pack_id]')) p.session_pack_id = f.get('session_pack_id') || null;
     if (editing) p.id = prefill.id; else p.crm_contact_id = contactId;
-    const { error } = await sb.rpc('session_write', { p }); if (error) return fail(error);
-    toast(editing ? 'Session saved' : 'Session created'); closeSheet(); calRender().catch(fail);
-  };
+    const { data, error } = await sb.rpc('session_write', { p }); if (error) return fail(error);
+    // the server answers a repeated create with the session that already exists
+    toast(data && data.existing ? 'That session was already there' : (editing ? 'Session saved' : 'Session created'));
+    closeSheet(); calRender().catch(fail);
+  }); };
 }
 
 /* ---- block create / edit ---- */
@@ -2634,11 +2651,13 @@ async function pfNotes() {
     ${seesPrivate ? '' : '<p class="ad-muted" style="font-size:12px;margin:0 0 10px">Operational notes only. Private coaching notes need <code>coaching_sensitive:view</code>.</p>'}
     <div id="pf-note-list">${(data || []).map(noteHtml).join('') || '<p class="pf-sec-empty">No notes yet.</p>'}</div>`;
   const form = $('#pf-note-form');
-  if (form) form.onsubmit = async (e) => {
-    e.preventDefault(); const f = new FormData(form);
+  if (form) form.onsubmit = (e) => { e.preventDefault(); return once(form.querySelector('[type=submit]'), async () => {
+    const f = new FormData(form);
     const { error } = await sb.rpc('crm_add_note', { p_contact_id: pf.crmId, p_body: f.get('body'), p_category: f.get('category') || null, p_pinned: !!f.get('pinned'), p_scope: f.get('private') ? 'coach_private' : 'operational' });
-    if (error) return fail(error); toast('Note added'); pfNotes().catch(fail);
-  };
+    if (error) return fail(error);
+    form.reset();                       // the field empties, so it is obvious the note landed
+    toast('Note added'); pfNotes().catch(fail);
+  }); };
   bindNoteActions();
 }
 function noteHtml(n) {
