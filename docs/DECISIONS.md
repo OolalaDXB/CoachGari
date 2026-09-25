@@ -3959,3 +3959,56 @@ Production carried zero enquiries when this was found, so nothing is polluted.
 The cost of this fix was nil today and would have risen with every lead.
 
 Also in this change: "Start this week" became "Start now" on the final section.
+
+---
+
+## CG-043 — A local number is only local to somewhere
+
+The first leads from outside the Gulf showed what 20261061 really encoded: one
+country's habits, written as if they were the world's. A Zimbabwean
+`0788784495` matched nothing, stayed local, and — until 20261069 — wore a `+`.
+
+The country was in the row the whole time. The enquiry form asks for it,
+`crm_link_contact` already received it, and nothing used it.
+
+`crm_normalize_phone` now takes the country and reads `phone_dial_codes`, which
+stores the dialling code **and the lengths a country's national numbers
+actually have**. That second column is what makes this safe to run over real
+people's numbers: a conversion only happens when the digits after the trunk
+zero are a length that country uses. Sameer's `050659577` is one short for the
+UAE, so it is left exactly as it was. **A number that is merely unusable must
+not be turned into one that looks usable**, because the second kind reaches a
+stranger and nobody finds out.
+
+Every converted row is written to `admin_audit` with its old and new value, so
+the backfill can be read back and reversed. One contact changed: Precious,
+`0788784495` → `263788784495`.
+
+Normalisation now lives in the trigger *and* in `crm_link_contact`. The trigger
+covers every writer at once; `crm_link_contact` still needs its own call because
+it looks up by `phone_norm` before inserting, and **a lookup that normalises
+differently from the write stops recognising the person** — it would have
+created a second contact for the same number on the next enquiry.
+
+### The back-office can write a WhatsApp message
+
+All three leads left a phone and none left an email, and `email_events` already
+recorded the consequence: three `enquiry_received` rows with status `skipped`,
+reason "no email address". An email inbox would have had nobody to write to.
+
+So the composer is WhatsApp, on the client's own record: three starters, a free
+text box, and a note logged against the contact.
+
+It opens WhatsApp with the text ready rather than sending through the Cloud API,
+and that is not a shortcut — business-initiated WhatsApp may only be an approved
+template, so free prose to someone who has not written first is refused by
+WhatsApp, not by us. The part the back-office can own is the part that was
+missing: composing where the client's history is visible, and keeping a record.
+
+That record says **opened**, never *sent*. The last step happens inside WhatsApp
+where this page cannot see it, and a log that claims more than it knows is worse
+than no log at all.
+
+A number the button cannot reach now says so — dashed, greyed, not a button —
+instead of looking identical and opening WhatsApp on nothing. Two contacts are
+in that state today.
