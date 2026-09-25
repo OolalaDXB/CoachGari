@@ -159,6 +159,11 @@ table.ad-table{width:100%;border-collapse:collapse;font-size:14px;}
 .pf-cbtn:hover{background:var(--grey-bg);}
 .pf-cbtn svg{flex:0 0 auto;}
 .pf-cbtn.call{color:var(--accent-dark);border-color:var(--accent-tint);background:var(--accent-pale);}
+/* A number WhatsApp cannot reach. Shown, not hidden: the reason it is unusable is
+   something Coach Gari can fix by asking the person, and a button that silently
+   disappears teaches nobody anything. Not a <button>, so nothing to click. */
+.pf-cbtn.is-off{color:var(--grey-text);background:var(--grey-bg);border-style:dashed;cursor:default;}
+.pf-cbtn.is-off:hover{background:var(--grey-bg);}
 .pf-cbtn.wa{color:#0a7d3c;border-color:#c3e8d1;background:#eefaf1;}
 .pf-groups{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .pf-group{border:1px solid var(--line);border-radius:14px;padding:12px 15px;}

@@ -247,5 +247,34 @@ await page.waitForTimeout(500);
 check('Typing continues where it left off', await page.evaluate(() => document.querySelector('#c-search').value) === 'Amanda');
 
 await browser.close(); server.close();
+/* ---- a number WhatsApp can reach, and one it cannot -------------------
+   Two contacts on file are UAE numbers a digit short. The WhatsApp button used to
+   look identical for them and opened WhatsApp on nothing. These assertions pin the
+   rule that tells the two apart, because it is the kind of predicate that rots
+   silently: nothing fails, the button is simply wrong. */
+const dial = (() => {
+  const e164 = (p) => {
+    const d = String(p || '').replace(/\D/g, '');
+    if (/^00[0-9]{8,}$/.test(d)) return d.slice(2);
+    if (/^0(50|52|54|55|56|58)[0-9]{7}$/.test(d)) return '971' + d.slice(1);
+    return d;
+  };
+  const ok = (p) => /^[1-9][0-9]{7,14}$/.test(e164(p));
+  return {
+    uae:      ok('+971504408468'),
+    zw:       ok('+263788784495'),
+    za:       ok('+27789026845'),
+    local0:   ok('0788784495'),      // a trunk zero is not a country code
+    short:    ok('050659577'),       // a digit short: normalises to nothing usable
+    empty:    ok(''),
+    plusZero: ok('+0788784495'),     // what 20261062 used to store
+  };
+})();
+check('A full international number is reachable', dial.uae && dial.zw && dial.za);
+check('A number still written locally is not', !dial.local0);
+check('A number a digit short is not', !dial.short);
+check('No number at all is not', !dial.empty);
+check('A + in front of a zero does not make it reachable', !dial.plusZero);
+
 console.log(`\nADMIN_WORKSPACE_TESTS ok=${ok} fail=${fail}${log.length ? '\n' + log.join('\n') : ''}`);
 process.exit(fail ? 1 : 0);

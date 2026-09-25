@@ -2276,6 +2276,11 @@ const e164 = (p) => {
   return d;
 };
 const waHref = (p) => 'https://wa.me/' + e164(p);
+/* Can WhatsApp actually reach this? A country code never starts with zero, and no
+   number in service is under eight digits. Two contacts on file fail this — both
+   UAE numbers a digit short — and the button used to look just as clickable for
+   them as for anyone else, then opened WhatsApp on nothing. */
+const dialable = (p) => /^[1-9][0-9]{7,14}$/.test(e164(p));
 const initials = (n) => (n || '?').trim().split(/\s+/).slice(0, 2).map((x) => x[0]?.toUpperCase() || '').join('') || '?';
 
 async function openProfile(crmId, enquiryId, section = 'overview') {
@@ -2609,7 +2614,9 @@ async function pfOverview() {
       ${canMerge ? `<div id="pf-merge"><button class="btn btn-line btn-xs" id="pf-merge-open">Merge into another contact…</button></div>` : ''}</div>` : ''}
     <div class="pf-contact">
       ${c.phone ? `<div class="pf-crow"><div class="pf-crow-main"><div class="pf-crow-k">Phone / WhatsApp</div><a class="pf-crow-v" href="${tel}">${esc(c.phone)}</a></div>
-        <div class="pf-cacts"><a class="pf-cbtn call" href="${tel}">${ICO.call} Call</a><a class="pf-cbtn wa" href="${waHref(c.phone)}" target="_blank" rel="noopener">${ICO.wa} WhatsApp</a><button class="pf-cbtn" data-copy="${esc(c.phone)}">${ICO.copy} Copy</button></div></div>` : ''}
+        <div class="pf-cacts"><a class="pf-cbtn call" href="${tel}">${ICO.call} Call</a>${dialable(c.phone)
+          ? `<button class="pf-cbtn wa" data-wa-compose>${ICO.wa} Message</button>`
+          : `<span class="pf-cbtn is-off" title="This number cannot be dialled internationally — it is missing a country code or a digit.">${ICO.wa} Not reachable</span>`}<button class="pf-cbtn" data-copy="${esc(c.phone)}">${ICO.copy} Copy</button></div></div>` : ''}
       ${c.email ? `<div class="pf-crow"><div class="pf-crow-main"><div class="pf-crow-k">Email</div><a class="pf-crow-v" href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>
         <div class="pf-cacts"><a class="pf-cbtn call" href="mailto:${esc(c.email)}">${ICO.mail} Email</a><button class="pf-cbtn" data-copy="${esc(c.email)}">${ICO.copy} Copy</button></div></div>` : ''}
       ${(!c.phone && !c.email) ? '<p class="pf-sec-empty">No phone or email on file.</p>' : ''}
@@ -2623,6 +2630,8 @@ async function pfOverview() {
     </div>
     <details class="pf-tech"><summary>Technical</summary><dl class="pf-kv" style="margin-top:10px"><dt>CRM id</dt><dd>${esc(c.id)}</dd><dt>Created by</dt><dd>${esc(c.created_by || '—')}</dd><dt>Updated by</dt><dd>${esc(c.updated_by || '—')}</dd></dl></details>`;
   $('#pf-body').querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.copy); toast('Copied'); } catch {} });
+  const waBtn = $('#pf-body').querySelector('[data-wa-compose]');
+  if (waBtn) waBtn.onclick = () => waCompose(c);
   if (canMerge) $('#pf-merge-open').onclick = () => pfMergePicker(c);
   // reminders: one RPC, audited, and the checkbox goes back if the server says no
   const rem = $('#pf-rem'), wa = $('#pf-wa');
@@ -2690,6 +2699,51 @@ async function pfNotes() {
     toast('Note added'); pfNotes().catch(fail);
   }); };
   bindNoteActions();
+}
+/* Write a WhatsApp message from the client's own record.
+   It opens WhatsApp with the text ready rather than sending through the Cloud API,
+   and that is not a shortcut: business-initiated WhatsApp may only be a template
+   approved in the Meta console, so free prose to someone who has not written first
+   is refused by WhatsApp itself, not by us. What the back-office can own is the
+   part that was actually missing — composing somewhere the client's history is
+   visible, and keeping a record of what was said.
+   The record says "opened", never "sent": the last step happens inside WhatsApp,
+   where this page cannot see it, and a log that claims more than it knows is worse
+   than no log. */
+const WA_STARTERS = [
+  ['First reply to an enquiry', (n) => `Hi ${n}, Coach Gari here — thanks for reaching out. Tell me a bit about what you train with right now and what you'd like to change, and I'll tell you which option fits.`],
+  ['Propose a time', (n) => `Hi ${n}, Coach Gari here. I have a couple of slots this week — what time of day usually works for you?`],
+  ['Follow up, no answer yet', (n) => `Hi ${n}, Coach Gari again — just checking this reached you. No rush, and no hard sell: if the timing is wrong, tell me and I'll leave you be.`],
+];
+function waCompose(c) {
+  const name = (c.display_name || '').trim().split(/\s+/)[0] || 'there';
+  const host = ensureSheet(); const sheet = host.querySelector('.cg-sheet');
+  sheet.innerHTML = `<div class="cg-sheet-h"><b>Message ${esc(c.display_name || 'this contact')}</b><button class="pf-close" data-x>×</button></div>
+    <div class="cg-sheet-b">
+      <p class="ad-muted" style="margin:0 0 10px">To <b>${esc(c.phone || '')}</b> on WhatsApp.</p>
+      <div class="cg-acts cg-acts-thin" id="wa-starters">${WA_STARTERS.map((s, i) =>
+        `<button type="button" class="cg-act" data-starter="${i}"><span>${esc(s[0])}</span></button>`).join('')}</div>
+      <label style="display:block;margin-top:12px;font-weight:700;font-size:13px">Message
+        <textarea id="wa-text" rows="6" style="width:100%">${esc(WA_STARTERS[0][1](name))}</textarea></label>
+      <p class="ad-muted" style="font-size:12px;margin:8px 0 0">WhatsApp opens with this text ready; you press send there. It is then logged as a note on this client, marked <i>opened</i> — this page cannot see what you finally sent.</p>
+      <div class="cg-acts" style="margin-top:14px">
+        <button type="button" class="cg-act cg-act-go" id="wa-go">${ICO.wa}<span>Open WhatsApp</span></button>
+        <button type="button" class="cg-act" data-x><span>Cancel</span></button>
+      </div>
+    </div>`;
+  sheet.querySelectorAll('[data-x]').forEach((b) => b.onclick = closeSheet);
+  const box = sheet.querySelector('#wa-text');
+  sheet.querySelectorAll('[data-starter]').forEach((b) => b.onclick = () => { box.value = WA_STARTERS[+b.dataset.starter][1](name); box.focus(); });
+  sheet.querySelector('#wa-go').onclick = () => {
+    const text = (box.value || '').trim();
+    if (!text) { toast('Nothing to send'); return; }
+    // opened inside the click, or the browser treats it as a pop-up and blocks it
+    window.open(`${waHref(c.phone)}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    closeSheet();
+    sb.rpc('crm_add_note', { p_contact_id: pf.crmId, p_body: `WhatsApp opened from the back-office:\n\n${text}`,
+                             p_category: 'admin', p_pinned: false, p_scope: 'operational' })
+      .then(({ error }) => { if (error) return fail(error); toast('WhatsApp opened · logged'); if (!$('#pf-notes')?.hidden) pfNotes().catch(() => {}); });
+  };
 }
 function noteHtml(n) {
   const priv = n.scope === 'coach_private';
