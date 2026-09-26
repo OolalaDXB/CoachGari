@@ -1110,7 +1110,7 @@ export async function financePaymentLinks() {
         <td>${st(r.status)}</td>
         <td class="col-wide">${r.contact ? esc(r.contact) : '<span class="ad-muted">—</span>'}</td>
         <td class="col-wide">${r.paid_at ? '<span class="ad-muted">paid</span>' : (r.expires_at ? esc(new Date(r.expires_at).toLocaleDateString()) : '—')}</td>
-        <td>${manage && r.status === 'pending_payment' ? `<button class="btn btn-line btn-xs" data-void="${esc(r.reference)}">Withdraw</button>` : ''}</td>
+        <td>${manage ? `${r.status === 'pending_payment' ? `<button class="btn btn-line btn-xs" data-void="${esc(r.reference)}">Withdraw</button> ` : ''}${r.status === 'paid' ? '' : `<button class="btn btn-line btn-xs" data-del="${esc(r.reference)}">Delete</button>`}` : ''}</td>
       </tr>`).join('')}
       </tbody></table></div>` : '<p class="ad-muted">No payment links yet.</p>'}`;
 
@@ -1156,6 +1156,16 @@ export async function financePaymentLinks() {
     if (!await modal({ title: 'Withdraw this link?', body: '<p>Anyone holding it will no longer be able to pay. A link that has already been paid cannot be withdrawn.</p>', confirm: 'Withdraw', danger: true })) return;
     rpc('payment_link_void', { p_reference: b.dataset.void })
       .then(() => { toast('Link withdrawn'); invalidate('payment_link'); return financePaymentLinks(); })
+      .catch(fail);
+  });
+
+  /* Withdraw keeps the row and closes it; delete removes it. The second is for a
+     link that should not be in this list at all — a typo in the amount, a test —
+     and the server refuses it the moment a payment is attached to it. */
+  view.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!await modal({ title: 'Delete this link?', body: '<p>It disappears from this list and can never be paid. A link that has been paid cannot be deleted — refund it instead.</p>', confirm: 'Delete', danger: true })) return;
+    rpc('payment_link_delete', { p_reference: b.dataset.del })
+      .then(() => { toast('Link deleted'); invalidate('payment_link'); return financePaymentLinks(); })
       .catch(fail);
   });
 }

@@ -25,6 +25,8 @@ const fn = readFileSync(join(ROOT, 'supabase/functions/paylink/index.ts'), 'utf8
 const page = readFileSync(join(ROOT, 'pay.html'), 'utf8');
 const pageJs = readFileSync(join(ROOT, 'assets/pay.js'), 'utf8');
 const mig = readFileSync(join(ROOT, 'supabase/migrations/20261074_cg_payment_links.sql'), 'utf8');
+const mig2 = readFileSync(join(ROOT, 'supabase/migrations/20261075_cg_payment_link_reopen_and_delete.sql'), 'utf8');
+const admin = readFileSync(join(ROOT, 'admin/finance.js'), 'utf8');
 const vercel = JSON.parse(readFileSync(join(ROOT, 'vercel.json'), 'utf8'));
 
 let ok = 0, fail = 0; const log = [];
@@ -87,6 +89,36 @@ check('The token is stored only as a sha256', /digest\(tok, 'sha256'\)/.test(mig
 check('Withdrawing a link also cancels the request behind it', /beau_ph\.cancel_request/.test(mig));
 check('A paid link cannot be withdrawn', /this link has been paid/.test(mig));
 check('The card rail opts in to the `other` intent explicitly', /"intents":\["service","package","support","other"\]/.test(mig));
+
+/* ---- opening the same link twice ------------------------------------
+   The Idempotency-Key is `${reference}:${attempt}:embedded`, and the body
+   carries an `expires_at` computed at each call. Re-sending attempt 1 on the
+   second open is therefore not idempotent at all — Stripe answers 400
+   idempotency_error, which the function returned as a 502. That is what the
+   first person to reload a payment link saw. */
+check('A link with a session resumes it instead of creating a second one',
+  /resumePaymentRequest!\(attached, env\)/.test(fn));
+check('The attempt number comes from the row, never a constant',
+  /const attempt = Number\(d\.attempts \?\? 0\) \+ 1/.test(fn) && !/attempt:\s*1\b/.test(fn));
+check('A resumed session still passes the secret guard before it is sent',
+  (fn.match(/SECRET_VALUE_RE\.test/g) || []).length >= 2);
+check('The link keeps its own expiry: attach_checkout is not used here',
+  /rpc\("payment_link_attach"/.test(fn) && !/rpc\("attach_checkout"/.test(fn));
+check('payment_link_attach does not touch checkout_expires_at', !/checkout_expires_at\s*=/.test(mig2));
+check('payment_link_open hands back the session and the attempt count',
+  /'session_id', o\.stripe_checkout_session_id/.test(mig2) && /'attempts', coalesce\(o\.checkout_attempts, 0\)/.test(mig2));
+
+/* ---- deleting a link ---- */
+check('Deleting a link requires finance:manage', /has_permission\('finance:manage'\)/.test(mig2));
+check('A paid link cannot be deleted', /cannot be deleted/.test(mig2));
+check('Nor can one that carries a payment, refund or chargeback',
+  /from public\.payments\s+where order_id/.test(mig2) && /public\.refunds/.test(mig2) && /public\.chargebacks/.test(mig2));
+check('The request behind it is cancelled before the row goes',
+  mig2.indexOf('beau_ph.cancel_request') < mig2.indexOf('delete from public.orders'));
+check('The audit line is written before the delete, with the label and the amount',
+  mig2.indexOf("'payment_link:delete'") < mig2.indexOf('delete from public.orders') && /'label', o\.service_title/.test(mig2));
+check('The back-office offers Delete beside Withdraw', /data-del="/.test(admin) && /payment_link_delete/.test(admin));
+check('Deleting asks first', /Delete this link\?/.test(admin));
 
 console.log(`\nPAYLINK_TESTS ok=${ok} fail=${fail}${log.length ? '\n' + log.join('\n') : ''}`);
 process.exit(fail ? 1 : 0);

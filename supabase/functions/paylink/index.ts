@@ -81,6 +81,32 @@ Deno.serve(async (req: Request) => {
   }
 
   const request = d.request as Record<string, unknown>;
+
+  /* A link is opened more than once — reloaded, re-sent, finished on the phone
+     after being started on the laptop. The session already attached to it is
+     resumed when Stripe still holds it open; a new one is minted only when it
+     does not. Creating one per open would be wrong twice over: it would leave a
+     trail of open sessions at Stripe, and — because the Idempotency-Key is built
+     from the attempt number — re-sending the same key with a freshly computed
+     `expires_at` is exactly what Stripe refuses with 400 idempotency_error. */
+  const attached = typeof d.session_id === "string" ? d.session_id : "";
+  if (attached) {
+    const resumed = await stripe.resumePaymentRequest!(attached, env);
+    if (resumed.kind === "embedded") {
+      const reply = {
+        ok: true, state: "payable", ui: "embedded",
+        client_secret: resumed.clientSecret, publishable_key: resumed.publicConfig.publishable_key,
+        expires_at: resumed.expiresAt, reference, label: d.label, amount: d.amount, currency: d.currency,
+      };
+      if (SECRET_VALUE_RE.test(JSON.stringify({ ...reply, client_secret: "" }))) { log("public_guard_tripped"); return json(500, { ok: false, error: "server_error" }, origin, allowed); }
+      log("session_resumed", { reference });
+      return json(200, reply, origin, allowed);
+    }
+    log("resume_declined", { reference, reason: resumed.kind === "unavailable" ? resumed.reason : resumed.kind });
+  }
+
+  // never a key that has been used before: the attempt counter only ever goes up
+  const attempt = Number(d.attempts ?? 0) + 1;
   const created = await stripe.createPaymentRequest!({
     requestId: String(request.id), publicReference: String(request.public_reference), externalReference: String(request.external_reference),
     amount: Number(request.amount), currency: String(request.currency),      // trusted: the validated DB row, never the body
@@ -92,14 +118,17 @@ Deno.serve(async (req: Request) => {
       success: `${SITE_URL}/pay/${reference}/${token}?paid=1&session_id={CHECKOUT_SESSION_ID}`,
       cancel: `${SITE_URL}/pay/${reference}/${token}?cancelled=1`,
     },
-    attempt: 1,
+    attempt,
   }, env);
   if (created.kind !== "embedded") {
-    log("stripe_failed", { reason: created.kind === "unavailable" ? created.reason : created.kind });
+    log("stripe_failed", { reason: created.kind === "unavailable" ? created.reason : created.kind, attempt });
     return json(502, { ok: false, error: "payment_provider_error" }, origin, allowed);
   }
 
-  const { error: aErr } = await sb.rpc("attach_checkout", { p_order_reference: reference, p_session_id: created.providerReference, p_url: null, p_expires_at: created.expiresAt });
+  /* payment_link_attach, not attach_checkout: the latter writes the Stripe
+     session's expiry over checkout_expires_at, which for a link is the validity
+     window the coach chose — a 30-day link would lapse with its first session. */
+  const { error: aErr } = await sb.rpc("payment_link_attach", { p_reference: reference, p_session_id: created.providerReference });
   if (aErr) { log("attach_failed", { code: aErr.code }); return json(409, { ok: false, error: "conflict" }, origin, allowed); }
 
   const reply = {

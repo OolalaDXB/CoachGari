@@ -137,5 +137,68 @@ begin
   begin perform public.payment_link_create('Ghost', 30000, 'AED', '00000000-0000-0000-0000-000000000000'::uuid, 30);
         fail := fail + 1; log := log || ' [unknown contact accepted]'; exception when sqlstate 'P0002' then ok := ok + 1; end;
 
+  /* ---- 11. opening a link twice ----
+     The first live link could be opened once and never again: the Edge Function
+     asked Stripe for a session with a hard-coded attempt number, so the second
+     open re-sent a used Idempotency-Key with a changed body and Stripe refused
+     it. The DB half of the repair is what is checkable here — the attempt
+     counter the key is built from, and the link's own lifetime, which
+     attach_checkout used to overwrite with the Stripe session's expiry. */
+  j := public.payment_link_create('Opened twice', 20000, 'AED', null, 30);
+  ref := j ->> 'reference'; tok := j ->> 'token';
+  j := public.payment_link_open(ref, tok, rt);
+  if (j ->> 'session_id') is null and (j ->> 'attempts') = '0' then ok := ok + 1;
+  else fail := fail + 1; log := log || ' [first open already has a session]'; end if;
+
+  perform public.payment_link_attach(ref, 'cs_test_one');
+  j := public.payment_link_open(ref, tok, rt);
+  if (j ->> 'session_id') = 'cs_test_one' and (j ->> 'attempts') = '1' then ok := ok + 1;
+  else fail := fail + 1; log := log || ' [attach did not surface: ' || j::text || ']'; end if;
+
+  -- a second session gets a number that has never been used
+  perform public.payment_link_attach(ref, 'cs_test_two');
+  select checkout_attempts into n from public.orders where reference = ref;
+  if n = 2 then ok := ok + 1; else fail := fail + 1; log := log || ' [attempt counter stuck]'; end if;
+
+  -- and the coach's 30 days survive the attach; the session's own expiry is Stripe's business
+  select count(*) into n from public.orders
+   where reference = ref and checkout_expires_at > now() + interval '20 days';
+  if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [attach shortened the link]'; end if;
+
+  begin perform public.payment_link_attach('PL-ZZZZZZ', 'cs_test_x'); fail := fail + 1; log := log || ' [attached to nothing]';
+  exception when sqlstate 'P0003' then ok := ok + 1; end;
+
+  /* ---- 12. deleting a link ---- */
+  j := public.payment_link_delete(ref);
+  if (j ->> 'deleted') = 'true' then ok := ok + 1; else fail := fail + 1; log := log || ' [delete result]'; end if;
+  select count(*) into n from public.orders where reference = ref;
+  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [row survived the delete]'; end if;
+  -- the audit line outlives the row: what was removed, and by whom
+  select count(*) into n from public.admin_audit
+   where action = 'payment_link:delete' and summary ->> 'reference' = ref and summary ->> 'label' = 'Opened twice';
+  if n = 1 then ok := ok + 1; else fail := fail + 1; log := log || ' [no audit line for the delete]'; end if;
+  -- nothing live is left at the hub for a reference that no longer exists
+  select count(*) into n from beau_ph.payment_requests r join beau_ph.merchants m on m.id = r.merchant_id
+   where m.key = 'coach_gari' and r.external_reference = ref and r.status in ('created','pending','requires_action');
+  if n = 0 then ok := ok + 1; else fail := fail + 1; log := log || ' [request still live after delete]'; end if;
+
+  -- a paid link is an accounting record, not a row to tidy away
+  j := public.payment_link_create('Paid, then deleted?', 15000, 'AED');
+  ref := j ->> 'reference';
+  update public.orders set status = 'paid', paid_at = now() where reference = ref;
+  begin perform public.payment_link_delete(ref); fail := fail + 1; log := log || ' [paid link deleted]';
+  exception when sqlstate 'P0003' then ok := ok + 1; end;
+
+  -- nor may someone without finance:manage remove one
+  j := public.payment_link_create('Not yours', 15000, 'AED');
+  ref := j ->> 'reference';
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"ops@test.local"}', true);
+  begin perform public.payment_link_delete(ref); fail := fail + 1; log := log || ' [coach:operations can delete]';
+  exception when sqlstate '42501' then ok := ok + 1; end;
+  perform set_config('request.jwt.claims', '{"role":"authenticated","email":"fin@test.local"}', true);
+
+  begin perform public.payment_link_delete('PL-ZZZZZZ'); fail := fail + 1; log := log || ' [deleted a link that does not exist]';
+  exception when sqlstate 'P0002' then ok := ok + 1; end;
+
   raise exception 'CG023_TESTS ok=% fail=% %', ok, fail, log;
 end $$;

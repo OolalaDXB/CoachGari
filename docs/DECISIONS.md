@@ -4148,3 +4148,68 @@ validation, load the Stripe adapter, find the runtime **configured and embedded*
 exercises the whole chain.
 
 ADMIN_WORKSPACE 55/0 (4 new).
+
+---
+
+## CG-047 — A payment link could only be opened once
+
+The first live link worked for whoever opened it first and for nobody after,
+including the same person reloading. Two faults, one visible and one not:
+
+**The Idempotency-Key.** `paylink` asked Stripe for a Checkout Session with
+`attempt: 1` hard-coded. The adapter builds the key as
+`<reference>:<attempt>:embedded`, and the request body carries an `expires_at`
+computed from the clock at each call — so the second open re-sent a used key
+with a changed body, which is precisely what Stripe answers `400
+idempotency_error` to. The function turned that into a 502.
+
+The repair is not a fresh key per open: that would mint a new session on every
+reload and leave a trail of open sessions at Stripe. `payment_link_open` now
+returns the session already attached to the link and the attempt count, and the
+function **resumes** the session while Stripe still holds it open, creating a
+new one — with an attempt number that has never been used — only when it does
+not. Two opens of the same link now return the same `client_secret`, proven
+against the live project.
+
+**The link expired with the session.** `attach_checkout` writes the Stripe
+session's expiry over `orders.checkout_expires_at`, which for a link is the
+validity window the coach chose. A 30-day link silently became a 30-minute one.
+Payment links no longer go through `attach_checkout`: `payment_link_attach`
+records the session and counts the attempt, and leaves the lifetime alone. The
+session's own expiry is not stored at all — it is asked for at resume time,
+which is the only place it is true.
+
+### Deleting a link, as well as withdrawing one
+
+Withdrawal closes a link that was sent to someone; the row stays, and should.
+Deletion is for a link that should never have existed — a wrong amount, a test —
+and until now the only cure was a row in the finance list for ever.
+`payment_link_delete` refuses the moment money is involved (paid, or carrying a
+payment, refund or chargeback row), cancels the BEAU PH request behind it, and
+writes the audit line — reference, label, amount, currency — **before** removing
+the order. What is deleted is the operational row, never the record that it
+happened. The three links created while the bug was live were removed through
+that function rather than around it.
+
+### A guarantee that had never once executed
+
+Cancelling a request queues a provider cancellation, which a cron drainer
+delivers so the Stripe session is expired rather than merely disowned. Watching
+that queue after the deletions showed three rows `pending`, attempts `0`, no
+error — and `ph-cancel` answering 500 on every kick since the day it shipped.
+The cause: `cancellations_due` and `cancellation_mark` live in the `beau_ph`
+schema, and the function reaches them through PostgREST, which exposes `public`
+and nothing else. Every run failed on the first call.
+
+Nothing was ever double-charged — the state machine refuses a payment on a
+closed request — but money could reach Stripe on a closed order and need
+refunding by hand, which is the exact thing the queue exists to prevent. Two
+`public` wrappers carrying the names the deployed function already calls fix it
+without a redeploy. The first kick afterwards drained all three: `done=3`.
+
+A queue whose failure mode is "everything stays pending and nothing complains"
+is worth an alarm, not just a fix; `ph_cancellations_open()` already exposes it
+to Finance, and it should be surfaced there.
+
+CG023 46/0 (12 new) · PAYLINK 39/0 (13 new) · full replay 116 migrations, 18
+suites green.
