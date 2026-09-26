@@ -23,6 +23,9 @@ export const CONFIG = {
   // Public Edge Function that receives the enquiry form POST.
   FORM_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/contact',
 
+  // Payment links the coach issues himself (/pay/<reference>/<token>).
+  PAYLINK_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/paylink',
+
   // Public booking API (services, slots, holds, state, cancel).
   BOOKING_ENDPOINT: 'https://acrjrlgeeyseyolmofuq.supabase.co/functions/v1/booking',
 

@@ -4,6 +4,7 @@
   "trailingSlash": false,
   "rewrites": [
     { "source": "/r/:token", "destination": "/r" },
+    { "source": "/pay/:reference/:token", "destination": "/pay" },
     { "source": "/c/:token", "destination": "/c" }
   ],
   "redirects": [
@@ -46,6 +47,13 @@
     },
     {
       "source": "/r/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
+        { "key": "Cache-Control", "value": "no-store" }
+      ]
+    },
+    {
+      "source": "/pay/(.*)",
       "headers": [
         { "key": "X-Robots-Tag", "value": "noindex, nofollow" },
         { "key": "Cache-Control", "value": "no-store" }

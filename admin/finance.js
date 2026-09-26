@@ -1060,3 +1060,101 @@ async function newSubscriptionForm() {
     } catch (err) { C.fail(err); }
   };
 }
+
+/* ---- Payment links ---------------------------------------------------
+   A label, an amount, a URL. The one kind of money in this system that hangs
+   off nothing — no booking, no package, and a client only when the coach
+   happens to know one. That is the whole point: quoting someone who is not in
+   the CRM yet was the case the back-office could not serve.
+
+   The token is shown exactly once, here, at creation. It is stored as a
+   sha256, so nothing can print it again — which is why the row that carries it
+   stays on screen until the coach dismisses it, and why "Copy link" is the
+   first thing under it. A link that cannot be recovered is a link that must
+   not be lost in a toast. */
+let plNew = null;      // { reference, url, label, amount, currency, expires_at } — this session only
+
+export async function financePaymentLinks() {
+  const { $, esc, money, st, view, has, toast, fail } = C;
+  const rows = await rpc('payment_link_list', { p_limit: 100 });
+  const manage = has('finance:manage');
+  const site = location.origin;
+
+  view.innerHTML = `
+    <div class="ad-head"><div><h1>Payment links</h1><p class="ad-muted">A label, an amount and a link you can send to anyone — in the CRM or not. Paid by card; it lands in Transactions like every other payment. The link is not a page anyone can find: it only opens with its own key.</p></div></div>
+    ${manage ? `<div class="ad-panel" style="margin-bottom:14px">
+      <form id="pl-form" class="ad-form">
+        <div class="row">
+          <label style="flex:2 1 260px">What it is for
+            <input name="label" maxlength="120" placeholder="Strength Training — September" required>
+            <span class="ad-muted" style="font-size:12px">This is what the payer reads, on the page and on their statement.</span></label>
+          <label style="flex:0 1 140px">Amount
+            <input name="amount" type="number" min="10" step="0.01" placeholder="250" required></label>
+          <label style="flex:0 1 110px">Currency
+            <input name="currency" maxlength="3" value="AED" required></label>
+          <label style="flex:0 1 130px">Valid for
+            <select name="days"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option></select></label>
+        </div>
+        <button class="btn btn-accent btn-sm" type="submit">Create link</button>
+      </form>
+    </div>` : ''}
+    <div id="pl-new"></div>
+    ${rows.length ? `<div class="ad-table-wrap"><table class="ad-table"><thead><tr>
+        <th>Reference</th><th>What for</th><th>Amount</th><th>Status</th><th class="col-wide">For</th><th class="col-wide">Expires</th><th></th>
+      </tr></thead><tbody>
+      ${rows.map((r) => `<tr>
+        <td>${esc(r.reference)}</td>
+        <td>${esc(r.label)}</td>
+        <td>${money(r.amount, r.currency)}</td>
+        <td>${st(r.status)}</td>
+        <td class="col-wide">${r.contact ? esc(r.contact) : '<span class="ad-muted">—</span>'}</td>
+        <td class="col-wide">${r.paid_at ? '<span class="ad-muted">paid</span>' : (r.expires_at ? esc(new Date(r.expires_at).toLocaleDateString()) : '—')}</td>
+        <td>${manage && r.status === 'pending_payment' ? `<button class="btn btn-line btn-xs" data-void="${esc(r.reference)}">Withdraw</button>` : ''}</td>
+      </tr>`).join('')}
+      </tbody></table></div>` : '<p class="ad-muted">No payment links yet.</p>'}`;
+
+  if (plNew) renderNew();
+
+  function renderNew() {
+    const host = $('#pl-new'); if (!host || !plNew) return;
+    host.innerHTML = `<div class="ad-panel" style="border-left:3px solid var(--accent);margin-bottom:14px">
+      <p style="margin:0 0 6px"><b>${esc(plNew.label)} · ${money(plNew.amount, plNew.currency)}</b></p>
+      <p class="ad-muted" style="margin:0 0 8px">This link is shown once and cannot be retrieved later — copy it now.</p>
+      <input readonly id="pl-url" value="${esc(plNew.url)}" style="width:100%;font:inherit;font-size:13px;padding:9px 10px;border:1px solid var(--line);border-radius:10px">
+      <div class="cg-actions" style="margin-top:10px">
+        <button class="btn btn-accent btn-sm" data-pl="copy">Copy link</button>
+        <button class="btn btn-line btn-sm" data-pl="msg">Copy message</button>
+        <button class="btn btn-line btn-sm" data-pl="done">Done</button>
+      </div></div>`;
+    const msg = () => `Hi,\n\n${plNew.label}\nAmount: ${money(plNew.amount, plNew.currency)}\n\nYou can pay by card here:\n${plNew.url}\n\nThanks,\nGari`;
+    host.querySelector('[data-pl="copy"]').onclick = async () => { try { await navigator.clipboard.writeText(plNew.url); toast('Link copied'); } catch {} };
+    host.querySelector('[data-pl="msg"]').onclick = async () => { try { await navigator.clipboard.writeText(msg()); toast('Message copied'); } catch {} };
+    host.querySelector('[data-pl="done"]').onclick = () => { plNew = null; host.innerHTML = ''; };
+  }
+
+  const form = $('#pl-form');
+  if (form) form.onsubmit = (e) => {
+    e.preventDefault();
+    const f = new FormData(form);
+    const major = Number(f.get('amount'));
+    if (!(major > 0)) return fail(new Error('Enter an amount.'));
+    // minor units, rounded once: a float multiplied by 100 is not reliably an integer
+    const minor = Math.round(major * 100);
+    const btn = form.querySelector('[type=submit]'); btn.disabled = true;
+    rpc('payment_link_create', { p_label: f.get('label'), p_amount: minor, p_currency: String(f.get('currency') || '').toUpperCase(), p_crm_contact_id: null, p_days: Number(f.get('days')) })
+      .then((d) => {
+        plNew = { reference: d.reference, label: d.label, amount: d.amount, currency: d.currency,
+                  url: `${site}/pay/${d.reference}/${d.token}` };
+        invalidate('payment_link');
+        return financePaymentLinks();
+      })
+      .catch(fail).finally(() => { btn.disabled = false; });
+  };
+
+  view.querySelectorAll('[data-void]').forEach((b) => b.onclick = async () => {
+    if (!await modal({ title: 'Withdraw this link?', body: '<p>Anyone holding it will no longer be able to pay. A link that has already been paid cannot be withdrawn.</p>', confirm: 'Withdraw', danger: true })) return;
+    rpc('payment_link_void', { p_reference: b.dataset.void })
+      .then(() => { toast('Link withdrawn'); invalidate('payment_link'); return financePaymentLinks(); })
+      .catch(fail);
+  });
+}
