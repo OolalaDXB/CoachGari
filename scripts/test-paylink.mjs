@@ -23,6 +23,7 @@ import { dirname, join, resolve } from 'node:path';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const fn = readFileSync(join(ROOT, 'supabase/functions/paylink/index.ts'), 'utf8');
 const page = readFileSync(join(ROOT, 'pay.html'), 'utf8');
+const pageJs = readFileSync(join(ROOT, 'assets/pay.js'), 'utf8');
 const mig = readFileSync(join(ROOT, 'supabase/migrations/20261074_cg_payment_links.sql'), 'utf8');
 const vercel = JSON.parse(readFileSync(join(ROOT, 'vercel.json'), 'utf8'));
 
@@ -52,12 +53,22 @@ check('The secret pattern covers live and test keys and webhook secrets',
   /sk\|rk/.test(fn) && /whsec_/.test(fn));
 
 /* ---- the payer's page ---- */
-check('The page takes its reference and token from the path', /location\.pathname\.split/.test(page));
+check('The page takes its reference and token from the path', /location\.pathname\.split/.test(pageJs));
 check('The page does not read the token from the query string', !/searchParams\.get\(['"]t['"]\)/.test(page));
 check('The page re-asks the server after the Stripe redirect instead of trusting it',
-  /q\.get\('paid'\)/.test(page) && /action: 'state'/.test(page));
+  /q\.get\('paid'\)/.test(pageJs) && /action: 'state'/.test(pageJs));
 check('The page never announces "paid" on the redirect alone',
-  /l\.state === 'paid'/.test(page));
+  /l\.state === 'paid'/.test(pageJs));
+
+/* ---- the page can actually run --------------------------------------
+   The site's CSP is `script-src 'self'` with no 'unsafe-inline'. An inline
+   module is refused by the browser without a word in the page, which leaves the
+   markup's own loading text on screen for ever — which is how the first real
+   payment link looked to the person holding it. These two assertions are the
+   cheapest possible guard against repeating it. */
+check('The page carries no inline script — the CSP refuses them', !/<script(?![^>]*\bsrc=)[^>]*>[\s\S]*?<\/script>/i.test(page));
+check('It loads its module from a file instead', /<script[^>]+src="\/assets\/pay\.js"/.test(page));
+check('A failure says something rather than leaving the loading text up', /start\(\)\.catch\(/.test(pageJs));
 
 /* ---- the route is private ---- */
 check('/pay/<ref>/<token> is rewritten to the page',
