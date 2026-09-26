@@ -4071,3 +4071,41 @@ Cancelling only the order would leave a live request against a reference the
 host considers closed — drift that is invisible until a payment lands on it.
 
 CG023_TESTS ok=34 · PAYLINK_TESTS ok=23 · 114 migrations replay clean.
+
+---
+
+## CG-045 — The back-office explains itself
+
+The guide for Coach Gari exists as a document, but a document is the wrong home
+for it. **When a button is renamed, the page describing it has to change in the
+same commit** — otherwise the guide drifts, and a drifted guide costs the reader
+their trust in the rest of it. So the how-to lives in `admin/howto.js`, ships
+with the code, is precached by the service worker, and works on a phone between
+clients with no signal and no second account to hold.
+
+Four topics, one screen each: a new lead, packages, payment links, and which
+link to use. No permission of its own — a person who can open this app is a
+person who may read how it works.
+
+Two rules kept while writing them, and worth keeping for the next page:
+
+* **say what is not automatic as plainly as what is.** Most of the wasted hours
+  in a back-office come from believing something was sent;
+* **name the screen and the button exactly as they are labelled.** A guide that
+  paraphrases the interface makes the reader translate.
+
+### The bug the test found
+
+`howtoLink()` renders `<a href="#howto/links">`, and other screens carry it. In
+the running app it did nothing: the address bar changed and the screen stayed
+where it was, because **the shell had no `hashchange` listener** — the hash was
+read once at boot and thereafter only written. Every in-app link to another
+screen would have behaved the same way, and the browser's Back button had never
+meant anything inside the back-office.
+
+It was found by asserting real prose on the rendered page rather than that the
+route resolved — CG-037's lesson applied deliberately. The listener ignores the
+hash the router itself just wrote (`lastHash`), which is what keeps it from
+re-entering on every navigation.
+
+ADMIN_WORKSPACE 51/0 (5 new) · ADMIN_PWA 65/0 · service worker shell at v7.

@@ -31,6 +31,7 @@
    Editors render from the provider's config schema (data), not from
    provider-specific code.
    ============================================================= */
+import { howtoLink } from '/admin/howto.js';
 let C = null;   // shared helpers handed over by admin.js: sb, $, esc, money, st, fmt, table, toast, fail, has, view, config, openProfile, session
 
 export function initFinance(ctx) { C = ctx; }
@@ -1081,7 +1082,7 @@ export async function financePaymentLinks() {
   const site = location.origin;
 
   view.innerHTML = `
-    <div class="ad-head"><div><h1>Payment links</h1><p class="ad-muted">A label, an amount and a link you can send to anyone — in the CRM or not. Paid by card; it lands in Transactions like every other payment. The link is not a page anyone can find: it only opens with its own key.</p></div></div>
+    <div class="ad-head"><div><h1>Payment links</h1><p class="ad-muted">A label, an amount and a link you can send to anyone — in the CRM or not. Paid by card; it lands in Transactions like every other payment. The link is not a page anyone can find: it only opens with its own key. ${howtoLink('links')}</p></div></div>
     ${manage ? `<div class="ad-panel" style="margin-bottom:14px">
       <form id="pl-form" class="ad-form">
         <div class="row">

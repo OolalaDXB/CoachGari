@@ -246,6 +246,29 @@ await page.keyboard.type('nda', { delay: 30 });
 await page.waitForTimeout(500);
 check('Typing continues where it left off', await page.evaluate(() => document.querySelector('#c-search').value) === 'Amanda');
 
+/* ---- How to: the pages must actually render ---------------------------
+   CG-037's lesson: a screen that never rendered passes every layout check ever
+   written about it. So this asserts real prose is on the page, not that the
+   route resolved. */
+await page.goto(`${base}/admin/#howto/links`);
+await page.waitForTimeout(400);
+const ho = await page.evaluate(() => {
+  const v = document.querySelector('#view');
+  const nav = [...document.querySelectorAll('#subnav a')].map((a) => a.textContent.trim());
+  return { h1: v?.querySelector('h1')?.textContent || '', words: (v?.innerText || '').length, subs: nav,
+           hasSteps: /Finance/.test(v?.innerText || '') && /Create link/.test(v?.innerText || '') };
+});
+check('The How to route renders a page, not an empty view', ho.words > 400, `${ho.words} chars`);
+check('It lands on the topic that was asked for', /payment link/i.test(ho.h1), ho.h1);
+check('It names the screen and the button as they are labelled', ho.hasSteps);
+check('Every topic is reachable from the sub-navigation', ho.subs.length >= 4, ho.subs.join(', '));
+
+await page.goto(`${base}/admin/#howto/leads`);
+await page.waitForTimeout(400);
+const hoLeads = await page.evaluate(() => (document.querySelector('#view')?.innerText || ''));
+check('The leads page states plainly that nothing is sent automatically',
+  /No WhatsApp message is ever sent automatically/.test(hoLeads));
+
 await browser.close(); server.close();
 /* ---- a number WhatsApp can reach, and one it cannot -------------------
    Two contacts on file are UAE numbers a digit short. The WhatsApp button used to
