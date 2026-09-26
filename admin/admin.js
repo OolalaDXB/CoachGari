@@ -28,7 +28,7 @@
    tables, so `select *` would be refused.
    ============================================================= */
 import { CONFIG } from '/config.js';
-import { initFinance, financeTransactions, financeSubscriptions, financeCommissions, financePaymentMethods, phRails, phFx } from '/admin/finance.js';
+import { initFinance, financeTransactions, financeSubscriptions, financeCommissions, financePaymentMethods, financePaymentLinks, phRails, phFx } from '/admin/finance.js';
 import { initCollab, collabList } from '/admin/collab.js';
 import { csvToSnapshots } from '/admin/csv.js';
 
@@ -517,6 +517,7 @@ function navModel() {
       subs: [ { key: 'transactions', label: 'Transactions', show: () => true, run: financeTransactions },
               { key: 'subscriptions', label: 'Subscriptions', show: () => true, run: financeSubscriptions },
               { key: 'commissions', label: 'Commissions', show: () => true, run: financeCommissions },
+              { key: 'links', label: 'Payment links', show: () => true, run: financePaymentLinks },
               { key: 'methods', label: 'Payment methods', show: () => true, run: financePaymentMethods } ] },
     { key: 'analytics', label: 'Audience', icon: '◔', show: () => has('analytics:view'), run: analytics },
     // Settings = what is configured once and rarely touched: the catalogue, who has access, and the

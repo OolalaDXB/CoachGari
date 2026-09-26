@@ -4012,3 +4012,62 @@ than no log at all.
 A number the button cannot reach now says so — dashed, greyed, not a button —
 instead of looking identical and opening WhatsApp on nothing. Two contacts are
 in that state today.
+
+---
+
+## CG-044 — A payment link that hangs off nothing
+
+Everything Coach Gari could charge for had to be attached to something already
+in the system — a booking or a package, and therefore a client. That serves
+"be paid for this, by this person". It does not serve the ordinary case:
+quoting someone who is not in the CRM yet.
+
+A link is an `orders` row with a new reason, `payment_link`, and it reaches
+BEAU PH through `cg_ph_request_for_order` like every other order. Two things
+were checked rather than assumed, and both decided the shape:
+
+**`process_stripe_event` needed no change.** Its non-booking branch calls
+`project_pack_payment`, which returns immediately when `session_pack_id` is
+null — the same reason a `support` payment reconciles safely today. Reading
+that before writing anything is what kept this feature out of the webhook, the
+one file where a mistake means money lands and nothing records it.
+
+**The card rail had to opt in to the `other` intent explicitly.** Rails are
+never enabled for an intent by default here, and that rule was not worth
+breaking for convenience. Aani, bank transfer and cash stay as they were.
+
+The BEAU PH request is minted when the payer **opens** the link, not when the
+coach writes it. A request carries an expiry and a live status; minting one
+that then sits untouched for a month would have the ledger describe an attempt
+nobody made.
+
+### What the suite caught
+
+`payment_link_create` first asked `beau_ph.eligible_currencies`, the same
+question the support widget asks. Every currency was refused. The reason is
+worth keeping: **eligibility weighs the runtime of the browser making the
+request, and the coach is not the payer** — a back-office session has no Stripe
+runtime to declare. The creation-time question is a *configuration* one — is
+this a currency Coach Gari is set up to charge in — and the runtime question
+belongs in `payment_link_open`, where a runtime exists. Two questions that look
+alike and are not.
+
+Two smaller ones: `admin_audit` had no `order` area, so the ledger could not
+record the act it was being asked to record; and `beau_ph.cancel_request`
+takes `operator`, not `merchant`, for a person acting on the merchant's side.
+Both would have failed in production on a real click.
+
+### What the payer gets
+
+`/pay/<reference>/<token>`, noindex and no-store, reading its credentials from
+the path rather than a query string an ad network or a referrer header would
+carry away. The page never proposes an amount: the Checkout Session is built
+from the row the coach wrote. It also never announces "paid" on the Stripe
+redirect alone — it re-asks the server, because only the verified webhook moves
+a link to paid.
+
+Withdrawing a link cancels the BEAU PH request behind it as well as the order.
+Cancelling only the order would leave a live request against a reference the
+host considers closed — drift that is invisible until a payment lands on it.
+
+CG023_TESTS ok=34 · PAYLINK_TESTS ok=23 · 114 migrations replay clean.
