@@ -29,6 +29,7 @@
    ============================================================= */
 import { CONFIG } from '/config.js';
 import { initFinance, financeTransactions, financeSubscriptions, financeCommissions, financePaymentMethods, financePaymentLinks, phRails, phFx } from '/admin/finance.js';
+import { initHowto, howtoSubs, howtoLink } from '/admin/howto.js';
 import { initCollab, collabList } from '/admin/collab.js';
 import { csvToSnapshots } from '/admin/csv.js';
 
@@ -520,6 +521,9 @@ function navModel() {
               { key: 'links', label: 'Payment links', show: () => true, run: financePaymentLinks },
               { key: 'methods', label: 'Payment methods', show: () => true, run: financePaymentMethods } ] },
     { key: 'analytics', label: 'Audience', icon: '◔', show: () => has('analytics:view'), run: analytics },
+    // How to = the back-office explaining itself. No permission of its own: a person who can open
+    // this app at all is a person who may read how it works.
+    { key: 'howto', label: 'How to', icon: '?', show: () => true, subs: howtoSubs() },
     // Settings = what is configured once and rarely touched: the catalogue, who has access, and the
     // BEAU PH payment infrastructure (Rails, FX) — each tab keeps its own permission.
     { key: 'settings', label: 'Settings', icon: '⚙', show: () => has('catalog:view') || has('platform:admin') || has('finance:view'),
@@ -544,6 +548,7 @@ async function render(session) {
     const { data, error } = await sb.rpc('my_permissions'); if (error) throw error;
     me = data;
     initFinance({ sb, $, esc, money, st, fmt, table, toast, fail, has, view, config: CONFIG, openProfile });
+    initHowto({ esc, view });
     initCollab({ sb, $, esc, money, st, fmt, table, toast, fail, has, view, config: CONFIG });
     const model = navModel();
     const others = model.filter((s) => s.key !== 'overview' && s.show());
@@ -584,6 +589,18 @@ function renderAccount(session) {
   };
 }
 
+/* The hash the ROUTER wrote, so its own writes do not come back as navigation.
+   Without this listener an in-app link like <a href="#howto/links"> changed the
+   address bar and nothing else — the screen stayed where it was. It also gives
+   the browser's Back button meaning inside the back-office, which it never had. */
+let lastHash = null;
+window.addEventListener('hashchange', () => {
+  const h = location.hash.slice(1);
+  if (h === lastHash) return;                       // our own write, already rendered
+  const [sec, sub] = h.split('/');
+  if (sec) go(sec, sub);
+});
+
 // route to a section (and optional sub-tab); keeps the hash in sync
 function go(sectionKey, subKey) {
   // sections that moved keep their old hashes landing: #bookings → Schedule, #services / #access / #beauph → Settings
@@ -602,7 +619,7 @@ function go(sectionKey, subKey) {
   if (section.subs && section.subs.length) {
     const sub = section.subs.find((x) => x.key === subKey) || section.subs[0];
     cur.sub = sub.key;
-    location.hash = `${section.key}/${sub.key}`;
+    location.hash = lastHash = `${section.key}/${sub.key}`;
     $('#subnav').hidden = false;
     $('#subnav').innerHTML = section.subs.map((x) => `<a data-sub="${x.key}" class="${x.key === sub.key ? 'on' : ''}">${esc(x.label)}</a>`).join('');
     $('#subnav').onclick = (e) => { const a = e.target.closest('[data-sub]'); if (a) go(section.key, a.dataset.sub); };
@@ -610,7 +627,7 @@ function go(sectionKey, subKey) {
     sub.run().catch(fail);
   } else {
     cur.sub = null;
-    location.hash = section.key;
+    location.hash = lastHash = section.key;
     $('#subnav').hidden = true;
     view.innerHTML = '<p class="ad-empty">Loading…</p>';
     section.run().catch(fail);
@@ -2404,6 +2421,7 @@ function pfPackActions(p, after) {
         <button class="cg-act" data-a="renew">${ICO.renew}<span>Renew package</span></button>
         <button class="cg-act" data-a="history">${ICO.history}<span>Payment history</span></button>
       </div>
+      <p class="ad-muted" style="font-size:12px;margin:10px 0 0">${howtoLink('packages', 'How packages and payment work')}</p>
       <div id="pf-pack-out" style="margin-top:12px"></div>
     </div>`;
   sheet.querySelector('[data-x]').onclick = closeSheet;

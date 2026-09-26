@@ -16,9 +16,9 @@
    response and replaying it for a navigation is an error in Chrome, and a
    scope of '/admin/' does not contain the page at '/admin', which leaves the
    page uncontrolled: no offline, no push, and nothing to install. */
-const VERSION = 'cg-admin-v6';
+const VERSION = 'cg-admin-v7';
 const SHELL = [
-  '/admin', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/admin/collab.js',
+  '/admin', '/admin/admin.css', '/admin/admin.js', '/admin/finance.js', '/admin/collab.js', '/admin/howto.js',
   '/admin/manifest.webmanifest', '/admin/icons/icon-192.png', '/admin/icons/icon-512.png', '/admin/icons/maskable-512.png',
   '/admin/vendor/supabase-js@2.116.0/supabase.js',
   '/assets/coach-gari.css', '/config.js',

@@ -631,3 +631,19 @@ html.standalone .ad-side{padding-top:env(safe-area-inset-top);}
   .ad-account .acct{padding:5px;gap:0;}
   .ad-account .acct .who{display:none;}
 }
+
+/* ---- How to ----------------------------------------------------------
+   A guide that lives in the app, so a renamed button and the page describing
+   it change together. Styled as prose rather than as another dashboard: wide
+   measure hurts reading, so the column is capped where the eye stops tracking. */
+.ho-page{max-width:68ch;}
+.ho-page h3{font-size:15px;letter-spacing:-.01em;margin:22px 0 6px;}
+.ho-page h3:first-child{margin-top:0;}
+.ho-page p{margin:0 0 10px;font-size:14.5px;line-height:1.6;}
+.ho-page ul{margin:0 0 12px;padding-left:20px;}
+.ho-page li{margin-bottom:6px;font-size:14.5px;line-height:1.6;}
+.ho-page code{background:var(--grey-bg);padding:1px 5px;border-radius:5px;font-size:13px;}
+.ho-page .ad-table-wrap{margin:0 0 12px;}
+/* the hint other screens carry: present, never competing with the action beside it */
+.ho-hint{color:var(--accent);font-weight:700;text-decoration:none;white-space:nowrap;}
+.ho-hint:hover{text-decoration:underline;}
