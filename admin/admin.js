@@ -2293,7 +2293,28 @@ const e164 = (p) => {
   if (/^0(50|52|54|55|56|58)[0-9]{7}$/.test(d)) return '971' + d.slice(1);
   return d;
 };
-const waHref = (p) => 'https://wa.me/' + e164(p);
+/* WhatsApp Business, not WhatsApp.
+
+   wa.me hands the link to the operating system, which offers whichever WhatsApp
+   it likes — on a phone carrying both, that is regularly the personal one, and a
+   coaching message then leaves from the wrong account with the wrong profile.
+
+   Android can be told: Business is its own package (com.whatsapp.w4b), and an
+   intent URL names it. S.browser_fallback_url keeps a phone WITHOUT Business
+   working — it falls back to the wa.me link rather than to nothing.
+
+   iOS cannot be told. Both apps register the same whatsapp:// scheme and there is
+   no package to name, so the choice belongs to the phone. On iOS this returns the
+   ordinary link and the device decides; there is no code that changes that.       */
+const isAndroid = () => /Android/i.test((typeof navigator !== 'undefined' && navigator.userAgent) || '');
+const waWeb = (n, text) => 'https://wa.me/' + n + (text ? '?text=' + encodeURIComponent(text) : '');
+const waUrl = (p, text) => {
+  const n = e164(p);
+  if (!isAndroid()) return waWeb(n, text);
+  const q = 'phone=' + n + (text ? '&text=' + encodeURIComponent(text) : '');
+  return `intent://send/?${q}#Intent;scheme=whatsapp;package=com.whatsapp.w4b;S.browser_fallback_url=${encodeURIComponent(waWeb(n, text))};end`;
+};
+const waHref = (p) => waUrl(p, '');
 /* Can WhatsApp actually reach this? A country code never starts with zero, and no
    number in service is under eight digits. Two contacts on file fail this — both
    UAE numbers a digit short — and the button used to look just as clickable for
@@ -2462,7 +2483,7 @@ async function pfShareRecap(p) {
     <p class="ad-muted" style="font-size:12px;margin-top:8px">The link opens the client's recap and payment options. It never shows body metrics, health data or private notes. Nothing is auto-sent.</p>`;
   const getMsg = () => $('#pf-share-msg').value;
   const sOn = (s, fn) => { const el = out.querySelector(`[data-s="${s}"]`); if (el) el.onclick = fn; };
-  sOn('wa', () => window.open(`${waHref(ph)}?text=${encodeURIComponent(getMsg())}`, '_blank', 'noopener'));
+  sOn('wa', () => window.open(waUrl(ph, getMsg()), '_blank', 'noopener'));
   sOn('email', () => { const subject = 'Your Coach Gari session recap'; window.location.href = `mailto:${em ? encodeURIComponent(em) : ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(getMsg())}`; });
   sOn('copymsg', async () => { try { await navigator.clipboard.writeText(getMsg()); toast('Message copied'); } catch {} });
   sOn('copylink', async () => { try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch {} });
@@ -2757,7 +2778,7 @@ function waCompose(c) {
     const text = (box.value || '').trim();
     if (!text) { toast('Nothing to send'); return; }
     // opened inside the click, or the browser treats it as a pop-up and blocks it
-    window.open(`${waHref(c.phone)}?text=${encodeURIComponent(text)}`, '_blank', 'noopener');
+    window.open(waUrl(c.phone, text), '_blank', 'noopener');
     closeSheet();
     sb.rpc('crm_add_note', { p_contact_id: pf.crmId, p_body: `WhatsApp opened from the back-office:\n\n${text}`,
                              p_category: 'admin', p_pinned: false, p_scope: 'operational' })
