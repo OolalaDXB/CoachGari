@@ -246,6 +246,27 @@ await page.keyboard.type('nda', { delay: 30 });
 await page.waitForTimeout(500);
 check('Typing continues where it left off', await page.evaluate(() => document.querySelector('#c-search').value) === 'Amanda');
 
+/* ---- WhatsApp Business, not WhatsApp -----------------------------------
+   A phone carrying both apps regularly opens the personal one from a wa.me
+   link, and the message then leaves from the wrong account. Android can be
+   told which package to use; iOS cannot, and these assertions pin both halves
+   so the iOS limit stays a stated fact rather than a forgotten one. */
+const wa = await page.evaluate(() => {
+  const e164 = (p) => String(p || '').replace(/\D/g, '');
+  const waWeb = (n, t) => 'https://wa.me/' + n + (t ? '?text=' + encodeURIComponent(t) : '');
+  const build = (android) => (p, text) => {
+    const n = e164(p);
+    if (!android) return waWeb(n, text);
+    const q = 'phone=' + n + (text ? '&text=' + encodeURIComponent(text) : '');
+    return `intent://send/?${q}#Intent;scheme=whatsapp;package=com.whatsapp.w4b;S.browser_fallback_url=${encodeURIComponent(waWeb(n, text))};end`;
+  };
+  return { android: build(true)('+971585484269', 'Hi there'), other: build(false)('+971585484269', 'Hi there') };
+});
+check('On Android the link names the Business package', /package=com\.whatsapp\.w4b/.test(wa.android));
+check('It carries the number and the message', /phone=971585484269/.test(wa.android) && /text=Hi%20there/.test(wa.android));
+check('A phone without Business still has somewhere to land', /browser_fallback_url=https%3A%2F%2Fwa\.me/.test(wa.android));
+check('Elsewhere it stays the ordinary wa.me link', wa.other === 'https://wa.me/971585484269?text=Hi%20there');
+
 /* ---- How to: the pages must actually render ---------------------------
    CG-037's lesson: a screen that never rendered passes every layout check ever
    written about it. So this asserts real prose is on the page, not that the

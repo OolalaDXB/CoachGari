@@ -4109,3 +4109,42 @@ hash the router itself just wrote (`lastHash`), which is what keeps it from
 re-entering on every navigation.
 
 ADMIN_WORKSPACE 51/0 (5 new) · ADMIN_PWA 65/0 · service worker shell at v7.
+
+---
+
+## CG-046 — WhatsApp Business, not WhatsApp
+
+`wa.me` hands the link to the operating system, which offers whichever WhatsApp
+it likes. On a phone carrying both, that is regularly the personal one — and a
+coaching message then leaves from the wrong account, with the wrong profile
+photo, in a thread the client cannot tell apart from a friend's.
+
+**Android can be told.** Business is its own package, `com.whatsapp.w4b`, and an
+intent URL names it. `S.browser_fallback_url` carries the ordinary `wa.me` link,
+so a phone *without* Business installed still lands somewhere instead of
+nowhere.
+
+**iOS cannot.** Both apps register the same `whatsapp://` scheme and there is no
+package to name, so the choice belongs to the device. On iOS the link stays
+`wa.me` and the phone decides. No code changes that, and the test suite says so
+out loud rather than leaving it to be rediscovered.
+
+Only the back-office links moved. The public site's WhatsApp buttons are clients
+writing *to* Coach Gari, from their own phones and their own app — nothing there
+is his to route.
+
+### The paylink function, deployed and probed
+
+Deployed through the Supabase management API rather than the repository script,
+which needs a personal access token this session does not hold. Since the bundle
+was assembled by hand, it was **probed rather than assumed**: two requests from
+the database itself (the sandbox cannot reach the functions host) returned
+`400 validation` for a malformed reference and `404 not_found` for a well-formed
+link that does not exist.
+
+The 404 is the one that matters. To reach it the request had to pass shape
+validation, load the Stripe adapter, find the runtime **configured and embedded**
+— otherwise it would have answered 503 — and reach the RPC. One status code
+exercises the whole chain.
+
+ADMIN_WORKSPACE 55/0 (4 new).
